@@ -248,29 +248,31 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 	
 	if (m_iDMVersion < OLD_SHUTTER_BROKEN) {
 		sprintf(m_strTemp, "SetPersistentNumberNote"
-			"(\"MSC:Parameters:2:Alternate Shutter\", %d)\r", shutter);
+			"(\"MSC:Parameters:2:Alternate Shutter\", %d)\n", shutter);
 		m_strCommand += m_strTemp;
 	}
 
-	if (m_iDMVersion >= NEW_SETTLING_OK) {
-		sprintf(m_strTemp, "CM_SetShutterIndex(acqParams, %g\n", shutter);
+	if (m_iDMVersion >= NEW_SELECT_SHUTTER_OK) {
+		sprintf(m_strTemp, "CM_SetShutterIndex(acqParams, %d)\n", shutter);
 		m_strCommand += m_strTemp;
 	}
 
 	// Open shutter if a delay is set
 	if (shutterDelay) {
-		if (m_iDMVersion < NEW_SHUTTER_OK)
+		if (m_iDMVersion < NEW_OPEN_SHUTTER_OK)
 			m_strCommand += "SSCOpenShutter()\n";
 		else
 			// TODO: parameterize the shutter that needs to be opened?
-			m_strCommand += "CM_SetCurrentShutterState(camera, 1, 1)\n";
+			m_strCommand += "CM_SetCurrentShutterState(camera, 1, 0)\n";
 		sprintf(m_strTemp, "Delay(%d)\n", shutterDelay);
 		m_strCommand += m_strTemp;
 		// Probably unneeded
-		if (m_iDMVersion < NEW_SHUTTER_OK)
+		/*
+		if (m_iDMVersion < NEW_OPEN_SHUTTER_OK)
 			m_strCommand += "SSCCloseShutter()\n";
 		else
-			m_strCommand += "CM_SetCurrentShutterState(camera, 1, 0)\n";
+			m_strCommand += "CM_SetCurrentShutterState(camera, 1, 1)\n";
+		*/
 	}
 
 	// Get the image acquisition command

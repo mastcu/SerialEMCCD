@@ -2,7 +2,7 @@
 
 
 /* File created by MIDL compiler version 5.01.0164 */
-/* at Sun Nov 03 15:37:21 2002
+/* at Tue Nov 19 19:38:26 2002
  */
 /* Compiler settings for C:\Documents and Settings\mast\My Documents\VisualC\SerialEMCCD\SerialEMCCD.idl:
     Os (OptLev=s), W1, Zp8, env=Win32, ms_ext, c_ext
@@ -159,6 +159,10 @@ EXTERN_C const IID IID_IDMCamera;
         virtual /* [helpstring][id] */ HRESULT STDMETHODCALLTYPE GetDMVersion( 
             /* [out] */ long __RPC_FAR *version) = 0;
         
+        virtual /* [helpstring][id] */ HRESULT STDMETHODCALLTYPE GetDMCapabilities( 
+            /* [out] */ BOOL __RPC_FAR *canSelectShutter,
+            /* [out] */ BOOL __RPC_FAR *canSetSettling) = 0;
+        
     };
     
 #else 	/* C style interface */
@@ -303,6 +307,11 @@ EXTERN_C const IID IID_IDMCamera;
             IDMCamera __RPC_FAR * This,
             /* [out] */ long __RPC_FAR *version);
         
+        /* [helpstring][id] */ HRESULT ( STDMETHODCALLTYPE __RPC_FAR *GetDMCapabilities )( 
+            IDMCamera __RPC_FAR * This,
+            /* [out] */ BOOL __RPC_FAR *canSelectShutter,
+            /* [out] */ BOOL __RPC_FAR *canSetSettling);
+        
         END_INTERFACE
     } IDMCameraVtbl;
 
@@ -380,6 +389,9 @@ EXTERN_C const IID IID_IDMCamera;
 
 #define IDMCamera_GetDMVersion(This,version)	\
     (This)->lpVtbl -> GetDMVersion(This,version)
+
+#define IDMCamera_GetDMCapabilities(This,canSelectShutter,canSetSettling)	\
+    (This)->lpVtbl -> GetDMCapabilities(This,canSelectShutter,canSetSettling)
 
 #endif /* COBJMACROS */
 
@@ -590,6 +602,19 @@ void __RPC_STUB IDMCamera_InsertCamera_Stub(
 
 
 void __RPC_STUB IDMCamera_GetDMVersion_Stub(
+    IRpcStubBuffer *This,
+    IRpcChannelBuffer *_pRpcChannelBuffer,
+    PRPC_MESSAGE _pRpcMessage,
+    DWORD *_pdwStubPhase);
+
+
+/* [helpstring][id] */ HRESULT STDMETHODCALLTYPE IDMCamera_GetDMCapabilities_Proxy( 
+    IDMCamera __RPC_FAR * This,
+    /* [out] */ BOOL __RPC_FAR *canSelectShutter,
+    /* [out] */ BOOL __RPC_FAR *canSetSettling);
+
+
+void __RPC_STUB IDMCamera_GetDMCapabilities_Stub(
     IRpcStubBuffer *This,
     IRpcChannelBuffer *_pRpcChannelBuffer,
     PRPC_MESSAGE _pRpcMessage,
