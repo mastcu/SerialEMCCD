@@ -342,6 +342,10 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 	long ID;
 	DM::Image image;
 	long outLimit = *arrSize;
+  int byteSize, i;
+  unsigned int *uiData;
+  int *iData;
+  unsigned short *usData;
 
 	// Set these values to zero in case of error returns
 	*width = 0;
@@ -365,7 +369,9 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 		}
 		
 		// Check the data type (may need to be fancier)
-		if (DM::ImageGetDataElementByteSize(image.get()) != dataSize) {
+		byteSize = DM::ImageGetDataElementByteSize(image.get());
+    if (byteSize != dataSize && !(dataSize == 2 && byteSize == 4 && 
+      DM::ImageIsDataTypeInteger(image.get()))) {
 			DebugToResult("Image data are not of the expected type\n");
 			return WRONG_DATA_TYPE;
 		}
@@ -380,7 +386,30 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 		// Get data pointer and transfer the data
 		{
 			GatanPlugIn::ImageDataLocker imageL( image );
-			memcpy(array, imageL.get(), *width * *height * dataSize);
+      if (dataSize == byteSize) {
+			  memcpy(array, imageL.get(), *width * *height * dataSize);
+      } else {
+        usData = (unsigned short *)array;
+        if (DM::ImageIsDataTypeUnsignedInteger(image.get())) {
+        
+          // If these are long integers and they are unsigned, just transfer
+          DebugToResult("Converting unsigned integers to unsigned shorts");
+          uiData = (unsigned int *)imageL.get();
+          for (i = 0; i < *width * *height; i++)
+            usData[i] = (unsigned short)uiData[i];
+        } else {
+
+          // Otherwise need to truncate at zero to copy signed to unsigned
+          DebugToResult("Converting signed integers to unsigned shorts with truncation");
+          iData = (int *)imageL.get();
+          for (i = 0; i < *width * *height; i++) {
+            if (iData[i] >= 0)
+              usData[i] = (unsigned short)iData[i];
+            else
+              usData[i] = 0;
+          }
+        }
+      }
 		}
 		DM::DeleteImage(image.get());
 	}
