@@ -246,7 +246,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 		m_strCommand += m_strTemp;
 	}
 	
-	if (m_iDMVersion < OLD_SHUTTER_BROKEN) {
+	if (m_iDMVersion < OLD_SELECT_SHUTTER_BROKEN) {
 		sprintf(m_strTemp, "SetPersistentNumberNote"
 			"(\"MSC:Parameters:2:Alternate Shutter\", %d)\n", shutter);
 		m_strCommand += m_strTemp;

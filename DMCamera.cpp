@@ -180,12 +180,16 @@ STDMETHODIMP CDMCamera::GetDMVersion(long *version)
 	return S_OK;
 }
 
-STDMETHODIMP CDMCamera::GetDMCapabilities(BOOL *canSelectShutter, BOOL *canSetSettling)
+STDMETHODIMP CDMCamera::GetDMCapabilities(BOOL *canSelectShutter, BOOL *canSetSettling,
+											BOOL *openShutterWorks)
 {
 	long version = gPlugInWrapper.GetDMVersion();
 	if (version < 0)
 		return E_FAIL;
-	*canSelectShutter = version < OLD_SHUTTER_BROKEN || version >= NEW_SELECT_SHUTTER_OK;
+	*canSelectShutter = version < OLD_SELECT_SHUTTER_BROKEN || 
+		version >= NEW_SELECT_SHUTTER_OK;
 	*canSetSettling = version < OLD_SETTLING_BROKEN || version >= NEW_SETTLING_OK;
+	*openShutterWorks = version < OLD_OPEN_SHUTTER_BROKEN || 
+		version >= NEW_OPEN_SHUTTER_OK;
 	return S_OK;
 }
