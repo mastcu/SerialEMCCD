@@ -171,3 +171,11 @@ STDMETHODIMP CDMCamera::InsertCamera(long camera, BOOL state)
 		return E_FAIL;
 	return S_OK;
 }
+
+STDMETHODIMP CDMCamera::GetDMVersion(long *version)
+{
+	*version = gPlugInWrapper.GetDMVersion();
+	if (*version < 0)
+		return E_FAIL;
+	return S_OK;
+}

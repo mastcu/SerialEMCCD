@@ -19,6 +19,7 @@ using namespace std ;
 class TemplatePlugIn : 	public Gatan::PlugIn::PlugInMain
 {
 public:
+	long GetDMVersion();
 	int InsertCamera(long camera, BOOL state);
 	int IsCameraInserted(long camera);
 	int GetNumberOfCameras();
@@ -204,7 +205,7 @@ void TemplatePlugIn::AddCameraSelection(int camera)
 						"Object camera = ObjectAt(cameraList, %d)\n"
 						"CM_SelectCamera(manager, camera)\n", camera);
 	else
-		m_strTemp[0] = 0x00;
+		sprintf(m_strTemp, "MSCSelectCamera(%d)\n", camera);
 	m_strCommand += m_strTemp;
 }
 
@@ -420,10 +421,14 @@ int TemplatePlugIn::SelectCamera(long camera)
 int TemplatePlugIn::GetNumberOfCameras()
 {
 	m_strCommand.resize(0);
-	m_strCommand += "Object manager = CM_GetCameraManager()\n"
-					"Object cameraList = CM_GetCameras(manager)\n"
-					"number listsize = SizeOfList(cameraList)\n"
-					"Exit(listsize)";
+	if (m_iDMVersion < NEW_CAMERA_MANAGER)
+		m_strCommand += "number num = MSCGetCameraCount()\n"
+						"Exit(num)";
+	else
+		m_strCommand += "Object manager = CM_GetCameraManager()\n"
+						"Object cameraList = CM_GetCameras(manager)\n"
+						"number listsize = SizeOfList(cameraList)\n"
+						"Exit(listsize)";
 	double retval = ExecuteScript((char *)m_strCommand.c_str());
 	if (retval == SCRIPT_ERROR_RETURN)
 		return -1;
@@ -434,11 +439,16 @@ int TemplatePlugIn::GetNumberOfCameras()
 int TemplatePlugIn::IsCameraInserted(long camera)
 {
 	m_strCommand.resize(0);
-	sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
-					"Object cameraList = CM_GetCameras(manager)\n"
-					"Object camera = ObjectAt(cameraList, %d)\n"
-					"number inserted = CM_GetCameraInserted(camera)\n"
-					"Exit(inserted)", camera);
+	if (m_iDMVersion < NEW_CAMERA_MANAGER)
+		sprintf(m_strTemp, "MSCSelectCamera(%d)\n"
+						"number inserted = MSCIsCameraIn()\n"
+						"Exit(inserted)", camera);
+	else
+		sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
+						"Object cameraList = CM_GetCameras(manager)\n"
+						"Object camera = ObjectAt(cameraList, %d)\n"
+						"number inserted = CM_GetCameraInserted(camera)\n"
+						"Exit(inserted)", camera);
 	m_strCommand += m_strTemp;
 	double retval = ExecuteScript((char *)m_strCommand.c_str());
 	if (retval == SCRIPT_ERROR_RETURN)
@@ -449,15 +459,36 @@ int TemplatePlugIn::IsCameraInserted(long camera)
 int TemplatePlugIn::InsertCamera(long camera, BOOL state)
 {
 	m_strCommand.resize(0);
-	sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
-					"Object cameraList = CM_GetCameras(manager)\n"
-					"Object camera = ObjectAt(cameraList, %d)\n"
-					"CM_SetCameraInserted(camera, %d)\n", camera, state ? 1 : 0);
+	if (m_iDMVersion < NEW_CAMERA_MANAGER)
+		sprintf(m_strTemp, "MSCSelectCamera(%d)\n"
+						"MSCSetCameraIn(%d)", camera, state ? 1 : 0);
+	else
+		sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
+						"Object cameraList = CM_GetCameras(manager)\n"
+						"Object camera = ObjectAt(cameraList, %d)\n"
+						"CM_SetCameraInserted(camera, %d)\n", camera, state ? 1 : 0);
 	m_strCommand += m_strTemp;
 	double retval = ExecuteScript((char *)m_strCommand.c_str());
 	if (retval == SCRIPT_ERROR_RETURN)
 		return 1;
 	return 0;
+}
+
+// Get version from DM, return it and set internal version number
+long TemplatePlugIn::GetDMVersion()
+{
+	unsigned int code;
+	m_strCommand.resize(0);
+	m_strCommand += "number version\n"
+					"GetApplicationInfo(2, version)\n"
+					"Exit(version)";
+	double retval = ExecuteScript((char *)m_strCommand.c_str());
+	if (retval == SCRIPT_ERROR_RETURN)
+		return 1;
+	code = (unsigned int)(retval + 0.1);
+	long my3digits = 100 * (code >> 24) + 10 * ((code >> 16) & 0xff) + 
+		((code >> 8) & 0xff);
+	return my3digits;
 }
 
 // Global instances of the plugin and the wrapper class for calling into this file
@@ -541,4 +572,9 @@ int PlugInWrapper::IsCameraInserted(long camera)
 int PlugInWrapper::InsertCamera(long camera, BOOL state)
 {
 	return gTemplatePlugIn.InsertCamera(camera, state);
+}
+
+long PlugInWrapper::GetDMVersion()
+{
+	return gTemplatePlugIn.GetDMVersion();
 }

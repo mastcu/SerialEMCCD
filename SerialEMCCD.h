@@ -2,9 +2,9 @@
 
 
 /* File created by MIDL compiler version 5.01.0164 */
-/* at Mon Oct 28 14:57:00 2002
+/* at Wed Oct 30 17:03:35 2002
  */
-/* Compiler settings for C:\Documents and Settings\mast\My Documents\VisualC\SerialEMCCD\SerialEMCCD.idl:
+/* Compiler settings for C:\Users\Mast\VisualC\SerialEMCCD\SerialEMCCD.idl:
     Os (OptLev=s), W1, Zp8, env=Win32, ms_ext, c_ext
     error checks: allocation ref bounds_check enum stub_data 
 */
@@ -156,6 +156,9 @@ EXTERN_C const IID IID_IDMCamera;
             /* [in] */ long camera,
             /* [in] */ BOOL state) = 0;
         
+        virtual /* [helpstring][id] */ HRESULT STDMETHODCALLTYPE GetDMVersion( 
+            /* [out] */ long __RPC_FAR *version) = 0;
+        
     };
     
 #else 	/* C style interface */
@@ -296,6 +299,10 @@ EXTERN_C const IID IID_IDMCamera;
             /* [in] */ long camera,
             /* [in] */ BOOL state);
         
+        /* [helpstring][id] */ HRESULT ( STDMETHODCALLTYPE __RPC_FAR *GetDMVersion )( 
+            IDMCamera __RPC_FAR * This,
+            /* [out] */ long __RPC_FAR *version);
+        
         END_INTERFACE
     } IDMCameraVtbl;
 
@@ -370,6 +377,9 @@ EXTERN_C const IID IID_IDMCamera;
 
 #define IDMCamera_InsertCamera(This,camera,state)	\
     (This)->lpVtbl -> InsertCamera(This,camera,state)
+
+#define IDMCamera_GetDMVersion(This,version)	\
+    (This)->lpVtbl -> GetDMVersion(This,version)
 
 #endif /* COBJMACROS */
 
@@ -568,6 +578,18 @@ void __RPC_STUB IDMCamera_IsCameraInserted_Stub(
 
 
 void __RPC_STUB IDMCamera_InsertCamera_Stub(
+    IRpcStubBuffer *This,
+    IRpcChannelBuffer *_pRpcChannelBuffer,
+    PRPC_MESSAGE _pRpcMessage,
+    DWORD *_pdwStubPhase);
+
+
+/* [helpstring][id] */ HRESULT STDMETHODCALLTYPE IDMCamera_GetDMVersion_Proxy( 
+    IDMCamera __RPC_FAR * This,
+    /* [out] */ long __RPC_FAR *version);
+
+
+void __RPC_STUB IDMCamera_GetDMVersion_Stub(
     IRpcStubBuffer *This,
     IRpcChannelBuffer *_pRpcChannelBuffer,
     PRPC_MESSAGE _pRpcMessage,

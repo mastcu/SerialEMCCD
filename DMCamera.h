@@ -37,6 +37,7 @@ DECLARE_REGISTRY_RESOURCEID(IDR_DMCamera)
 
 // IDMCamera
 public:
+	STDMETHOD(GetDMVersion)(/*[out]*/long *version);
 	STDMETHOD(InsertCamera)(/*[in]*/long camera, /*[in]*/BOOL state);
 	STDMETHOD(IsCameraInserted)(/*[in]*/long camera, /*[out]*/BOOL *inserted);
 	STDMETHOD(GetNumberOfCameras)(/*[out]*/long *numCameras);

@@ -20,6 +20,7 @@
 class PlugInWrapper
 {
 public:
+	long GetDMVersion();
 	int InsertCamera(long camera, BOOL state);
 	int IsCameraInserted(long camera);
 	int GetNumberOfCameras();
