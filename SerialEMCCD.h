@@ -2,9 +2,9 @@
 
 
 /* File created by MIDL compiler version 5.01.0164 */
-/* at Fri Oct 25 11:36:03 2002
+/* at Sun Oct 27 20:04:43 2002
  */
-/* Compiler settings for C:\Users\Mast\VisualC\SerialEMCCD\SerialEMCCD.idl:
+/* Compiler settings for C:\Documents and Settings\mast\My Documents\VisualC\SerialEMCCD\SerialEMCCD.idl:
     Os (OptLev=s), W1, Zp8, env=Win32, ms_ext, c_ext
     error checks: allocation ref bounds_check enum stub_data 
 */

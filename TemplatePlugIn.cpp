@@ -198,6 +198,11 @@ void TemplatePlugIn::AddCameraSelection(int camera)
 {
 	if (camera < 0)
 		camera = m_iCurrentCamera;
+	sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
+					"Object cameraList = CM_GetCameras(manager)\n"
+					"Object camera = ObjectAt(cameraList, %d)\n"
+					"CM_SelectCamera(manager, camera)\n", camera);
+	m_strCommand += m_strTemp;
 }
 
 // Common pathway for obtaining an acquired image or a dark reference
@@ -355,21 +360,44 @@ int TemplatePlugIn::SelectCamera(long camera)
 // Return number of cameras or -1 for error
 int TemplatePlugIn::GetNumberOfCameras()
 {
-	return 1;
+	m_strCommand.resize(0);
+	m_strCommand += "Object manager = CM_GetCameraManager()\n"
+					"Object cameraList = CM_GetCameras(manager)\n"
+					"number listsize = SizeOfList(cameraList)\n"
+					"Exit(listsize)";
+	double retval = ExecuteScript((char *)m_strCommand.c_str());
+	if (retval == SCRIPT_ERROR_RETURN)
+		return -1;
+	return (int)(retval + 0.1);
 }
 
 // Determine insertion state of given camera: return -1 for error, 0 if out, 1 if in
 int TemplatePlugIn::IsCameraInserted(long camera)
 {
 	m_strCommand.resize(0);
-	AddCameraSelection(camera);
-	return 1;
+	sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
+					"Object cameraList = CM_GetCameras(manager)\n"
+					"Object camera = ObjectAt(cameraList, %d)\n"
+					"number inserted = CM_GetCameraInserted(camera)\n"
+					"Exit(inserted)", camera);
+	m_strCommand += m_strTemp;
+	double retval = ExecuteScript((char *)m_strCommand.c_str());
+	if (retval == SCRIPT_ERROR_RETURN)
+		return -1;
+	return (int)(retval + 0.1);
 }
 
 int TemplatePlugIn::InsertCamera(long camera, BOOL state)
 {
 	m_strCommand.resize(0);
-	AddCameraSelection(camera);
+	sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
+					"Object cameraList = CM_GetCameras(manager)\n"
+					"Object camera = ObjectAt(cameraList, %d)\n"
+					"CM_SetCameraInserted(camera, %d)\n", camera, state ? 1 : 0);
+	m_strCommand += m_strTemp;
+	double retval = ExecuteScript((char *)m_strCommand.c_str());
+	if (retval == SCRIPT_ERROR_RETURN)
+		return 1;
 	return 0;
 }
 
