@@ -156,6 +156,7 @@ SOURCE="$(InputPath)"
 	copy "$(TargetPath)" "C:\Program Files\Gatan\DigitalMicrograph\Plugins" 
 	regsvr32 /s /c "C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll" 
 	echo regsvr32 exec. time > "$(OutDir)\regsvr32.trg" 
+	copy "$(TargetPath)" . 
 	
 # End Custom Build
 # Begin Special Build Tool
