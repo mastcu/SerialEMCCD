@@ -506,7 +506,7 @@ int TemplatePlugIn::SetShutterNormallyClosed(long camera, long shutter)
   sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
 						"Object cameraList = CM_GetCameras(manager)\n"
 						"Object camera = ObjectAt(cameraList, %d)\n"
-						"CM_SetSetIdleShutterState(camera, %d, 1)\n", camera, shutter);
+						"CM_SetIdleShutterState(camera, %d, 1)\n", camera, shutter);
 	m_strCommand += m_strTemp;
 	double retval = ExecuteScript((char *)m_strCommand.c_str());
 	if (retval == SCRIPT_ERROR_RETURN)
