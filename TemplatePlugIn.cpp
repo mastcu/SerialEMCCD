@@ -47,7 +47,7 @@ public:
 	virtual void End();
 	TemplatePlugIn()
 	{
-		m_bDebug = false;
+		m_bDebug = getenv("SERIALEMCCD_DEBUG") != NULL;
 		m_iDMVersion = 340;
 		m_iCurrentCamera = 0;
 		m_strQueue.resize(0);
