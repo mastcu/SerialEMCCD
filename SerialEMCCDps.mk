@@ -1,6 +1,6 @@
 
 SerialEMCCDps.dll: dlldata.obj SerialEMCCD_p.obj SerialEMCCD_i.obj
-	link /dll /force:unresolved /out:SerialEMCCDps.dll /def:SerialEMCCDps.def /entry:DllMain \
+	link /dll /force:unresolved /out:SerialEMCCDps.dll /def:SerialEMCCDps.def \
 		dlldata.obj SerialEMCCD_p.obj SerialEMCCD_i.obj \
 		kernel32.lib rpcndr.lib rpcns4.lib rpcrt4.lib oleaut32.lib uuid.lib \
 
