@@ -1,0 +1,23 @@
+HKCR
+{
+	SerialEMCCD.DMCamera.1 = s 'DMCamera Class'
+	{
+		CLSID = s '{E3C017CA-38F5-49D2-8D1F-55024C8038C2}'
+	}
+	SerialEMCCD.DMCamera = s 'DMCamera Class'
+	{
+		CLSID = s '{E3C017CA-38F5-49D2-8D1F-55024C8038C2}'
+	}
+	NoRemove CLSID
+	{
+		ForceRemove {E3C017CA-38F5-49D2-8D1F-55024C8038C2} = s 'DMCamera Class'
+		{
+			ProgID = s 'SerialEMCCD.DMCamera.1'
+			VersionIndependentProgID = s 'SerialEMCCD.DMCamera'
+			InprocServer32 = s '%MODULE%'
+			{
+				val ThreadingModel = s 'both'
+			}
+		}
+	}
+}
