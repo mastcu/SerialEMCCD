@@ -49,11 +49,12 @@ public:
 	STDMETHOD(GetAcquiredImage)(/*[out, size_is(arrSize)]*/short array[], /*[in, out]*/long *arrSize, 
 		/*[out]*/long *width, /*[out]*/long *height, /*[in]*/long processing, /*[in]*/double exposure,
 		/*[in]*/long binning, /*[in]*/long top, /*[in]*/long left, /*[in]*/long bottom, /*[in]*/long right,
-		/*[in]*/long shutter, /*[in]*/double settling, /*[in]*/long shutterDelay, /*[in]*/long divideBy2);
+		/*[in]*/long shutter, /*[in]*/double settling, /*[in]*/long shutterDelay, /*[in]*/long divideBy2,
+    /*[in]*/long corrections);
 	STDMETHOD(GetDarkReference)(/*[out, size_is(arrSize)]*/short array[], /*[in, out]*/long *arrSize, 
 		/*[out]*/long *width, /*[out]*/long *height, /*[in]*/double exposure,
 		/*[in]*/long binning, /*[in]*/long top, /*[in]*/long left, /*[in]*/long bottom, /*[in]*/long right,
-		/*[in]*/long shutter, /*[in]*/double settling, /*[in]*/long divideBy2);
+		/*[in]*/long shutter, /*[in]*/double settling, /*[in]*/long divideBy2, /*[in]*/long corrections);
 	STDMETHOD(QueueScript)(/*[in]*/long size, /*[in, size_is(size)]*/long script[]);
 	STDMETHOD(SetCurrentCamera)(/*[in]*/long camera);
 	STDMETHOD(SetDMVersion)(/*[in]*/long version);

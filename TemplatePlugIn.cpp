@@ -31,10 +31,9 @@ public:
 	void AddCameraSelection(int camera = -1);
 	int GetGainReference(float *array, long *arrSize, long *width, 
 							long *height, long binning);
-	int GetImage(short *array, long *arrSize, long *width, 
-		long *height, long processing, double exposure,
-		long binning, long top, long left, long bottom, 
-		long right, long shutter, double settling, long shutterDelay, long divideBy2);
+	int GetImage(short *array, long *arrSize, long *width, long *height, long processing,
+    double exposure, long binning, long top, long left, long bottom, long right, 
+    long shutter, double settling, long shutterDelay, long divideBy2, long corrections);
 	void QueueScript(char *strScript);
 	void SetCurrentCamera(int inVal) {m_iCurrentCamera = inVal;};
 	void SetDMVersion(int inVal) {m_iDMVersion = inVal;};
@@ -197,7 +196,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 							long *height, long processing, double exposure,
 							long binning, long top, long left, long bottom, 
 							long right, long shutter, double settling, long shutterDelay,
-              long divideBy2)
+              long divideBy2, long corrections)
 {
 	m_strCommand.resize(0);
 	AddCameraSelection();
@@ -231,6 +230,11 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 			newProc, exposure, binning, binning, top, left, bottom, right);
 		m_strCommand += m_strTemp;
 
+    // Specify corrections if incoming value is >= 0
+    if (corrections >= 0) {
+      sprintf(m_strTemp, "CM_SetCorrections(acqParams, 255, %d)\n", corrections);
+		  m_strCommand += m_strTemp;
+    }
 		// Turn off defect correction for raw images and dark references
 		//if (newProc == NEWCM_UNPROCESSED)
 		//	m_strCommand += "CM_SetCorrections(acqParams, 1, 0)\n";
@@ -640,10 +644,11 @@ int PlugInWrapper::GetImage(short *array, long *arrSize, long *width,
 							long *height, long processing, double exposure,
 							long binning, long top, long left, long bottom, 
 							long right, long shutter, double settling, long shutterDelay,
-              long divideBy2)
+              long divideBy2, long corrections)
 {
 	return gTemplatePlugIn.GetImage(array, arrSize, width, height, processing, exposure,
-		binning, top, left, bottom, right, shutter, settling, shutterDelay, divideBy2);
+		binning, top, left, bottom, right, shutter, settling, shutterDelay, divideBy2, 
+    corrections);
 }
 
 int PlugInWrapper::GetGainReference(float *array, long *arrSize, long *width, 

@@ -110,10 +110,10 @@ STDMETHODIMP CDMCamera::GetAcquiredImage(short array[], long *arrSize, long *wid
 										 long *height, long processing, double exposure,
 										 long binning, long top, long left, long bottom, 
 										 long right, long shutter, double settling, 
-										 long shutterDelay, long divideBy2)
+										 long shutterDelay, long divideBy2, long corrections)
 {
 	int retval = gPlugInWrapper.GetImage(array, arrSize, width, height, processing,
-		exposure, binning, top, left, bottom, right, shutter, settling, shutterDelay, divideBy2);
+		exposure, binning, top, left, bottom, right, shutter, settling, shutterDelay, divideBy2, corrections);
 	if (retval)
 		return E_FAIL;
 	return S_OK;
@@ -122,10 +122,10 @@ STDMETHODIMP CDMCamera::GetAcquiredImage(short array[], long *arrSize, long *wid
 STDMETHODIMP CDMCamera::GetDarkReference(short array[], long *arrSize, long *width, 
 										 long *height, double exposure,
 										 long binning, long top, long left, long bottom, 
-										 long right, long shutter, double settling, long divideBy2) 
+										 long right, long shutter, double settling, long divideBy2, long corrections) 
 {
 	int retval = gPlugInWrapper.GetImage(array, arrSize, width, height, DARK_REFERENCE,
-		exposure, binning, top, left, bottom, right, shutter, settling, 0, divideBy2);
+		exposure, binning, top, left, bottom, right, shutter, settling, 0, divideBy2, corrections);
 	if (retval)
 		return E_FAIL;
 	return S_OK;
