@@ -194,21 +194,6 @@ void TemplatePlugIn::QueueScript(char *strScript)
 		DM::Result((char *)m_strQueue.c_str());
 }
 
-// Add commands for selecting a camera to the command string
-void TemplatePlugIn::AddCameraSelection(int camera)
-{
-	if (camera < 0)
-		camera = m_iCurrentCamera;
-	if (m_iDMVersion >= NEW_CAMERA_MANAGER)
-		sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
-						"Object cameraList = CM_GetCameras(manager)\n"
-						"Object camera = ObjectAt(cameraList, %d)\n"
-						"CM_SelectCamera(manager, camera)\n", camera);
-	else
-		sprintf(m_strTemp, "MSCSelectCamera(%d)\n", camera);
-	m_strCommand += m_strTemp;
-}
-
 // Common pathway for obtaining an acquired image or a dark reference
 int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width, 
 							long *height, long processing, double exposure,
@@ -313,6 +298,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 		m_strCommand += m_strTemp;
 	} else {
 		if (processing == DARK_REFERENCE)
+			// This command has an inverted sense, 1 means keep shutter closed
+			// Need to use this to get defect correction
 			m_strCommand += "CM_SetShutterExposure(acqParams, 1)\n"
 					"Image img := CM_AcquireImage(camera, acqParams)\n";
 //			"Image img := CM_CreateImageForAcquire(camera, acqParams, \"temp\")\n"
@@ -405,6 +392,21 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 	return 0;
 }
 
+// Add commands for selecting a camera to the command string
+void TemplatePlugIn::AddCameraSelection(int camera)
+{
+	if (camera < 0)
+		camera = m_iCurrentCamera;
+	if (m_iDMVersion >= NEW_CAMERA_MANAGER)
+		sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
+						"Object cameraList = CM_GetCameras(manager)\n"
+						"Object camera = ObjectAt(cameraList, %d)\n"
+						"CM_SelectCamera(manager, camera)\n", camera);
+	else
+		sprintf(m_strTemp, "MSCSelectCamera(%d)\n", camera);
+	m_strCommand += m_strTemp;
+}
+
 // Make camera be the current camera and execute selection script
 int TemplatePlugIn::SelectCamera(long camera)
 {
@@ -486,9 +488,9 @@ long TemplatePlugIn::GetDMVersion()
 	if (retval == SCRIPT_ERROR_RETURN)
 		return 1;
 	code = (unsigned int)(retval + 0.1);
-	long my3digits = 100 * (code >> 24) + 10 * ((code >> 16) & 0xff) + 
+	m_iDMVersion = 100 * (code >> 24) + 10 * ((code >> 16) & 0xff) + 
 		((code >> 8) & 0xff);
-	return my3digits;
+	return m_iDMVersion;
 }
 
 // Global instances of the plugin and the wrapper class for calling into this file
