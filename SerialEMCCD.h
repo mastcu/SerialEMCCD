@@ -2,7 +2,7 @@
 
 
 /* File created by MIDL compiler version 5.01.0164 */
-/* at Sun Oct 27 20:04:43 2002
+/* at Mon Oct 28 14:57:00 2002
  */
 /* Compiler settings for C:\Documents and Settings\mast\My Documents\VisualC\SerialEMCCD\SerialEMCCD.idl:
     Os (OptLev=s), W1, Zp8, env=Win32, ms_ext, c_ext

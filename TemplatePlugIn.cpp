@@ -47,7 +47,7 @@ public:
 	{
 		m_bBusy = false;
 		m_bRunning = false;
-		m_bDebug = true;
+		m_bDebug = false;
 		m_iDMVersion = 340;
 		m_iCurrentCamera = 0;
 		m_strQueue.resize(0);
@@ -175,19 +175,19 @@ double TemplatePlugIn::ExecuteClientScript(char *strScript, BOOL selectCamera)
 	m_strCommand.resize(0);
 	if (selectCamera)
 		AddCameraSelection();
-	m_strCommand.append(strScript);
+	m_strCommand += strScript;
 	char last = m_strCommand[m_strCommand.length() - 1];
 	if (last != '\n' && last != '\r')
-		m_strCommand.append("\n");
+		m_strCommand += "\n";
 	return ExecuteScript((char *)m_strCommand.c_str());
 }
 
 void TemplatePlugIn::QueueScript(char *strScript)
 {
-	m_strQueue.append(strScript);
+	m_strQueue += strScript;
 	char last = m_strQueue[m_strQueue.length() - 1];
 	if (last != '\n' && last != '\r')
-		m_strQueue.append("\n");
+		m_strQueue += "\n";
 	DebugToResult("QueueScript called, queue is now:\n");
 	if (m_bDebug)
 		DM::Result((char *)m_strQueue.c_str());
@@ -198,10 +198,13 @@ void TemplatePlugIn::AddCameraSelection(int camera)
 {
 	if (camera < 0)
 		camera = m_iCurrentCamera;
-	sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
-					"Object cameraList = CM_GetCameras(manager)\n"
-					"Object camera = ObjectAt(cameraList, %d)\n"
-					"CM_SelectCamera(manager, camera)\n", camera);
+	if (m_iDMVersion >= NEW_CAMERA_MANAGER)
+		sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
+						"Object cameraList = CM_GetCameras(manager)\n"
+						"Object camera = ObjectAt(cameraList, %d)\n"
+						"CM_SelectCamera(manager, camera)\n", camera);
+	else
+		m_strTemp[0] = 0x00;
 	m_strCommand += m_strTemp;
 }
 
@@ -216,50 +219,106 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
 	// Add and clear the queue
 	if (!m_strQueue.empty()) {
-		m_strCommand.append(m_strQueue);
+		m_strCommand += m_strQueue;
 		m_strQueue.resize(0);
+	}
+
+	// Set up acquisition parameters
+	if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
+		
+		// Convert the processing argument to the new format
+		int newProc;
+		switch (processing) {
+		case DARK_REFERENCE: 
+		case UNPROCESSED:
+			newProc = NEWCM_UNPROCESSED;
+			break;
+		case DARK_SUBTRACTED:
+			newProc = NEWCM_DARK_SUBTRACTED;
+			break;
+		case GAIN_NORMALIZED:
+			newProc = NEWCM_GAIN_NORMALIZED;
+			break;
+		}
+		sprintf(m_strTemp, "Object acqParams = CM_CreateAcquisitionParameters_FullCCD"
+			"(camera, %d, %g, %d, %d)\n"
+			"CM_SetBinnedReadArea(camera, acqParams, %d, %d, %d, %d)\n",
+			newProc, exposure, binning, binning, top, left, bottom, right);
+		m_strCommand += m_strTemp;
+
+		// Turn off defect correction for raw images and dark references
+		//if (newProc == NEWCM_UNPROCESSED)
+		//	m_strCommand += "CM_SetCorrections(acqParams, 1, 0)\n";
 	}
 
 	// Old version, set the settling and the alternate shutter through notes
 	if (m_iDMVersion < OLD_SETTLING_BROKEN) {
 		sprintf(m_strTemp, 
 			"SetPersistentNumberNote(\"MSC:Parameters:2:Settling\", %g)\n",	settling);
-		m_strCommand.append(m_strTemp);
+		m_strCommand += m_strTemp;
 	}
 
+	if (m_iDMVersion >= NEW_SETTLING_OK && settling > 0.) {
+		sprintf(m_strTemp, "CM_SetSettling(acqParams, %g\n", settling);
+		m_strCommand += m_strTemp;
+	}
+	
 	if (m_iDMVersion < OLD_SHUTTER_BROKEN) {
 		sprintf(m_strTemp, "SetPersistentNumberNote"
 			"(\"MSC:Parameters:2:Alternate Shutter\", %d)\r", shutter);
-		m_strCommand.append(m_strTemp);
+		m_strCommand += m_strTemp;
+	}
+
+	if (m_iDMVersion >= NEW_SETTLING_OK) {
+		sprintf(m_strTemp, "CM_SetShutterIndex(acqParams, %g\n", shutter);
+		m_strCommand += m_strTemp;
 	}
 
 	// Open shutter if a delay is set
 	if (shutterDelay) {
-		m_strCommand.append("SSCOpenShutter()\n");
+		if (m_iDMVersion < NEW_SHUTTER_OK)
+			m_strCommand += "SSCOpenShutter()\n";
+		else
+			// TODO: parameterize the shutter that needs to be opened?
+			m_strCommand += "CM_SetCurrentShutterState(camera, 1, 1)\n";
 		sprintf(m_strTemp, "Delay(%d)\n", shutterDelay);
-		m_strCommand.append(m_strTemp);
-		m_strCommand.append("SSCCloseShutter()\n");
+		m_strCommand += m_strTemp;
+		// Probably unneeded
+		if (m_iDMVersion < NEW_SHUTTER_OK)
+			m_strCommand += "SSCCloseShutter()\n";
+		else
+			m_strCommand += "CM_SetCurrentShutterState(camera, 1, 0)\n";
 	}
 
 	// Get the image acquisition command
-	switch (processing) {
-	case UNPROCESSED:
-		m_strCommand.append("Image img := SSCUnprocessedBinnedAcquire");
-		break;
-	case DARK_SUBTRACTED:
-		m_strCommand.append("Image img := SSCDarkSubtractedBinnedAcquire");
-		break;
-	case GAIN_NORMALIZED:
-		m_strCommand.append("Image img := SSCGainNormalizedBinnedAcquire");
-		break;
-	case DARK_REFERENCE:
-		m_strCommand.append("Image img := SSCGetDarkReference");
-		break;
-	}
+	if (m_iDMVersion < NEW_CAMERA_MANAGER) {
+		switch (processing) {
+		case UNPROCESSED:
+			m_strCommand += "Image img := SSCUnprocessedBinnedAcquire";
+			break;
+		case DARK_SUBTRACTED:
+			m_strCommand += "Image img := SSCDarkSubtractedBinnedAcquire";
+			break;
+		case GAIN_NORMALIZED:
+			m_strCommand += "Image img := SSCGainNormalizedBinnedAcquire";
+			break;
+		case DARK_REFERENCE:
+			m_strCommand += "Image img := SSCGetDarkReference";
+			break;
+		}
 
-	sprintf(m_strTemp, "(%f, %d, %d, %d, %d, %d)\n", exposure, binning, top, left, 
-		bottom, right);
-	m_strCommand.append(m_strTemp);
+		sprintf(m_strTemp, "(%f, %d, %d, %d, %d, %d)\n", exposure, binning, top, left, 
+			bottom, right);
+		m_strCommand += m_strTemp;
+	} else {
+		if (processing == DARK_REFERENCE)
+			m_strCommand += "CM_SetShutterExposure(acqParams, 1)\n"
+					"Image img := CM_AcquireImage(camera, acqParams)\n";
+//			"Image img := CM_CreateImageForAcquire(camera, acqParams, \"temp\")\n"
+//						"CM_AcquireDarkReference(camera, acqParams, img, NULL)\n";
+		else
+			m_strCommand += "Image img := CM_AcquireImage(camera, acqParams)\n";
+	}
 	
 	// Restore drift settling to zero if it was set
 	if (m_iDMVersion < OLD_SETTLING_BROKEN && settling > 0.)
@@ -269,7 +328,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 	sprintf(m_strTemp, "KeepImage(img)\n"
 		"number retval = GetImageID(img)\n"
 		"Exit(retval)");
-	m_strCommand.append(m_strTemp);
+	m_strCommand += m_strTemp;
 
 	int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height);	
 
@@ -285,7 +344,7 @@ int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width,
 		"KeepImage(img)\n"
 		"number retval = GetImageID(img)\n"
 		"Exit(retval)", binning);
-	m_strCommand.append(m_strTemp);
+	m_strCommand += m_strTemp;
 	return AcquireAndTransferImage((void *)array, 4, arrSize, width, height);	
 }
 
