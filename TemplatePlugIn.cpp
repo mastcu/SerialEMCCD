@@ -46,19 +46,14 @@ public:
 	virtual void End();
 	TemplatePlugIn()
 	{
-		m_bBusy = false;
-		m_bRunning = false;
 		m_bDebug = false;
 		m_iDMVersion = 340;
 		m_iCurrentCamera = 0;
 		m_strQueue.resize(0);
 	}
 
-	BOOL GetPlugInRunning() {return m_bRunning;};
 	
 private:
-	BOOL m_bBusy;
-	BOOL m_bRunning;
 	BOOL m_bDebug;
 	int m_iDMVersion;
 	int m_iCurrentCamera;
@@ -93,14 +88,17 @@ void TemplatePlugIn::Run()
 {
 	DM::Window results = DM::GetResultsWindow( true );
 	//PlugIn::gResultOut << "Hello, world" << std::endl;
-	m_bRunning = true;
 	if (WasCOMInitialized())
-		DebugToResult("COM was initialized through DllMain\n");
+		DebugToResult("SerialEMCCD: COM was initialized through DllMain\n");
 		//PlugIn::gResultOut << "COM was initialized through DllMain" << std::endl;
 	else {
 		m_bDebug = true;
-		DebugToResult("DllMain was never called - trouble!\n");
+		DebugToResult("DllMain was never called when SerialEMCCD was loaded - trouble!\n");
 		//PlugIn::gResultOut << "DllMain was never called - trouble!" << std::endl;
+	}
+	if (GetDMVersion() < 0) {
+		m_bDebug = true;
+		DebugToResult("SerialEMCCD: Error getting Digital Micrograph version\n");
 	}
 }
 
@@ -127,7 +125,6 @@ void TemplatePlugIn::Cleanup()
 ///
 void TemplatePlugIn::End()
 {
-	m_bRunning = false;
 	TerminateModuleUninitializeCOM();
 }
 
@@ -486,7 +483,7 @@ long TemplatePlugIn::GetDMVersion()
 					"Exit(version)";
 	double retval = ExecuteScript((char *)m_strCommand.c_str());
 	if (retval == SCRIPT_ERROR_RETURN)
-		return 1;
+		return -1;
 	code = (unsigned int)(retval + 0.1);
 	m_iDMVersion = 100 * (code >> 24) + 10 * ((code >> 16) & 0xff) + 
 		((code >> 8) & 0xff);
@@ -502,12 +499,6 @@ PlugInWrapper gPlugInWrapper;
 PlugInWrapper::PlugInWrapper()
 {
 }
-
-BOOL PlugInWrapper::GetPlugInRunning ()
-{
-	return gTemplatePlugIn.GetPlugInRunning();
-}
-
 
 
 BOOL PlugInWrapper::GetCameraBusy()
