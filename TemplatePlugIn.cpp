@@ -242,7 +242,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 	}
 
 	if (m_iDMVersion >= NEW_SETTLING_OK && settling > 0.) {
-		sprintf(m_strTemp, "CM_SetSettling(acqParams, %g\n", settling);
+		sprintf(m_strTemp, "CM_SetSettling(acqParams, %g)\n", settling);
 		m_strCommand += m_strTemp;
 	}
 	
