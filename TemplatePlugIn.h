@@ -11,13 +11,15 @@
 #define NEWCM_DARK_SUBTRACTED 2
 #define NEWCM_GAIN_NORMALIZED 3
 
-#define OLD_OPEN_SHUTTER_BROKEN    3600
-#define OLD_SELECT_SHUTTER_BROKEN    3600
-#define OLD_SETTLING_BROKEN   3600
-#define NEW_CAMERA_MANAGER    3600
-#define NEW_OPEN_SHUTTER_OK   3700
-#define NEW_SELECT_SHUTTER_OK 3716
-#define NEW_SETTLING_OK       3716
+#define OLD_OPEN_SHUTTER_BROKEN    360
+#define OLD_SELECT_SHUTTER_BROKEN    360
+#define OLD_SETTLING_BROKEN   360
+#define NEW_CAMERA_MANAGER    360
+#define NEW_OPEN_SHUTTER_OK   370
+// These are broken in 3.7.1.5 but work in 3.7.1.6.  If you have 3.7.1.5 you
+// have to disable them through SerialEM properties
+#define NEW_SELECT_SHUTTER_OK 371
+#define NEW_SETTLING_OK       371
 
 class PlugInWrapper
 {

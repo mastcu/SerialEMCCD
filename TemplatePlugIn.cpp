@@ -47,7 +47,7 @@ public:
 	TemplatePlugIn()
 	{
 		m_bDebug = false;
-		m_iDMVersion = 3400;
+		m_iDMVersion = 340;
 		m_iCurrentCamera = 0;
 		m_strQueue.resize(0);
 	}
@@ -487,9 +487,14 @@ long TemplatePlugIn::GetDMVersion()
 	if (retval == SCRIPT_ERROR_RETURN)
 		return -1;
 	code = (unsigned int)(retval + 0.1);
-	m_iDMVersion = 1000 * (code >> 24) + 100 * ((code >> 16) & 0xff) + 
-		10 * ((code >> 8) & 0xff) + (code & 0xff);
-	return m_iDMVersion;
+  // They don't support the last digit
+//	m_iDMVersion = 1000 * (code >> 24) + 100 * ((code >> 16) & 0xff) + 
+//		10 * ((code >> 8) & 0xff) + (code & 0xff);
+	m_iDMVersion = 100 * (code >> 24) + 10 * ((code >> 16) & 0xff) + 
+		((code >> 8) & 0xff);
+  sprintf(m_strTemp, "retval = %g, code = %x, version = %d", retval, code, m_iDMVersion);
+  DebugToResult(m_strTemp);
+  return m_iDMVersion;
 }
 
 // Global instances of the plugin and the wrapper class for calling into this file
