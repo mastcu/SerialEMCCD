@@ -27,7 +27,7 @@ public:
 	int SelectCamera(long camera);
 	double ExecuteClientScript(char *strScript, BOOL selectCamera);
 	int AcquireAndTransferImage(void *array, int dataSize, long *arrSize, long *width,
-		long *height, long divideBy2);
+		long *height, long divideBy2, long transpose);
 	void AddCameraSelection(int camera = -1);
 	int GetGainReference(float *array, long *arrSize, long *width, 
 							long *height, long binning);
@@ -327,7 +327,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 	m_strCommand += m_strTemp;
 
 	int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
-    divideBy2);	
+    divideBy2, 0);	
 
 	return retval;
 }
@@ -335,28 +335,41 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width, 
 									long *height, long binning)
 {
-	m_strCommand.resize(0);
+  // It seems that the gain reference is not flipped when images are
+  long transpose = 0;
+	if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
+    m_strCommand.resize(0);
+	  AddCameraSelection();
+    m_strCommand += "Number transpose = CM_Config_GetDefaultTranspose(camera)\n"
+      "Exit(transpose)";
+  	double retval = ExecuteScript((char *)m_strCommand.c_str());
+	  if (retval != SCRIPT_ERROR_RETURN)
+      transpose = (int)retval;
+  }
+
+  m_strCommand.resize(0);
 	AddCameraSelection();
 	sprintf(m_strTemp, "Image img := SSCGetGainReference(%d)\n"
 		"KeepImage(img)\n"
 		"number retval = GetImageID(img)\n"
 		"Exit(retval)", binning);
 	m_strCommand += m_strTemp;
-	return AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0);	
+	return AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0, transpose);
 }
 
 int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arrSize, 
-											long *width, long *height, long divideBy2)
+											long *width, long *height, long divideBy2, long transpose)
 {
 	long ID;
 	DM::Image image;
 	long outLimit = *arrSize;
-  int byteSize, i;
+  int byteSize, i, j;
   unsigned int *uiData;
   int *iData;
   unsigned short *usData;
   short *outData;
   short *sData;
+  float *flIn, *flOut;
 
 	// Set these values to zero in case of error returns
 	*width = 0;
@@ -398,10 +411,21 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 		{
 			GatanPlugIn::ImageDataLocker imageL( image );
 
-      // Do a simple copy if sizes match and not dividing by 2
+      // Do a simple copy if sizes match and not dividing by 2 and not trasnposing
       if (dataSize == byteSize && !divideBy2) {
-			  memcpy(array, imageL.get(), *width * *height * dataSize);
-      
+        if (!(transpose & 1))
+          memcpy(array, imageL.get(), *width * *height * dataSize);
+        else {
+
+          // Otherwise transpose floats around Y axis
+          for (j = 0; j < *height; j++) {
+            flIn = (float *)imageL.get() + j * *width;
+            flOut = (float *)array + (j + 1) * *width - 1;
+            for (i = 0; i < *width; i++)
+              *flOut-- = *flIn++;
+          }
+        }
+
       } else if (divideBy2) {
 
         // Divide by 2
