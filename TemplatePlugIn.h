@@ -35,7 +35,7 @@ public:
 	int GetImage(short *array, long *arrSize, long *width, 
 		long *height, long processing, double exposure,
 		long binning, long top, long left, long bottom, 
-		long right, long shutter, double settling, long shutterDelay);
+		long right, long shutter, double settling, long shutterDelay, long divideBy2);
 	int GetGainReference(float *array, long *arrSize, long *width, 
 		long *height, long binning);
 	void QueueScript(char *strScript);

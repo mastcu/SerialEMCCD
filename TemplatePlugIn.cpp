@@ -27,14 +27,14 @@ public:
 	int SelectCamera(long camera);
 	double ExecuteClientScript(char *strScript, BOOL selectCamera);
 	int AcquireAndTransferImage(void *array, int dataSize, long *arrSize, long *width,
-		long *height);
+		long *height, long divideBy2);
 	void AddCameraSelection(int camera = -1);
 	int GetGainReference(float *array, long *arrSize, long *width, 
 							long *height, long binning);
 	int GetImage(short *array, long *arrSize, long *width, 
 		long *height, long processing, double exposure,
 		long binning, long top, long left, long bottom, 
-		long right, long shutter, double settling, long shutterDelay);
+		long right, long shutter, double settling, long shutterDelay, long divideBy2);
 	void QueueScript(char *strScript);
 	void SetCurrentCamera(int inVal) {m_iCurrentCamera = inVal;};
 	void SetDMVersion(int inVal) {m_iDMVersion = inVal;};
@@ -196,7 +196,8 @@ void TemplatePlugIn::QueueScript(char *strScript)
 int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width, 
 							long *height, long processing, double exposure,
 							long binning, long top, long left, long bottom, 
-							long right, long shutter, double settling, long shutterDelay)
+							long right, long shutter, double settling, long shutterDelay,
+              long divideBy2)
 {
 	m_strCommand.resize(0);
 	AddCameraSelection();
@@ -262,9 +263,12 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 	if (shutterDelay) {
 		if (m_iDMVersion < NEW_OPEN_SHUTTER_OK)
 			m_strCommand += "SSCOpenShutter()\n";
-		else
-			// TODO: parameterize the shutter that needs to be opened?
-			m_strCommand += "CM_SetCurrentShutterState(camera, 1, 0)\n";
+    else {
+			// Specify the other shutter as being opened
+      sprintf(m_strTemp, "CM_SetCurrentShutterState(camera, %d, 0)\n", 
+        shutter > 0 ? 0 : 1);
+  		m_strCommand += m_strTemp;
+    }
 		sprintf(m_strTemp, "Delay(%d)\n", shutterDelay);
 		m_strCommand += m_strTemp;
 		// Probably unneeded
@@ -318,7 +322,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 		"Exit(retval)");
 	m_strCommand += m_strTemp;
 
-	int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height);	
+	int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
+    divideBy2);	
 
 	return retval;
 }
@@ -333,11 +338,11 @@ int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width,
 		"number retval = GetImageID(img)\n"
 		"Exit(retval)", binning);
 	m_strCommand += m_strTemp;
-	return AcquireAndTransferImage((void *)array, 4, arrSize, width, height);	
+	return AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0);	
 }
 
 int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arrSize, 
-											long *width, long *height)
+											long *width, long *height, long divideBy2)
 {
 	long ID;
 	DM::Image image;
@@ -346,6 +351,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   unsigned int *uiData;
   int *iData;
   unsigned short *usData;
+  short *outData;
+  short *sData;
 
 	// Set these values to zero in case of error returns
 	*width = 0;
@@ -386,21 +393,65 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 		// Get data pointer and transfer the data
 		{
 			GatanPlugIn::ImageDataLocker imageL( image );
-      if (dataSize == byteSize) {
+
+      // Do a simple copy if sizes match and not dividing by 2
+      if (dataSize == byteSize && !divideBy2) {
 			  memcpy(array, imageL.get(), *width * *height * dataSize);
+      
+      } else if (divideBy2) {
+
+        // Divide by 2
+        outData = (short *)array;
+        if (DM::ImageIsDataTypeUnsignedInteger(image.get())) {
+          if (byteSize == 2) {
+
+            // unsigned short to short
+            DebugToResult("Dividing unsigned shorts by 2\n");
+            usData = (unsigned short *)imageL.get();
+            for (i = 0; i < *width * *height; i++)
+              outData[i] = (short)(usData[i] / 2);
+          } else {
+
+            // unsigned long to short
+            DebugToResult("Dividing unsigned integers by 2\n");
+            uiData = (unsigned int *)imageL.get();
+            for (i = 0; i < *width * *height; i++)
+              outData[i] = (short)(uiData[i] / 2);
+          }
+        } else {
+          if (byteSize == 2) {
+
+            // signed short to short
+            DebugToResult("Dividing signed shorts by 2\n");
+            sData = (short *)imageL.get();
+            for (i = 0; i < *width * *height; i++)
+              outData[i] = sData[i] / 2;
+          } else {
+
+            // signed long to short
+            DebugToResult("Dividing signed integers by 2\n");
+            iData = (int *)imageL.get();
+            for (i = 0; i < *width * *height; i++)
+              outData[i] = (short)(iData[i] / 2);
+          }
+        }
+
       } else {
+
+        // No division by 2: Convert long integers to unsigned shorts
         usData = (unsigned short *)array;
         if (DM::ImageIsDataTypeUnsignedInteger(image.get())) {
         
           // If these are long integers and they are unsigned, just transfer
-          DebugToResult("Converting unsigned integers to unsigned shorts");
+          DebugToResult("Converting unsigned integers to unsigned shorts\n");
           uiData = (unsigned int *)imageL.get();
           for (i = 0; i < *width * *height; i++)
             usData[i] = (unsigned short)uiData[i];
         } else {
 
           // Otherwise need to truncate at zero to copy signed to unsigned
-          DebugToResult("Converting signed integers to unsigned shorts with truncation");
+          DebugToResult("Converting signed integers to unsigned shorts with "
+            "truncation\n");
           iData = (int *)imageL.get();
           for (i = 0; i < *width * *height; i++) {
             if (iData[i] >= 0)
@@ -588,10 +639,11 @@ void PlugInWrapper::QueueScript(char *strScript)
 int PlugInWrapper::GetImage(short *array, long *arrSize, long *width, 
 							long *height, long processing, double exposure,
 							long binning, long top, long left, long bottom, 
-							long right, long shutter, double settling, long shutterDelay)
+							long right, long shutter, double settling, long shutterDelay,
+              long divideBy2)
 {
 	return gTemplatePlugIn.GetImage(array, arrSize, width, height, processing, exposure,
-		binning, top, left, bottom, right, shutter, settling, shutterDelay);
+		binning, top, left, bottom, right, shutter, settling, shutterDelay, divideBy2);
 }
 
 int PlugInWrapper::GetGainReference(float *array, long *arrSize, long *width, 
