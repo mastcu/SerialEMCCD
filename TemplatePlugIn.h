@@ -16,6 +16,8 @@
 #define OLD_SETTLING_BROKEN   360
 #define NEW_CAMERA_MANAGER    360
 #define NEW_OPEN_SHUTTER_OK   370
+// A guess that this went with current shutter state
+#define SET_IDLE_STATE_OK     370
 // These are broken in 3.7.1.5 but work in 3.7.1.6.  If you have 3.7.1.5 you
 // have to disable them through SerialEM properties
 #define NEW_SELECT_SHUTTER_OK 371
@@ -24,6 +26,7 @@
 class PlugInWrapper
 {
 public:
+	int SetShutterNormallyClosed(long camera, long shutter);
 	long GetDMVersion();
 	int InsertCamera(long camera, BOOL state);
 	int IsCameraInserted(long camera);

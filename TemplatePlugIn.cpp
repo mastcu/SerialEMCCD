@@ -19,6 +19,7 @@ using namespace std ;
 class TemplatePlugIn : 	public Gatan::PlugIn::PlugInMain
 {
 public:
+	int SetShutterNormallyClosed(long camera, long shutter);
 	long GetDMVersion();
 	int InsertCamera(long camera, BOOL state);
 	int IsCameraInserted(long camera);
@@ -497,6 +498,23 @@ long TemplatePlugIn::GetDMVersion()
   return m_iDMVersion;
 }
 
+int TemplatePlugIn::SetShutterNormallyClosed(long camera, long shutter)
+{
+	if (m_iDMVersion < SET_IDLE_STATE_OK)
+    return 0;
+	m_strCommand.resize(0);
+  sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
+						"Object cameraList = CM_GetCameras(manager)\n"
+						"Object camera = ObjectAt(cameraList, %d)\n"
+						"CM_SetSetIdleShutterState(camera, %d, 1)\n", camera, shutter);
+	m_strCommand += m_strTemp;
+	double retval = ExecuteScript((char *)m_strCommand.c_str());
+	if (retval == SCRIPT_ERROR_RETURN)
+		return 1;
+	return 0;
+}
+
+
 // Global instances of the plugin and the wrapper class for calling into this file
 TemplatePlugIn gTemplatePlugIn;
 
@@ -578,3 +596,9 @@ long PlugInWrapper::GetDMVersion()
 {
 	return gTemplatePlugIn.GetDMVersion();
 }
+
+int PlugInWrapper::SetShutterNormallyClosed(long camera, long shutter)
+{
+  return gTemplatePlugIn.SetShutterNormallyClosed(camera, shutter);
+}
+

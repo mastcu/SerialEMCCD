@@ -193,3 +193,11 @@ STDMETHODIMP CDMCamera::GetDMCapabilities(BOOL *canSelectShutter, BOOL *canSetSe
 		version >= NEW_OPEN_SHUTTER_OK;
 	return S_OK;
 }
+
+STDMETHODIMP CDMCamera::SetShutterNormallyClosed(long camera, long shutter)
+{
+  int retval = gPlugInWrapper.SetShutterNormallyClosed(camera, shutter);
+	if (retval)
+		return E_FAIL;
+	return S_OK;
+}
