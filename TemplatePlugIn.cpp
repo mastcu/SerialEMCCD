@@ -232,9 +232,9 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
     // Specify corrections if incoming value is >= 0
     // As of DM 3.9.3 (3.9?) need to modify only the allowed coorections to avoid an
-    // overscan image in simulator, so change 255 to 41
+    // overscan image in simulator, so change 255 to 49
     if (corrections >= 0) {
-      sprintf(m_strTemp, "CM_SetCorrections(acqParams, 41, %d)\n", corrections);
+      sprintf(m_strTemp, "CM_SetCorrections(acqParams, 49, %d)\n", corrections);
 		  m_strCommand += m_strTemp;
     }
 		// Turn off defect correction for raw images and dark references
