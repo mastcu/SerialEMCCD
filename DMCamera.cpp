@@ -201,3 +201,9 @@ STDMETHODIMP CDMCamera::SetShutterNormallyClosed(long camera, long shutter)
 		return E_FAIL;
 	return S_OK;
 }
+
+STDMETHODIMP CDMCamera::SetNoDMSettling(long camera)
+{
+	gPlugInWrapper.SetNoDMSettling(camera);
+	return S_OK;
+}

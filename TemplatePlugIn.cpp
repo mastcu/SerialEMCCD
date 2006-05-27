@@ -15,10 +15,12 @@ using namespace Gatan;
 using namespace std ;
 
 #define MAX_TEMP_STRING   1000
+#define MAX_CAMERAS  4
 
 class TemplatePlugIn : 	public Gatan::PlugIn::PlugInMain
 {
 public:
+	void SetNoDMSettling(long camera);
 	int SetShutterNormallyClosed(long camera, long shutter);
 	long GetDMVersion();
 	int InsertCamera(long camera, BOOL state);
@@ -50,6 +52,8 @@ public:
 		m_iDMVersion = 340;
 		m_iCurrentCamera = 0;
 		m_strQueue.resize(0);
+    for (int i = 0; i < MAX_CAMERAS; i++)
+      m_iDMSettlingOK[i] = 1;
 	}
 
 	
@@ -57,6 +61,7 @@ private:
 	BOOL m_bDebug;
 	int m_iDMVersion;
 	int m_iCurrentCamera;
+  int m_iDMSettlingOK[MAX_CAMERAS];
 	string m_strQueue;
 	string m_strCommand;
 	char m_strTemp[MAX_TEMP_STRING];
@@ -198,6 +203,11 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 							long right, long shutter, double settling, long shutterDelay,
               long divideBy2, long corrections)
 {
+  //sprintf(m_strTemp, "Entering GetImage with divideBy2 %d\n", divideBy2);
+  //DebugToResult(m_strTemp);
+  // Workaround for Downing camera problem, inexplicable wild values coming through
+  if (divideBy2 > 1 || divideBy2 < -1)
+    divideBy2 = 0;
 	m_strCommand.resize(0);
 	AddCameraSelection();
 
@@ -249,7 +259,9 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 		m_strCommand += m_strTemp;
 	}
 
-	if (m_iDMVersion >= NEW_SETTLING_OK && settling > 0.) {
+  // 5/23/06: drift settling in Record set from DM was being applied, so set settling
+  // unconditionally as long as settling is OK (not in Faux camera)
+	if (m_iDMVersion >= NEW_SETTLING_OK && m_iDMSettlingOK[m_iCurrentCamera]) {
 		sprintf(m_strTemp, "CM_SetSettling(acqParams, %g)\n", settling);
 		m_strCommand += m_strTemp;
 	}
@@ -328,6 +340,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 		"Exit(retval)");
 	m_strCommand += m_strTemp;
 
+  //sprintf(m_strTemp, "Calling AcquireAndTransferImage with divideBy2 %d\n", divideBy2);
+  //DebugToResult(m_strTemp);
 	int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
     divideBy2, 0);	
 
@@ -415,11 +429,13 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 
       // Do a simple copy if sizes match and not dividing by 2 and not trasnposing
       if (dataSize == byteSize && !divideBy2) {
-        if (!(transpose & 1))
+        if (!(transpose & 1)) {
+          DebugToResult("Copying data\n");
           memcpy(array, imageL.get(), *width * *height * dataSize);
-        else {
+        } else {
 
           // Otherwise transpose floats around Y axis
+          DebugToResult("Copying float data with transposition\n");
           for (j = 0; j < *height; j++) {
             flIn = (float *)imageL.get() + j * *width;
             flOut = (float *)array + (j + 1) * *width - 1;
@@ -608,6 +624,7 @@ long TemplatePlugIn::GetDMVersion()
   return m_iDMVersion;
 }
 
+// Set selected shutter normally closed - also set other shutter normally open
 int TemplatePlugIn::SetShutterNormallyClosed(long camera, long shutter)
 {
 	if (m_iDMVersion < SET_IDLE_STATE_OK)
@@ -616,12 +633,19 @@ int TemplatePlugIn::SetShutterNormallyClosed(long camera, long shutter)
   sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
 						"Object cameraList = CM_GetCameras(manager)\n"
 						"Object camera = ObjectAt(cameraList, %d)\n"
-						"CM_SetIdleShutterState(camera, %d, 1)\n", camera, shutter);
+						"CM_SetIdleShutterState(camera, %d, 1)\n",
+            "CM_SetIdleShutterState(camera, %d, 0)\n", camera, shutter, 1 - shutter);
 	m_strCommand += m_strTemp;
 	double retval = ExecuteScript((char *)m_strCommand.c_str());
 	if (retval == SCRIPT_ERROR_RETURN)
 		return 1;
 	return 0;
+}
+
+void TemplatePlugIn::SetNoDMSettling(long camera)
+{
+  if (camera >= 0 && camera < MAX_CAMERAS)
+    m_iDMSettlingOK[camera] = 0;
 }
 
 
@@ -630,7 +654,9 @@ TemplatePlugIn gTemplatePlugIn;
 
 PlugInWrapper gPlugInWrapper;
 
+//////////////////////////////////////////////////////////////////////////
 // THE WRAPPER FUNCTIONS
+//
 PlugInWrapper::PlugInWrapper()
 {
 }
@@ -712,5 +738,10 @@ long PlugInWrapper::GetDMVersion()
 int PlugInWrapper::SetShutterNormallyClosed(long camera, long shutter)
 {
   return gTemplatePlugIn.SetShutterNormallyClosed(camera, shutter);
+}
+
+void PlugInWrapper::SetNoDMSettling(long camera)
+{
+  gTemplatePlugIn.SetNoDMSettling(camera);
 }
 

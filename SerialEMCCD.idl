@@ -32,6 +32,7 @@ import "ocidl.idl";
 		[id(17), helpstring("method GetDMVersion")] HRESULT GetDMVersion([out]long *version);
 		[id(18), helpstring("method GetDMCapabilities")] HRESULT GetDMCapabilities([out]BOOL *canSelectShutter, [out]BOOL *canSetSettling, [out]BOOL *openShutterWorks);
 		[id(19), helpstring("method SetShutterNormallyClosed")] HRESULT SetShutterNormallyClosed([in]long camera, [in]long shutter);
+		[id(20), helpstring("method SetNoDMSettling")] HRESULT SetNoDMSettling([in]long camera);
 	};
 	
 	

@@ -37,6 +37,7 @@ DECLARE_REGISTRY_RESOURCEID(IDR_DMCamera)
 
 // IDMCamera
 public:
+	STDMETHOD(SetNoDMSettling)(/*[in]*/long camera);
 	STDMETHOD(SetShutterNormallyClosed)(/*[in]*/long camera, /*[in]*/long shutter);
 	STDMETHOD(GetDMCapabilities)(/*[out]*/BOOL *canSelectShutter, /*[out]*/BOOL *canSetSettling, /*[out]*/BOOL *openShutterWorks);
 	STDMETHOD(GetDMVersion)(/*[out]*/long *version);

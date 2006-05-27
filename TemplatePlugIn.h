@@ -26,6 +26,7 @@
 class PlugInWrapper
 {
 public:
+	void SetNoDMSettling(long camera);
 	int SetShutterNormallyClosed(long camera, long shutter);
 	long GetDMVersion();
 	int InsertCamera(long camera, BOOL state);
