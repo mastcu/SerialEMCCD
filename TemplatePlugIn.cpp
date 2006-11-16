@@ -153,10 +153,13 @@ void TemplatePlugIn::DebugToResult(char *strMessage, char *strPrefix)
 double TemplatePlugIn::ExecuteScript(char *strScript)
 {
 	double retval;
-	char retstr[128];
+	char last, retstr[128];
 	DebugToResult(strScript, "DMCamera executing script :\n");
 	if (m_bDebug) {
-		char last = strScript[strlen(strScript) - 1];
+
+    // 11/15/06: switch to this from using strlen which falied with DMSDK 3.8.2
+    for (int i = 0; strScript[i]; i++)
+      last = strScript[i];
 		if (last != '\n' && last != '\r')
 			DM::Result("\n");
 	}
