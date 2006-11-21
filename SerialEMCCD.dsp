@@ -26,7 +26,7 @@ CFG=SerialEMCCD - Win32 Debug
 # PROP AllowPerConfigDependencies 0
 # PROP Scc_ProjName ""
 # PROP Scc_LocalPath ""
-CPP=cl.exe
+CPP=xicl6.exe
 MTL=midl.exe
 RSC=rc.exe
 
@@ -50,7 +50,7 @@ RSC=rc.exe
 BSC32=bscmake.exe
 # ADD BASE BSC32 /nologo
 # ADD BSC32 /nologo
-LINK32=link.exe
+LINK32=xilink6.exe
 # ADD BASE LINK32 kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:windows /dll /debug /machine:I386 /pdbtype:sept
 # ADD LINK32 "..\..\DMSDK\Win32\lib\DMPlugInBasic-Dbg.lib" kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:windows /dll /debug /machine:I386 /pdbtype:sept
 # SUBTRACT LINK32 /pdb:none
@@ -94,7 +94,7 @@ PostBuild_Cmds=nmake -f SerialEMCCDps.mk	regsvr32 /s SerialEMCCDps.dll
 BSC32=bscmake.exe
 # ADD BASE BSC32 /nologo
 # ADD BSC32 /nologo
-LINK32=link.exe
+LINK32=xilink6.exe
 # ADD BASE LINK32 kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:windows /dll /machine:I386
 # ADD LINK32 "..\..\DMSDK\Win32\lib\DMPlugInBasic.lib" kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:windows /dll /machine:I386 /force:unresolved
 # SUBTRACT LINK32 /nodefaultlib
@@ -133,17 +133,17 @@ PostBuild_Cmds=nmake -f SerialEMCCDps.mk	regsvr32 /s SerialEMCCDps.dll
 # PROP Target_Dir ""
 # ADD BASE CPP /nologo /MT /W3 /GX /O1 /I "..\..\DMSDK\Win32\include\\" /D "WIN32" /D "NDEBUG" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "_ATL_DLL" /Yu"stdafx.h" /FD /c
 # SUBTRACT BASE CPP /u
-# ADD CPP /nologo /MT /W3 /GX /O2 /I "..\..\DMSDK\Win32\include\\" /D "WIN32" /D "NDEBUG" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "_ATL_STATIC_REGISTRY" /Yu"stdafx.h" /FD /c
+# ADD CPP /nologo /MT /W3 /GX /O2 /I "..\..\DMSDK\Win32\VisualStudio.6\include\\" /I "..\..\DMSDK\Win32" /D "WIN32" /D "NDEBUG" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "_ATL_STATIC_REGISTRY" /Yu"stdafx.h" /FD /c
 # SUBTRACT CPP /u
 # ADD BASE RSC /l 0x409 /d "NDEBUG"
 # ADD RSC /l 0x409 /d "NDEBUG"
 BSC32=bscmake.exe
 # ADD BASE BSC32 /nologo
 # ADD BSC32 /nologo
-LINK32=link.exe
+LINK32=xilink6.exe
 # ADD BASE LINK32 "..\..\DMSDK\Win32\lib\DMPlugInBasic.lib" kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:windows /dll /machine:I386 /force:unresolved
 # SUBTRACT BASE LINK32 /nodefaultlib
-# ADD LINK32 "..\..\DMSDK\Win32\lib\DMPlugInBasic.lib" kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:windows /dll /machine:I386 /force:unresolved
+# ADD LINK32 "..\..\DMSDK\Win32\VisualStudio.6\lib\DMPlugInBasic.lib" kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:windows /dll /machine:I386 /force:unresolved
 # SUBTRACT LINK32 /nodefaultlib
 # Begin Custom Build - Performing registration
 OutDir=.\ReleaseMinDependency
