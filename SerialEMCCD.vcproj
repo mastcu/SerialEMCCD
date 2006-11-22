@@ -204,7 +204,7 @@ copy &quot;$(TargetPath)&quot; .
 				Name="VCLinkerTool"
 				IgnoreImportLibrary="TRUE"
 				AdditionalOptions="/force:unresolved"
-				AdditionalDependencies="&quot;..\..\DMSDK\Win32\VisualStudio.NET\lib\DMPlugInBasic.lib&quot; odbc32.lib odbccp32.lib"
+				AdditionalDependencies="&quot;..\DMSDK\Win32\VisualStudio.NET\lib\DMPlugInBasic.lib&quot; odbc32.lib odbccp32.lib"
 				OutputFile=".\ReleaseMinDependency/SerialEMCCD.dll"
 				LinkIncremental="1"
 				SuppressStartupBanner="TRUE"
