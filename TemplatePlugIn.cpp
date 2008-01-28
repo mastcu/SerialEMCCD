@@ -389,6 +389,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   short *outData;
   short *sData;
   float *flIn, *flOut;
+  bool isInteger;
 
 	// Set these values to zero in case of error returns
 	*width = 0;
@@ -413,8 +414,9 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 		
 		// Check the data type (may need to be fancier)
 		byteSize = DM::ImageGetDataElementByteSize(image.get());
+    isInteger = DM::ImageIsDataTypeInteger(image.get());
     if (byteSize != dataSize && !(dataSize == 2 && byteSize == 4 && 
-      DM::ImageIsDataTypeInteger(image.get()))) {
+      (isInteger || DM::ImageIsDataTypeFloat(image.get())))) {
 			DebugToResult("Image data are not of the expected type\n");
 			return WRONG_DATA_TYPE;
 		}
@@ -467,7 +469,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             for (i = 0; i < *width * *height; i++)
               outData[i] = (short)(uiData[i] / 2);
           }
-        } else {
+        } else if (isInteger) {
           if (byteSize == 2) {
 
             // signed short to short
@@ -483,6 +485,13 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             for (i = 0; i < *width * *height; i++)
               outData[i] = (short)(iData[i] / 2);
           }
+        } else {
+
+          // Float to short
+          DebugToResult("Dividing floats by 2\n");
+          flIn = (float *)imageL.get();
+          for (i = 0; i < *width * *height; i++)
+            outData[i] = (short)(flIn[i] / 2);
         }
 
       } else {
@@ -496,7 +505,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           uiData = (unsigned int *)imageL.get();
           for (i = 0; i < *width * *height; i++)
             usData[i] = (unsigned short)uiData[i];
-        } else {
+        } else if (isInteger) {
 
           // Otherwise need to truncate at zero to copy signed to unsigned
           DebugToResult("Converting signed integers to unsigned shorts with "
@@ -505,6 +514,17 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           for (i = 0; i < *width * *height; i++) {
             if (iData[i] >= 0)
               usData[i] = (unsigned short)iData[i];
+            else
+              usData[i] = 0;
+          }
+        } else {
+
+          //Float to unsigned with truncation
+          DebugToResult("Converting floats to unsigned shorts with truncation\n");
+          flIn = (float *)imageL.get();
+          for (i = 0; i < *width * *height; i++) {
+            if (flIn[i] >= 0)
+              usData[i] = (unsigned short)flIn[i];
             else
               usData[i] = 0;
           }
