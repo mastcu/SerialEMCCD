@@ -289,6 +289,9 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       sprintf(m_strTemp, "CM_SetCurrentShutterState(camera, %d, 0)\n", 
         shutter > 0 ? 0 : 1);
   		m_strCommand += m_strTemp;
+      sprintf(m_strTemp, "CM_SetCurrentShutterState(camera, %d, 1)\n", 
+        shutter > 0 ? 1 : 0);
+  		m_strCommand += m_strTemp;
     }
 		sprintf(m_strTemp, "Delay(%d)\n", shutterDelay);
 		m_strCommand += m_strTemp;
@@ -388,7 +391,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   unsigned short *usData;
   short *outData;
   short *sData;
-  float *flIn, *flOut;
+  float *flIn, *flOut, flTmp;
   bool isInteger;
 
 	// Set these values to zero in case of error returns
@@ -440,7 +443,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         } else {
 
           // Otherwise transpose floats around Y axis
-          DebugToResult("Copying float data with transposition\n");
+          DebugToResult("Copying float data with transposition around Y\n");
           for (j = 0; j < *height; j++) {
             flIn = (float *)imageL.get() + j * *width;
             flOut = (float *)array + (j + 1) * *width - 1;
@@ -448,6 +451,34 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
               *flOut-- = *flIn++;
           }
         }
+
+        // Do further transpositions in place for float data
+        if (transpose & 2) {
+          DebugToResult("Transposing float data around X in place\n");
+          for (j = 0; j < *height / 2; j++) {
+            flIn = (float *)array + j * *width;
+            flOut = (float *)array + (*height - j - 1) * *width;
+            for (i = 0; i < *width; i++) {
+              flTmp = *flIn;
+              *flIn++ = *flOut;
+              *flOut++ = flTmp;
+            }
+          }
+        }
+        if ((transpose & 256) && *width == *height) {
+          DebugToResult("Transposing float data around diagonal in place\n");
+          for (j = 0; j < *height; j++) {
+            flIn = (float *)array + j * *width + j;
+            flOut = flIn;
+            for (i = j; i < *width; i++) {
+              flTmp = *flIn;
+              *flIn++ = *flOut;
+              *flOut = flTmp;
+              flOut += *width;
+            }
+          }
+        } 
+
 
       } else if (divideBy2) {
 
