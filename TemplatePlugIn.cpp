@@ -285,12 +285,12 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 		if (m_iDMVersion < NEW_OPEN_SHUTTER_OK)
 			m_strCommand += "SSCOpenShutter()\n";
     else {
-			// Specify the other shutter as being opened
-      sprintf(m_strTemp, "CM_SetCurrentShutterState(camera, %d, 0)\n", 
-        shutter > 0 ? 0 : 1);
-  		m_strCommand += m_strTemp;
+			// Specify the other shutter as being closed first; 1 means closed
       sprintf(m_strTemp, "CM_SetCurrentShutterState(camera, %d, 1)\n", 
         shutter > 0 ? 1 : 0);
+  		m_strCommand += m_strTemp;
+      sprintf(m_strTemp, "CM_SetCurrentShutterState(camera, %d, 0)\n", 
+        shutter > 0 ? 0 : 1);
   		m_strCommand += m_strTemp;
     }
 		sprintf(m_strTemp, "Delay(%d)\n", shutterDelay);
