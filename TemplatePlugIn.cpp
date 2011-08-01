@@ -91,7 +91,9 @@ void TemplatePlugIn::Start()
 ///
 void TemplatePlugIn::Run()
 {
+#ifndef GMS2
 	DM::Window results = DM::GetResultsWindow( true );
+#endif
 	//PlugIn::gResultOut << "Hello, world" << std::endl;
 	if (WasCOMInitialized())
 		DebugToResult("SerialEMCCD: COM was initialized through DllMain\n");
