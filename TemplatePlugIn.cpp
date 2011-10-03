@@ -41,7 +41,8 @@ public:
 	void SetDMVersion(int inVal) {m_iDMVersion = inVal;};
 	void SetDebugMode(BOOL inVal) {m_bDebug = inVal;};
 	double ExecuteScript(char *strScript);
-	void DebugToResult(char *strMessage, char *strPrefix = NULL);
+	void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
+	void ErrorToResult(const char *strMessage, const char *strPrefix = NULL);
 	virtual void Start();
 	virtual void Run();
 	virtual void Cleanup();
@@ -136,7 +137,7 @@ void TemplatePlugIn::End()
 }
 
 
-void TemplatePlugIn::DebugToResult(char *strMessage, char *strPrefix)
+void TemplatePlugIn::DebugToResult(const char *strMessage, const char *strPrefix)
 {
 	if (!m_bDebug) return;
 	double time = (::GetTickCount() % (DWORD)3600000) / 1000.;
@@ -151,6 +152,19 @@ void TemplatePlugIn::DebugToResult(char *strMessage, char *strPrefix)
 	DM::Result(strMessage );
 }
 
+void TemplatePlugIn::ErrorToResult(const char *strMessage, const char *strPrefix)
+{
+  if (m_bDebug) {
+    DebugToResult(strMessage);
+  } else {
+  	DM::OpenResultsWindow();
+	  if (strPrefix)
+		  DM::Result(strPrefix);
+    else
+		  DM::Result("\nAn error occurred acquiring an image for SerialEM:\n");
+    DM::Result(strMessage);
+  }
+}
 
 double TemplatePlugIn::ExecuteScript(char *strScript)
 {
@@ -169,9 +183,16 @@ double TemplatePlugIn::ExecuteScript(char *strScript)
 		retval = DM::ExecuteScriptString(strScript);
 	}
 	catch (exception exc) {
-		DebugToResult("Exception thrown while executing script\n");
+		DebugToResult("Exception thrown while executing script");
+    if (!m_bDebug) {
+      DM::OpenResultsWindow();
+      DM::Result("\nAn exception occurred executing this script for SerialEM:\n\n\n");
+      DM::Result(strScript);
+    }
+    DM::Result("\n\n\nTo determine the cause, copy the above script with Ctrl-C,\n"
+      "  open a script window with Ctrl-K, paste in there with Ctrl-V,\n"
+      "  and execute the script with Ctrl-Enter\n");
 		return SCRIPT_ERROR_RETURN;
-		// Do we need to clean up error?  Do we want to catch this?
 	}
 	sprintf(retstr, "Return value = %g\n", retval);
 	DebugToResult(retstr);
@@ -413,7 +434,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 		// Get the image
 		ID = (long)(retval + 0.01);
 		if (!DM::GetImageFromID(image, ID)) {
-			DebugToResult("Image not found from ID\n");
+			ErrorToResult("Image not found from ID\n");
 			return IMAGE_NOT_FOUND;
 		}
 		
@@ -422,14 +443,15 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
     isInteger = DM::ImageIsDataTypeInteger(image.get());
     if (byteSize != dataSize && !(dataSize == 2 && byteSize == 4 && 
       (isInteger || DM::ImageIsDataTypeFloat(image.get())))) {
-			DebugToResult("Image data are not of the expected type\n");
+			ErrorToResult("Image data are not of the expected type\n");
 			return WRONG_DATA_TYPE;
 		}
 
 		// Get the size and adjust if necessary to fit output array
 		DM::GetSize( image.get(), width, height );
 		if (*width * *height > outLimit) {
-			DebugToResult("Warning: image is larger than the supplied array\n");
+			ErrorToResult("Warning: image is larger than the supplied array\n",
+        "\nA problem occurred acquiring an image for SerialEM:\n");
 			*height = outLimit / *width;
 		}
 		
@@ -567,7 +589,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 		DM::DeleteImage(image.get());
 	}
 	catch (exception exc) {
-		DebugToResult("Caught an exception from a call to DM:: function\n");
+		ErrorToResult("Caught an exception from a call to a DM:: function\n");
 		return DM_CALL_EXCEPTION;
 	}
 	*arrSize = *width * *height;
