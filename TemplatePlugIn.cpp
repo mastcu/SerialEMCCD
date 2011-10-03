@@ -673,9 +673,14 @@ long TemplatePlugIn::GetDMVersion()
   // They don't support the last digit
 //	m_iDMVersion = 1000 * (code >> 24) + 100 * ((code >> 16) & 0xff) + 
 //		10 * ((code >> 8) & 0xff) + (code & 0xff);
-	m_iDMVersion = 100 * (code >> 24) + 10 * ((code >> 16) & 0xff) + 
-		((code >> 8) & 0xff);
-  sprintf(m_strTemp, "retval = %g, code = %x, version = %d", retval, code, m_iDMVersion);
+  if ((code >> 24) < 4 && ((code >> 16) & 0xff) < 11)
+  	m_iDMVersion = 100 * (code >> 24) + 10 * ((code >> 16) & 0xff) + 
+	  	((code >> 8) & 0xff);
+  else
+   	m_iDMVersion = 10000 * (code >> 24) + 100 * ((code >> 16) & 0xff) + 
+	  	((code >> 8) & 0xff);
+
+  sprintf(m_strTemp, "retval = %g, code = %x, version = %d\n", retval, code, m_iDMVersion);
   DebugToResult(m_strTemp);
   return m_iDMVersion;
 }
