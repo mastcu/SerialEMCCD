@@ -47,12 +47,12 @@ public:
 	STDMETHOD(SelectCamera)(/*[in]*/long camera);
 	STDMETHOD(GetGainReference)(/*[out, size_is(*arrSize)]*/float array[], /*[in, out]*/long *arrSize, 
 		/*[out]*/long *width, /*[out]*/long *height, /*[in]*/long binning);
-	STDMETHOD(GetAcquiredImage)(/*[out, size_is(arrSize)]*/short array[], /*[in, out]*/long *arrSize, 
+	STDMETHOD(GetAcquiredImage)(/*[out, size_is(*arrSize)]*/short array[], /*[in, out]*/long *arrSize, 
 		/*[out]*/long *width, /*[out]*/long *height, /*[in]*/long processing, /*[in]*/double exposure,
 		/*[in]*/long binning, /*[in]*/long top, /*[in]*/long left, /*[in]*/long bottom, /*[in]*/long right,
 		/*[in]*/long shutter, /*[in]*/double settling, /*[in]*/long shutterDelay, /*[in]*/long divideBy2,
     /*[in]*/long corrections);
-	STDMETHOD(GetDarkReference)(/*[out, size_is(arrSize)]*/short array[], /*[in, out]*/long *arrSize, 
+	STDMETHOD(GetDarkReference)(/*[out, size_is(*arrSize)]*/short array[], /*[in, out]*/long *arrSize, 
 		/*[out]*/long *width, /*[out]*/long *height, /*[in]*/double exposure,
 		/*[in]*/long binning, /*[in]*/long top, /*[in]*/long left, /*[in]*/long bottom, /*[in]*/long right,
 		/*[in]*/long shutter, /*[in]*/double settling, /*[in]*/long divideBy2, /*[in]*/long corrections);
