@@ -31,27 +31,30 @@ END_OBJECT_MAP()
 extern "C"
 BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID /*lpReserved*/)
 {
-	HRESULT hRes;
-    if (dwReason == DLL_PROCESS_ATTACH)
-    {
-		hRes = CoInitialize(NULL);
-        _ASSERTE(SUCCEEDED(hRes));
-		if (FAILED(hRes))
-			return false;
-        _Module.Init(ObjectMap, hInstance, &LIBID_SERIALEMCCDLib);
-		initialized = true;
-        DisableThreadLibraryCalls(hInstance);
-        hRes = _Module.RegisterClassObjects(CLSCTX_LOCAL_SERVER, 
-            REGCLS_MULTIPLEUSE);
-        _ASSERTE(SUCCEEDED(hRes));
-		if (FAILED(hRes))
-			return false;
-		registered = true;
+  HRESULT hRes;
+  HANDLE hMutex = CreateMutex(NULL, FALSE, "b3dregsvrMutex");
+  BOOL regsvr = hMutex && GetLastError() == ERROR_ALREADY_EXISTS;
+  if (dwReason == DLL_PROCESS_ATTACH) {
+    hRes = CoInitialize(NULL);
+    _ASSERTE(SUCCEEDED(hRes));
+    if (FAILED(hRes))
+      return false;
+    _Module.Init(ObjectMap, hInstance, &LIBID_SERIALEMCCDLib);
+    initialized = true;
+    DisableThreadLibraryCalls(hInstance);
+    if (!regsvr) {
+      hRes = _Module.RegisterClassObjects(CLSCTX_LOCAL_SERVER, 
+        REGCLS_MULTIPLEUSE);
+      _ASSERTE(SUCCEEDED(hRes));
+      if (FAILED(hRes))
+        return false;
+      registered = true;
     }
-    else if (dwReason == DLL_PROCESS_DETACH) {
-		TerminateModuleUninitializeCOM();
-	}
-    return TRUE;    // ok
+  }
+  else if (dwReason == DLL_PROCESS_DETACH) {
+    TerminateModuleUninitializeCOM();
+  }
+  return TRUE;    // ok
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -84,20 +87,19 @@ STDAPI DllRegisterServer(void)
 
 STDAPI DllUnregisterServer(void)
 {
-    return _Module.UnregisterServer(TRUE);
+  return _Module.UnregisterServer(TRUE);
 }
-
 
 void TerminateModuleUninitializeCOM() 
 {
-	if (registered)
-		_Module.RevokeClassObjects();
-	if (initialized) {
-        _Module.Term();
-		CoUninitialize();
-	}
-	registered = false;
-	initialized = false;
+  if (registered)
+    _Module.RevokeClassObjects();
+  if (initialized) {
+    _Module.Term();
+    CoUninitialize();
+  }
+  registered = false;
+  initialized = false;
 }
 
 BOOL WasCOMInitialized()
