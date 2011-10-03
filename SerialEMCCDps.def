@@ -1,5 +1,5 @@
 
-LIBRARY      "SerialEMCCDPS"
+; LIBRARY      "SerialEMCCDPS"
 
 EXPORTS
 	DllGetClassObject       PRIVATE

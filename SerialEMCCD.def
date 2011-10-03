@@ -1,6 +1,6 @@
 ; SerialEMCCD.def : Declares the module parameters.
 
-LIBRARY      "SerialEMCCD.DLL"
+; LIBRARY      "SerialEMCCD.DLL"
 
 EXPORTS
 	DllCanUnloadNow     PRIVATE
