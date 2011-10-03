@@ -117,6 +117,105 @@
 			/>
 		</Configuration>
 		<Configuration
+			Name="Debug|x64"
+			OutputDirectory="$(PlatformName)\$(ConfigurationName)"
+			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
+			ConfigurationType="2"
+			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
+			UseOfMFC="0"
+			ATLMinimizesCRunTimeLibraryUsage="false"
+			CharacterSet="2"
+			>
+			<Tool
+				Name="VCPreBuildEventTool"
+			/>
+			<Tool
+				Name="VCCustomBuildTool"
+				Description="Performing registration"
+				CommandLine="regsvr32 /s /u &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins&quot;&#x0D;&#x0A;regsvr32 /s /c &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;echo regsvr32 exec. time &gt; &quot;$(OutDir)\regsvr32.trg&quot;&#x0D;&#x0A;"
+				Outputs="$(OutDir)\regsvr32.trg"
+			/>
+			<Tool
+				Name="VCXMLDataGeneratorTool"
+			/>
+			<Tool
+				Name="VCWebServiceProxyGeneratorTool"
+			/>
+			<Tool
+				Name="VCMIDLTool"
+				TargetEnvironment="3"
+				TypeLibraryName=".\Debug/SerialEMCCD.tlb"
+				HeaderFileName=""
+			/>
+			<Tool
+				Name="VCCLCompilerTool"
+				Optimization="0"
+				AdditionalIncludeDirectories="..\DMSDK\Win32\VisualStudio.NET\include\;..\DMSDK\Win32\"
+				BasicRuntimeChecks="3"
+				RuntimeLibrary="1"
+				UsePrecompiledHeader="2"
+				PrecompiledHeaderThrough="stdafx.h"
+				PrecompiledHeaderFile=".\Debug/SerialEMCCD.pch"
+				AssemblerListingLocation=".\Debug/"
+				ObjectFile=".\Debug/"
+				ProgramDataBaseFileName=".\Debug/"
+				WarningLevel="3"
+				SuppressStartupBanner="true"
+				DebugInformationFormat="3"
+				CompileAs="0"
+			/>
+			<Tool
+				Name="VCManagedResourceCompilerTool"
+			/>
+			<Tool
+				Name="VCResourceCompilerTool"
+				PreprocessorDefinitions="_DEBUG"
+				Culture="1033"
+			/>
+			<Tool
+				Name="VCPreLinkEventTool"
+			/>
+			<Tool
+				Name="VCLinkerTool"
+				IgnoreImportLibrary="true"
+				AdditionalDependencies="&quot;..\..\DMSDK\Win32\lib\DMPlugInBasic-Dbg.lib&quot; odbc32.lib odbccp32.lib"
+				OutputFile=".\Debug/SerialEMCCD.dll"
+				LinkIncremental="1"
+				SuppressStartupBanner="true"
+				ModuleDefinitionFile=".\SerialEMCCD.def"
+				GenerateDebugInformation="true"
+				ProgramDatabaseFile=".\Debug/SerialEMCCD.pdb"
+				SubSystem="2"
+				RandomizedBaseAddress="1"
+				DataExecutionPrevention="0"
+				ImportLibrary=".\Debug/SerialEMCCD.lib"
+				TargetMachine="17"
+			/>
+			<Tool
+				Name="VCALinkTool"
+			/>
+			<Tool
+				Name="VCManifestTool"
+			/>
+			<Tool
+				Name="VCXDCMakeTool"
+			/>
+			<Tool
+				Name="VCBscMakeTool"
+			/>
+			<Tool
+				Name="VCFxCopTool"
+			/>
+			<Tool
+				Name="VCAppVerifierTool"
+			/>
+			<Tool
+				Name="VCPostBuildEventTool"
+				Description="Building proxy/stub"
+				CommandLine="nmake -f SerialEMCCDps.mk&#x0D;&#x0A;regsvr32 /s SerialEMCCDps.dll&#x0D;&#x0A;"
+			/>
+		</Configuration>
+		<Configuration
 			Name="Release MinSize|Win32"
 			OutputDirectory=".\ReleaseMinSize"
 			IntermediateDirectory=".\ReleaseMinSize"
@@ -192,412 +291,6 @@
 				DataExecutionPrevention="0"
 				ImportLibrary=".\ReleaseMinSize/SerialEMCCD.lib"
 				TargetMachine="1"
-			/>
-			<Tool
-				Name="VCALinkTool"
-			/>
-			<Tool
-				Name="VCManifestTool"
-			/>
-			<Tool
-				Name="VCXDCMakeTool"
-			/>
-			<Tool
-				Name="VCBscMakeTool"
-			/>
-			<Tool
-				Name="VCFxCopTool"
-			/>
-			<Tool
-				Name="VCAppVerifierTool"
-			/>
-			<Tool
-				Name="VCPostBuildEventTool"
-				Description="Building proxy/stub"
-				CommandLine="nmake -f SerialEMCCDps.mk&#x0D;&#x0A;regsvr32 /s SerialEMCCDps.dll&#x0D;&#x0A;"
-			/>
-		</Configuration>
-		<Configuration
-			Name="Release MinDependency|Win32"
-			OutputDirectory=".\ReleaseMinDependency"
-			IntermediateDirectory=".\ReleaseMinDependency"
-			ConfigurationType="2"
-			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
-			UseOfMFC="0"
-			UseOfATL="1"
-			ATLMinimizesCRunTimeLibraryUsage="false"
-			CharacterSet="2"
-			>
-			<Tool
-				Name="VCPreBuildEventTool"
-			/>
-			<Tool
-				Name="VCCustomBuildTool"
-				Description="Performing registration"
-				CommandLine="regsvr32 /s /u &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins&quot;&#x0D;&#x0A;regsvr32 /s /c &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;echo regsvr32 exec. time &gt; &quot;$(OutDir)\regsvr32.trg&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; .&#x0D;&#x0A;"
-				Outputs="$(OutDir)\regsvr32.trg"
-			/>
-			<Tool
-				Name="VCXMLDataGeneratorTool"
-			/>
-			<Tool
-				Name="VCWebServiceProxyGeneratorTool"
-			/>
-			<Tool
-				Name="VCMIDLTool"
-				AdditionalOptions="/no_robust"
-				TypeLibraryName=".\ReleaseMinDependency/SerialEMCCD.tlb"
-				HeaderFileName=""
-			/>
-			<Tool
-				Name="VCCLCompilerTool"
-				Optimization="2"
-				InlineFunctionExpansion="1"
-				AdditionalIncludeDirectories="..\DMSDK\Win32\VisualStudio.NET\include\;..\DMSDK\Win32\"
-				StringPooling="true"
-				RuntimeLibrary="0"
-				EnableFunctionLevelLinking="true"
-				UsePrecompiledHeader="2"
-				PrecompiledHeaderThrough="stdafx.h"
-				PrecompiledHeaderFile=".\ReleaseMinDependency/SerialEMCCD.pch"
-				AssemblerListingLocation=".\ReleaseMinDependency/"
-				ObjectFile=".\ReleaseMinDependency/"
-				ProgramDataBaseFileName=".\ReleaseMinDependency/"
-				WarningLevel="3"
-				SuppressStartupBanner="true"
-				CompileAs="0"
-			/>
-			<Tool
-				Name="VCManagedResourceCompilerTool"
-			/>
-			<Tool
-				Name="VCResourceCompilerTool"
-				PreprocessorDefinitions="NDEBUG"
-				Culture="1033"
-			/>
-			<Tool
-				Name="VCPreLinkEventTool"
-			/>
-			<Tool
-				Name="VCLinkerTool"
-				IgnoreImportLibrary="true"
-				AdditionalOptions="/force:unresolved"
-				AdditionalDependencies="&quot;..\DMSDK\Win32\VisualStudio.NET\lib\DMPlugInBasic.lib&quot; odbc32.lib odbccp32.lib"
-				OutputFile=".\ReleaseMinDependency/SerialEMCCD.dll"
-				LinkIncremental="1"
-				SuppressStartupBanner="true"
-				ModuleDefinitionFile=".\SerialEMCCD.def"
-				ProgramDatabaseFile=".\ReleaseMinDependency/SerialEMCCD.pdb"
-				SubSystem="2"
-				RandomizedBaseAddress="1"
-				DataExecutionPrevention="0"
-				ImportLibrary=".\ReleaseMinDependency/SerialEMCCD.lib"
-				TargetMachine="1"
-			/>
-			<Tool
-				Name="VCALinkTool"
-			/>
-			<Tool
-				Name="VCManifestTool"
-			/>
-			<Tool
-				Name="VCXDCMakeTool"
-			/>
-			<Tool
-				Name="VCBscMakeTool"
-			/>
-			<Tool
-				Name="VCFxCopTool"
-			/>
-			<Tool
-				Name="VCAppVerifierTool"
-			/>
-			<Tool
-				Name="VCPostBuildEventTool"
-				Description="Building proxy/stub"
-				CommandLine="nmake -f SerialEMCCDps.mk&#x0D;&#x0A;regsvr32 /s SerialEMCCDps.dll&#x0D;&#x0A;"
-			/>
-		</Configuration>
-		<Configuration
-			Name="GMS2-64bit|Win32"
-			OutputDirectory="$(ConfigurationName)"
-			IntermediateDirectory="$(ConfigurationName)"
-			ConfigurationType="2"
-			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
-			UseOfMFC="0"
-			UseOfATL="1"
-			ATLMinimizesCRunTimeLibraryUsage="false"
-			CharacterSet="2"
-			>
-			<Tool
-				Name="VCPreBuildEventTool"
-			/>
-			<Tool
-				Name="VCCustomBuildTool"
-				Description="Performing registration"
-				CommandLine="regsvr32 /s /u &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins&quot;&#x0D;&#x0A;regsvr32 /s /c &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;echo regsvr32 exec. time &gt; &quot;$(OutDir)\regsvr32.trg&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; .&#x0D;&#x0A;"
-				Outputs="$(OutDir)\regsvr32.trg"
-			/>
-			<Tool
-				Name="VCXMLDataGeneratorTool"
-			/>
-			<Tool
-				Name="VCWebServiceProxyGeneratorTool"
-			/>
-			<Tool
-				Name="VCMIDLTool"
-				AdditionalOptions="/no_robust"
-				TypeLibraryName=".\ReleaseMinDependency/SerialEMCCD.tlb"
-				HeaderFileName=""
-			/>
-			<Tool
-				Name="VCCLCompilerTool"
-				Optimization="2"
-				InlineFunctionExpansion="1"
-				AdditionalIncludeDirectories="&quot;C:\Program Files (x86)\boost\boost_1_38&quot;;&quot;C:\Users\All Users\Application Data\Gatan\DMSDK\include&quot;"
-				StringPooling="true"
-				RuntimeLibrary="0"
-				EnableFunctionLevelLinking="true"
-				UsePrecompiledHeader="2"
-				PrecompiledHeaderThrough="stdafx.h"
-				PrecompiledHeaderFile=".\ReleaseMinDependency/SerialEMCCD.pch"
-				AssemblerListingLocation=".\ReleaseMinDependency/"
-				ObjectFile=".\ReleaseMinDependency/"
-				ProgramDataBaseFileName=".\ReleaseMinDependency/"
-				WarningLevel="3"
-				SuppressStartupBanner="true"
-				CompileAs="0"
-			/>
-			<Tool
-				Name="VCManagedResourceCompilerTool"
-			/>
-			<Tool
-				Name="VCResourceCompilerTool"
-				PreprocessorDefinitions="NDEBUG"
-				Culture="1033"
-			/>
-			<Tool
-				Name="VCPreLinkEventTool"
-			/>
-			<Tool
-				Name="VCLinkerTool"
-				IgnoreImportLibrary="true"
-				AdditionalOptions="/force:unresolved"
-				AdditionalDependencies="&quot;C:\Users\All Users\Application Data\Gatan\DMSDK\lib\x64\DMPlugInBasic.lib&quot; odbc32.lib odbccp32.lib"
-				OutputFile=".\ReleaseMinDependency/SerialEMCCD.dll"
-				LinkIncremental="1"
-				SuppressStartupBanner="true"
-				ModuleDefinitionFile=".\SerialEMCCD.def"
-				ProgramDatabaseFile=".\ReleaseMinDependency/SerialEMCCD.pdb"
-				SubSystem="2"
-				RandomizedBaseAddress="1"
-				DataExecutionPrevention="0"
-				ImportLibrary=".\ReleaseMinDependency/SerialEMCCD.lib"
-				TargetMachine="1"
-			/>
-			<Tool
-				Name="VCALinkTool"
-			/>
-			<Tool
-				Name="VCManifestTool"
-			/>
-			<Tool
-				Name="VCXDCMakeTool"
-			/>
-			<Tool
-				Name="VCBscMakeTool"
-			/>
-			<Tool
-				Name="VCFxCopTool"
-			/>
-			<Tool
-				Name="VCAppVerifierTool"
-			/>
-			<Tool
-				Name="VCPostBuildEventTool"
-				Description="Building proxy/stub"
-				CommandLine="nmake -f SerialEMCCDps.mk&#x0D;&#x0A;regsvr32 /s SerialEMCCDps.dll&#x0D;&#x0A;"
-			/>
-		</Configuration>
-		<Configuration
-			Name="GMS2-32bit|Win32"
-			OutputDirectory="$(ConfigurationName)"
-			IntermediateDirectory="$(ConfigurationName)"
-			ConfigurationType="2"
-			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
-			UseOfMFC="0"
-			UseOfATL="1"
-			ATLMinimizesCRunTimeLibraryUsage="false"
-			CharacterSet="2"
-			>
-			<Tool
-				Name="VCPreBuildEventTool"
-			/>
-			<Tool
-				Name="VCCustomBuildTool"
-				Description="Performing registration"
-				CommandLine="regsvr32 /s /u &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins&quot;&#x0D;&#x0A;regsvr32 /s /c &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;echo regsvr32 exec. time &gt; &quot;$(OutDir)\regsvr32.trg&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; .&#x0D;&#x0A;"
-				Outputs="$(OutDir)\regsvr32.trg"
-			/>
-			<Tool
-				Name="VCXMLDataGeneratorTool"
-			/>
-			<Tool
-				Name="VCWebServiceProxyGeneratorTool"
-			/>
-			<Tool
-				Name="VCMIDLTool"
-				AdditionalOptions="/no_robust"
-				TypeLibraryName=".\ReleaseMinDependency/SerialEMCCD.tlb"
-				HeaderFileName=""
-			/>
-			<Tool
-				Name="VCCLCompilerTool"
-				Optimization="2"
-				InlineFunctionExpansion="1"
-				AdditionalIncludeDirectories="&quot;$(BOOST_1_38_0)&quot;;&quot;$(GMS2_SDK)\include&quot;"
-				PreprocessorDefinitions="GMS2;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NoInherit)"
-				StringPooling="true"
-				RuntimeLibrary="2"
-				EnableFunctionLevelLinking="true"
-				UsePrecompiledHeader="2"
-				PrecompiledHeaderThrough="stdafx.h"
-				PrecompiledHeaderFile=".\ReleaseMinDependency/SerialEMCCD.pch"
-				AssemblerListingLocation=".\ReleaseMinDependency/"
-				ObjectFile=".\ReleaseMinDependency/"
-				ProgramDataBaseFileName=".\ReleaseMinDependency/"
-				WarningLevel="3"
-				SuppressStartupBanner="true"
-				CompileAs="0"
-			/>
-			<Tool
-				Name="VCManagedResourceCompilerTool"
-			/>
-			<Tool
-				Name="VCResourceCompilerTool"
-				PreprocessorDefinitions="NDEBUG"
-				Culture="1033"
-			/>
-			<Tool
-				Name="VCPreLinkEventTool"
-			/>
-			<Tool
-				Name="VCLinkerTool"
-				IgnoreImportLibrary="true"
-				AdditionalOptions="/force:unresolved"
-				AdditionalDependencies="DMPlugInBasic.lib Foundation.lib"
-				OutputFile=".\ReleaseMinDependency/SerialEMCCD.dll"
-				LinkIncremental="1"
-				SuppressStartupBanner="true"
-				AdditionalLibraryDirectories="&quot;$(GMS2_SDK)\lib\Win32\&quot;"
-				IgnoreAllDefaultLibraries="false"
-				IgnoreDefaultLibraryNames=""
-				ModuleDefinitionFile=".\SerialEMCCD.def"
-				ProgramDatabaseFile=".\ReleaseMinDependency/SerialEMCCD.pdb"
-				SubSystem="2"
-				RandomizedBaseAddress="1"
-				DataExecutionPrevention="0"
-				ImportLibrary=".\ReleaseMinDependency/SerialEMCCD.lib"
-				TargetMachine="1"
-			/>
-			<Tool
-				Name="VCALinkTool"
-			/>
-			<Tool
-				Name="VCManifestTool"
-			/>
-			<Tool
-				Name="VCXDCMakeTool"
-			/>
-			<Tool
-				Name="VCBscMakeTool"
-			/>
-			<Tool
-				Name="VCFxCopTool"
-			/>
-			<Tool
-				Name="VCAppVerifierTool"
-			/>
-			<Tool
-				Name="VCPostBuildEventTool"
-				Description="Building proxy/stub"
-				CommandLine="nmake -f SerialEMCCDps.mk&#x0D;&#x0A;regsvr32 /s SerialEMCCDps.dll&#x0D;&#x0A;"
-			/>
-		</Configuration>
-		<Configuration
-			Name="Debug|x64"
-			OutputDirectory="$(PlatformName)\$(ConfigurationName)"
-			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
-			ConfigurationType="2"
-			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
-			UseOfMFC="0"
-			ATLMinimizesCRunTimeLibraryUsage="false"
-			CharacterSet="2"
-			>
-			<Tool
-				Name="VCPreBuildEventTool"
-			/>
-			<Tool
-				Name="VCCustomBuildTool"
-				Description="Performing registration"
-				CommandLine="regsvr32 /s /u &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins&quot;&#x0D;&#x0A;regsvr32 /s /c &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;echo regsvr32 exec. time &gt; &quot;$(OutDir)\regsvr32.trg&quot;&#x0D;&#x0A;"
-				Outputs="$(OutDir)\regsvr32.trg"
-			/>
-			<Tool
-				Name="VCXMLDataGeneratorTool"
-			/>
-			<Tool
-				Name="VCWebServiceProxyGeneratorTool"
-			/>
-			<Tool
-				Name="VCMIDLTool"
-				TargetEnvironment="3"
-				TypeLibraryName=".\Debug/SerialEMCCD.tlb"
-				HeaderFileName=""
-			/>
-			<Tool
-				Name="VCCLCompilerTool"
-				Optimization="0"
-				AdditionalIncludeDirectories="..\DMSDK\Win32\VisualStudio.NET\include\;..\DMSDK\Win32\"
-				BasicRuntimeChecks="3"
-				RuntimeLibrary="1"
-				UsePrecompiledHeader="2"
-				PrecompiledHeaderThrough="stdafx.h"
-				PrecompiledHeaderFile=".\Debug/SerialEMCCD.pch"
-				AssemblerListingLocation=".\Debug/"
-				ObjectFile=".\Debug/"
-				ProgramDataBaseFileName=".\Debug/"
-				WarningLevel="3"
-				SuppressStartupBanner="true"
-				DebugInformationFormat="3"
-				CompileAs="0"
-			/>
-			<Tool
-				Name="VCManagedResourceCompilerTool"
-			/>
-			<Tool
-				Name="VCResourceCompilerTool"
-				PreprocessorDefinitions="_DEBUG"
-				Culture="1033"
-			/>
-			<Tool
-				Name="VCPreLinkEventTool"
-			/>
-			<Tool
-				Name="VCLinkerTool"
-				IgnoreImportLibrary="true"
-				AdditionalDependencies="&quot;..\..\DMSDK\Win32\lib\DMPlugInBasic-Dbg.lib&quot; odbc32.lib odbccp32.lib"
-				OutputFile=".\Debug/SerialEMCCD.dll"
-				LinkIncremental="1"
-				SuppressStartupBanner="true"
-				ModuleDefinitionFile=".\SerialEMCCD.def"
-				GenerateDebugInformation="true"
-				ProgramDatabaseFile=".\Debug/SerialEMCCD.pdb"
-				SubSystem="2"
-				RandomizedBaseAddress="1"
-				DataExecutionPrevention="0"
-				ImportLibrary=".\Debug/SerialEMCCD.lib"
-				TargetMachine="17"
 			/>
 			<Tool
 				Name="VCALinkTool"
@@ -726,6 +419,107 @@
 			/>
 		</Configuration>
 		<Configuration
+			Name="Release MinDependency|Win32"
+			OutputDirectory=".\ReleaseMinDependency"
+			IntermediateDirectory=".\ReleaseMinDependency"
+			ConfigurationType="2"
+			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
+			UseOfMFC="0"
+			UseOfATL="1"
+			ATLMinimizesCRunTimeLibraryUsage="false"
+			CharacterSet="2"
+			>
+			<Tool
+				Name="VCPreBuildEventTool"
+			/>
+			<Tool
+				Name="VCCustomBuildTool"
+				Description="Performing registration"
+				CommandLine="regsvr32 /s /u &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins&quot;&#x0D;&#x0A;regsvr32 /s /c &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;echo regsvr32 exec. time &gt; &quot;$(OutDir)\regsvr32.trg&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; .&#x0D;&#x0A;"
+				Outputs="$(OutDir)\regsvr32.trg"
+			/>
+			<Tool
+				Name="VCXMLDataGeneratorTool"
+			/>
+			<Tool
+				Name="VCWebServiceProxyGeneratorTool"
+			/>
+			<Tool
+				Name="VCMIDLTool"
+				AdditionalOptions="/no_robust"
+				TypeLibraryName=".\ReleaseMinDependency/SerialEMCCD.tlb"
+				HeaderFileName=""
+			/>
+			<Tool
+				Name="VCCLCompilerTool"
+				Optimization="2"
+				InlineFunctionExpansion="1"
+				AdditionalIncludeDirectories="..\DMSDK\Win32\VisualStudio.NET\include\;..\DMSDK\Win32\"
+				StringPooling="true"
+				RuntimeLibrary="0"
+				EnableFunctionLevelLinking="true"
+				UsePrecompiledHeader="2"
+				PrecompiledHeaderThrough="stdafx.h"
+				PrecompiledHeaderFile=".\ReleaseMinDependency/SerialEMCCD.pch"
+				AssemblerListingLocation=".\ReleaseMinDependency/"
+				ObjectFile=".\ReleaseMinDependency/"
+				ProgramDataBaseFileName=".\ReleaseMinDependency/"
+				WarningLevel="3"
+				SuppressStartupBanner="true"
+				CompileAs="0"
+			/>
+			<Tool
+				Name="VCManagedResourceCompilerTool"
+			/>
+			<Tool
+				Name="VCResourceCompilerTool"
+				PreprocessorDefinitions="NDEBUG"
+				Culture="1033"
+			/>
+			<Tool
+				Name="VCPreLinkEventTool"
+			/>
+			<Tool
+				Name="VCLinkerTool"
+				IgnoreImportLibrary="true"
+				AdditionalOptions="/force:unresolved"
+				AdditionalDependencies="&quot;..\DMSDK\Win32\VisualStudio.NET\lib\DMPlugInBasic.lib&quot; odbc32.lib odbccp32.lib"
+				OutputFile=".\ReleaseMinDependency/SerialEMCCD.dll"
+				LinkIncremental="1"
+				SuppressStartupBanner="true"
+				ModuleDefinitionFile=".\SerialEMCCD.def"
+				ProgramDatabaseFile=".\ReleaseMinDependency/SerialEMCCD.pdb"
+				SubSystem="2"
+				RandomizedBaseAddress="1"
+				DataExecutionPrevention="0"
+				ImportLibrary=".\ReleaseMinDependency/SerialEMCCD.lib"
+				TargetMachine="1"
+			/>
+			<Tool
+				Name="VCALinkTool"
+			/>
+			<Tool
+				Name="VCManifestTool"
+			/>
+			<Tool
+				Name="VCXDCMakeTool"
+			/>
+			<Tool
+				Name="VCBscMakeTool"
+			/>
+			<Tool
+				Name="VCFxCopTool"
+			/>
+			<Tool
+				Name="VCAppVerifierTool"
+			/>
+			<Tool
+				Name="VCPostBuildEventTool"
+				Description="Building proxy/stub"
+				CommandLine="nmake -f SerialEMCCDps.mk SerialEMCCDps.dll&#x0D;&#x0A;regsvr32 /s SerialEMCCDps.dll&#x0D;&#x0A;"
+			/>
+		</Configuration>
+		<Configuration
 			Name="Release MinDependency|x64"
 			OutputDirectory="$(PlatformName)\$(ConfigurationName)"
 			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
@@ -828,9 +622,110 @@
 			/>
 		</Configuration>
 		<Configuration
+			Name="GMS2-64bit|Win32"
+			OutputDirectory="$(ConfigurationName)"
+			IntermediateDirectory="$(ConfigurationName)"
+			ConfigurationType="2"
+			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
+			UseOfMFC="0"
+			UseOfATL="1"
+			ATLMinimizesCRunTimeLibraryUsage="false"
+			CharacterSet="2"
+			>
+			<Tool
+				Name="VCPreBuildEventTool"
+			/>
+			<Tool
+				Name="VCCustomBuildTool"
+				Description="Performing registration"
+				CommandLine="regsvr32 /s /u &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins&quot;&#x0D;&#x0A;regsvr32 /s /c &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;echo regsvr32 exec. time &gt; &quot;$(OutDir)\regsvr32.trg&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; .&#x0D;&#x0A;"
+				Outputs="$(OutDir)\regsvr32.trg"
+			/>
+			<Tool
+				Name="VCXMLDataGeneratorTool"
+			/>
+			<Tool
+				Name="VCWebServiceProxyGeneratorTool"
+			/>
+			<Tool
+				Name="VCMIDLTool"
+				AdditionalOptions="/no_robust"
+				TypeLibraryName=".\ReleaseMinDependency/SerialEMCCD.tlb"
+				HeaderFileName=""
+			/>
+			<Tool
+				Name="VCCLCompilerTool"
+				Optimization="2"
+				InlineFunctionExpansion="1"
+				AdditionalIncludeDirectories="&quot;C:\Program Files (x86)\boost\boost_1_38&quot;;&quot;C:\Users\All Users\Application Data\Gatan\DMSDK\include&quot;"
+				StringPooling="true"
+				RuntimeLibrary="0"
+				EnableFunctionLevelLinking="true"
+				UsePrecompiledHeader="2"
+				PrecompiledHeaderThrough="stdafx.h"
+				PrecompiledHeaderFile=".\ReleaseMinDependency/SerialEMCCD.pch"
+				AssemblerListingLocation=".\ReleaseMinDependency/"
+				ObjectFile=".\ReleaseMinDependency/"
+				ProgramDataBaseFileName=".\ReleaseMinDependency/"
+				WarningLevel="3"
+				SuppressStartupBanner="true"
+				CompileAs="0"
+			/>
+			<Tool
+				Name="VCManagedResourceCompilerTool"
+			/>
+			<Tool
+				Name="VCResourceCompilerTool"
+				PreprocessorDefinitions="NDEBUG"
+				Culture="1033"
+			/>
+			<Tool
+				Name="VCPreLinkEventTool"
+			/>
+			<Tool
+				Name="VCLinkerTool"
+				IgnoreImportLibrary="true"
+				AdditionalOptions="/force:unresolved"
+				AdditionalDependencies="&quot;C:\Users\All Users\Application Data\Gatan\DMSDK\lib\x64\DMPlugInBasic.lib&quot; odbc32.lib odbccp32.lib"
+				OutputFile=".\ReleaseMinDependency/SerialEMCCD.dll"
+				LinkIncremental="1"
+				SuppressStartupBanner="true"
+				ModuleDefinitionFile=".\SerialEMCCD.def"
+				ProgramDatabaseFile=".\ReleaseMinDependency/SerialEMCCD.pdb"
+				SubSystem="2"
+				RandomizedBaseAddress="1"
+				DataExecutionPrevention="0"
+				ImportLibrary=".\ReleaseMinDependency/SerialEMCCD.lib"
+				TargetMachine="1"
+			/>
+			<Tool
+				Name="VCALinkTool"
+			/>
+			<Tool
+				Name="VCManifestTool"
+			/>
+			<Tool
+				Name="VCXDCMakeTool"
+			/>
+			<Tool
+				Name="VCBscMakeTool"
+			/>
+			<Tool
+				Name="VCFxCopTool"
+			/>
+			<Tool
+				Name="VCAppVerifierTool"
+			/>
+			<Tool
+				Name="VCPostBuildEventTool"
+				Description="Building proxy/stub"
+				CommandLine="nmake -f SerialEMCCDps.mk&#x0D;&#x0A;regsvr32 /s SerialEMCCDps.dll&#x0D;&#x0A;"
+			/>
+		</Configuration>
+		<Configuration
 			Name="GMS2-64bit|x64"
-			OutputDirectory="$(PlatformName)\$(ConfigurationName)"
-			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
+			OutputDirectory="$(ConfigurationName)"
+			IntermediateDirectory="$(ConfigurationName)"
 			ConfigurationType="2"
 			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			UseOfMFC="2"
@@ -843,7 +738,7 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
-				Description="Performing registration"
+				Description="Copying to main directory"
 				CommandLine="copy &quot;$(TargetPath)&quot; .&#x0D;&#x0A;"
 				Outputs="$(OutDir)\regsvr32.trg"
 			/>
@@ -855,7 +750,6 @@
 			/>
 			<Tool
 				Name="VCMIDLTool"
-				AdditionalOptions="/no_robust"
 				TargetEnvironment="3"
 				TypeLibraryName=".\ReleaseMinDependency/SerialEMCCD.tlb"
 				HeaderFileName=""
@@ -864,7 +758,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				InlineFunctionExpansion="1"
-				AdditionalIncludeDirectories="&quot;C:\Users\All Users\Application Data\Gatan\DMSDK\include&quot;;&quot;C:\Program Files (x86)\boost\boost_1_38&quot;"
+				AdditionalIncludeDirectories="&quot;$(BOOST_1_38_0)&quot;;&quot;$(GMS2_SDK)\include&quot;"
 				PreprocessorDefinitions="NDEBUG;WIN32;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE"
 				StringPooling="true"
 				RuntimeLibrary="2"
@@ -872,9 +766,9 @@
 				UsePrecompiledHeader="2"
 				PrecompiledHeaderThrough="stdafx.h"
 				PrecompiledHeaderFile=".\ReleaseMinDependency/SerialEMCCD.pch"
-				AssemblerListingLocation=".\ReleaseMinDependency/"
-				ObjectFile=".\ReleaseMinDependency/"
-				ProgramDataBaseFileName=".\ReleaseMinDependency/"
+				AssemblerListingLocation="$(IntDir)\"
+				ObjectFile="$(IntDir)\"
+				ProgramDataBaseFileName="$(IntDir)\"
 				WarningLevel="3"
 				SuppressStartupBanner="true"
 				DebugInformationFormat="3"
@@ -896,10 +790,10 @@
 				IgnoreImportLibrary="true"
 				AdditionalOptions="/force:unresolved"
 				AdditionalDependencies="DMPlugInBasic.lib Foundation.lib"
-				OutputFile=".\ReleaseMinDependency/SerialEMCCD.dll"
+				OutputFile=".\$(OutDir)/SEMCCD-GMS2-64.dll"
 				LinkIncremental="1"
 				SuppressStartupBanner="true"
-				AdditionalLibraryDirectories="C:\Users\All Users\Application Data\Gatan\DMSDK\lib\x64"
+				AdditionalLibraryDirectories="&quot;$(GMS2_SDK)\lib\x64&quot;"
 				IgnoreDefaultLibraryNames=""
 				ModuleDefinitionFile=".\SerialEMCCD.def"
 				ProgramDatabaseFile=".\ReleaseMinDependency/SerialEMCCD.pdb"
@@ -930,7 +824,112 @@
 			<Tool
 				Name="VCPostBuildEventTool"
 				Description="Building proxy/stub"
-				CommandLine="nmake -f SerialEMCCDps.mk&#x0D;&#x0A;&#x0D;&#x0A;"
+				CommandLine="nmake -f SerialEMCCDps.mk SEMCCDps-GMS2-64.dll&#x0D;&#x0A;&#x0D;&#x0A;"
+			/>
+		</Configuration>
+		<Configuration
+			Name="GMS2-32bit|Win32"
+			OutputDirectory="$(ConfigurationName)"
+			IntermediateDirectory="$(ConfigurationName)"
+			ConfigurationType="2"
+			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
+			UseOfMFC="0"
+			UseOfATL="1"
+			ATLMinimizesCRunTimeLibraryUsage="false"
+			CharacterSet="2"
+			>
+			<Tool
+				Name="VCPreBuildEventTool"
+			/>
+			<Tool
+				Name="VCCustomBuildTool"
+				Description="Performing registration"
+				CommandLine="regsvr32 /s /u &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins&quot;&#x0D;&#x0A;regsvr32 /s /c &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;echo regsvr32 exec. time &gt; &quot;$(OutDir)\regsvr32.trg&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; .&#x0D;&#x0A;"
+				Outputs="$(OutDir)\regsvr32.trg"
+			/>
+			<Tool
+				Name="VCXMLDataGeneratorTool"
+			/>
+			<Tool
+				Name="VCWebServiceProxyGeneratorTool"
+			/>
+			<Tool
+				Name="VCMIDLTool"
+				AdditionalOptions="/no_robust"
+				TypeLibraryName=".\ReleaseMinDependency/SerialEMCCD.tlb"
+				HeaderFileName=""
+			/>
+			<Tool
+				Name="VCCLCompilerTool"
+				Optimization="2"
+				InlineFunctionExpansion="1"
+				AdditionalIncludeDirectories="&quot;$(BOOST_1_38_0)&quot;;&quot;$(GMS2_SDK)\include&quot;"
+				PreprocessorDefinitions="GMS2;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NoInherit)"
+				StringPooling="true"
+				RuntimeLibrary="2"
+				EnableFunctionLevelLinking="true"
+				UsePrecompiledHeader="2"
+				PrecompiledHeaderThrough="stdafx.h"
+				PrecompiledHeaderFile=".\ReleaseMinDependency/SerialEMCCD.pch"
+				AssemblerListingLocation=".\ReleaseMinDependency/"
+				ObjectFile=".\ReleaseMinDependency/"
+				ProgramDataBaseFileName=".\ReleaseMinDependency/"
+				WarningLevel="3"
+				SuppressStartupBanner="true"
+				CompileAs="0"
+			/>
+			<Tool
+				Name="VCManagedResourceCompilerTool"
+			/>
+			<Tool
+				Name="VCResourceCompilerTool"
+				PreprocessorDefinitions="NDEBUG"
+				Culture="1033"
+			/>
+			<Tool
+				Name="VCPreLinkEventTool"
+			/>
+			<Tool
+				Name="VCLinkerTool"
+				IgnoreImportLibrary="true"
+				AdditionalOptions="/force:unresolved"
+				AdditionalDependencies="DMPlugInBasic.lib Foundation.lib"
+				OutputFile=".\ReleaseMinDependency/SerialEMCCD.dll"
+				LinkIncremental="1"
+				SuppressStartupBanner="true"
+				AdditionalLibraryDirectories="&quot;$(GMS2_SDK)\lib\Win32\&quot;"
+				IgnoreAllDefaultLibraries="false"
+				IgnoreDefaultLibraryNames=""
+				ModuleDefinitionFile=".\SerialEMCCD.def"
+				ProgramDatabaseFile=".\ReleaseMinDependency/SerialEMCCD.pdb"
+				SubSystem="2"
+				RandomizedBaseAddress="1"
+				DataExecutionPrevention="0"
+				ImportLibrary=".\ReleaseMinDependency/SerialEMCCD.lib"
+				TargetMachine="1"
+			/>
+			<Tool
+				Name="VCALinkTool"
+			/>
+			<Tool
+				Name="VCManifestTool"
+			/>
+			<Tool
+				Name="VCXDCMakeTool"
+			/>
+			<Tool
+				Name="VCBscMakeTool"
+			/>
+			<Tool
+				Name="VCFxCopTool"
+			/>
+			<Tool
+				Name="VCAppVerifierTool"
+			/>
+			<Tool
+				Name="VCPostBuildEventTool"
+				Description="Building proxy/stub"
+				CommandLine="nmake -f SerialEMCCDps.mk SEMCCDps-GMS2-32.dll&#x0D;&#x0A;regsvr32 /s SEMCCDps-GMS2-32.dll&#x0D;&#x0A;"
 			/>
 		</Configuration>
 		<Configuration
@@ -1039,6 +1038,206 @@
 				CommandLine="nmake -f SerialEMCCDps.mk&#x0D;&#x0A;&#x0D;&#x0A;"
 			/>
 		</Configuration>
+		<Configuration
+			Name="Debug-64|Win32"
+			OutputDirectory="$(ConfigurationName)"
+			IntermediateDirectory="$(ConfigurationName)"
+			ConfigurationType="2"
+			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
+			UseOfMFC="0"
+			ATLMinimizesCRunTimeLibraryUsage="false"
+			CharacterSet="2"
+			>
+			<Tool
+				Name="VCPreBuildEventTool"
+			/>
+			<Tool
+				Name="VCCustomBuildTool"
+				Description="Performing registration"
+				CommandLine="regsvr32 /s /u &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins&quot;&#x0D;&#x0A;regsvr32 /s /c &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SerialEMCCD.dll&quot;&#x0D;&#x0A;echo regsvr32 exec. time &gt; &quot;$(OutDir)\regsvr32.trg&quot;&#x0D;&#x0A;"
+				Outputs="$(OutDir)\regsvr32.trg"
+			/>
+			<Tool
+				Name="VCXMLDataGeneratorTool"
+			/>
+			<Tool
+				Name="VCWebServiceProxyGeneratorTool"
+			/>
+			<Tool
+				Name="VCMIDLTool"
+				TypeLibraryName=".\Debug/SerialEMCCD.tlb"
+				HeaderFileName=""
+			/>
+			<Tool
+				Name="VCCLCompilerTool"
+				Optimization="0"
+				AdditionalIncludeDirectories="..\DMSDK\Win32\VisualStudio.NET\include\;..\DMSDK\Win32\"
+				BasicRuntimeChecks="3"
+				RuntimeLibrary="1"
+				UsePrecompiledHeader="2"
+				PrecompiledHeaderThrough="stdafx.h"
+				PrecompiledHeaderFile=".\Debug/SerialEMCCD.pch"
+				AssemblerListingLocation=".\Debug/"
+				ObjectFile=".\Debug/"
+				ProgramDataBaseFileName=".\Debug/"
+				WarningLevel="3"
+				SuppressStartupBanner="true"
+				DebugInformationFormat="4"
+				CompileAs="0"
+			/>
+			<Tool
+				Name="VCManagedResourceCompilerTool"
+			/>
+			<Tool
+				Name="VCResourceCompilerTool"
+				PreprocessorDefinitions="_DEBUG"
+				Culture="1033"
+			/>
+			<Tool
+				Name="VCPreLinkEventTool"
+			/>
+			<Tool
+				Name="VCLinkerTool"
+				IgnoreImportLibrary="true"
+				AdditionalDependencies="&quot;..\..\DMSDK\Win32\lib\DMPlugInBasic-Dbg.lib&quot; odbc32.lib odbccp32.lib"
+				OutputFile=".\Debug/SerialEMCCD.dll"
+				LinkIncremental="1"
+				SuppressStartupBanner="true"
+				ModuleDefinitionFile=".\SerialEMCCD.def"
+				GenerateDebugInformation="true"
+				ProgramDatabaseFile=".\Debug/SerialEMCCD.pdb"
+				SubSystem="2"
+				RandomizedBaseAddress="1"
+				DataExecutionPrevention="0"
+				ImportLibrary=".\Debug/SerialEMCCD.lib"
+				TargetMachine="1"
+			/>
+			<Tool
+				Name="VCALinkTool"
+			/>
+			<Tool
+				Name="VCManifestTool"
+			/>
+			<Tool
+				Name="VCXDCMakeTool"
+			/>
+			<Tool
+				Name="VCBscMakeTool"
+			/>
+			<Tool
+				Name="VCFxCopTool"
+			/>
+			<Tool
+				Name="VCAppVerifierTool"
+			/>
+			<Tool
+				Name="VCPostBuildEventTool"
+				Description="Building proxy/stub"
+				CommandLine="nmake -f SerialEMCCDps.mk&#x0D;&#x0A;regsvr32 /s SerialEMCCDps.dll&#x0D;&#x0A;"
+			/>
+		</Configuration>
+		<Configuration
+			Name="Debug-64|x64"
+			OutputDirectory="$(PlatformName)\$(ConfigurationName)"
+			IntermediateDirectory="$(PlatformName)\$(ConfigurationName)"
+			ConfigurationType="2"
+			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
+			UseOfMFC="0"
+			ATLMinimizesCRunTimeLibraryUsage="false"
+			CharacterSet="2"
+			>
+			<Tool
+				Name="VCPreBuildEventTool"
+			/>
+			<Tool
+				Name="VCCustomBuildTool"
+				Description="Performing registration"
+				CommandLine="&#x0D;&#x0A;"
+				Outputs="$(OutDir)\regsvr32.trg"
+			/>
+			<Tool
+				Name="VCXMLDataGeneratorTool"
+			/>
+			<Tool
+				Name="VCWebServiceProxyGeneratorTool"
+			/>
+			<Tool
+				Name="VCMIDLTool"
+				TargetEnvironment="3"
+				TypeLibraryName=".\Debug/SerialEMCCD.tlb"
+				HeaderFileName=""
+			/>
+			<Tool
+				Name="VCCLCompilerTool"
+				Optimization="0"
+				AdditionalIncludeDirectories="&quot;$(BOOST_1_38_0)&quot;;&quot;$(GMS2_SDK)\include&quot;"
+				PreprocessorDefinitions="WIN32;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE"
+				BasicRuntimeChecks="3"
+				RuntimeLibrary="3"
+				UsePrecompiledHeader="2"
+				PrecompiledHeaderThrough="stdafx.h"
+				PrecompiledHeaderFile=".\Debug/SerialEMCCD.pch"
+				AssemblerListingLocation=".\Debug/"
+				ObjectFile=".\Debug/"
+				ProgramDataBaseFileName=".\Debug/"
+				WarningLevel="3"
+				SuppressStartupBanner="true"
+				DebugInformationFormat="3"
+				CompileAs="0"
+			/>
+			<Tool
+				Name="VCManagedResourceCompilerTool"
+			/>
+			<Tool
+				Name="VCResourceCompilerTool"
+				PreprocessorDefinitions="_DEBUG"
+				Culture="1033"
+			/>
+			<Tool
+				Name="VCPreLinkEventTool"
+			/>
+			<Tool
+				Name="VCLinkerTool"
+				IgnoreImportLibrary="true"
+				AdditionalDependencies="DMPlugInBasic.lib Foundation.lib"
+				OutputFile=".\Debug/SerialEMCCD.dll"
+				LinkIncremental="1"
+				SuppressStartupBanner="true"
+				AdditionalLibraryDirectories="&quot;$(GMS2_SDK)\lib\x64&quot;"
+				IgnoreDefaultLibraryNames=""
+				ModuleDefinitionFile=".\SerialEMCCD.def"
+				GenerateDebugInformation="true"
+				ProgramDatabaseFile=".\Debug/SerialEMCCD.pdb"
+				SubSystem="2"
+				RandomizedBaseAddress="1"
+				DataExecutionPrevention="0"
+				ImportLibrary=".\Debug/SerialEMCCD.lib"
+				TargetMachine="17"
+			/>
+			<Tool
+				Name="VCALinkTool"
+			/>
+			<Tool
+				Name="VCManifestTool"
+			/>
+			<Tool
+				Name="VCXDCMakeTool"
+			/>
+			<Tool
+				Name="VCBscMakeTool"
+			/>
+			<Tool
+				Name="VCFxCopTool"
+			/>
+			<Tool
+				Name="VCAppVerifierTool"
+			/>
+			<Tool
+				Name="VCPostBuildEventTool"
+				Description="Building proxy/stub"
+				CommandLine="nmake -f SerialEMCCDps.mk&#x0D;&#x0A;&#x0D;&#x0A;"
+			/>
+		</Configuration>
 	</Configurations>
 	<References>
 	</References>
@@ -1062,7 +1261,28 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
+					Name="Debug|x64"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="0"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
+						BasicRuntimeChecks="3"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
 					Name="Release MinSize|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="1"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_DLL;$(NoInherit)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release MinSize|x64"
 					>
 					<Tool
 						Name="VCCLCompilerTool"
@@ -1082,7 +1302,7 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
-					Name="GMS2-64bit|Win32"
+					Name="Release MinDependency|x64"
 					>
 					<Tool
 						Name="VCCLCompilerTool"
@@ -1092,38 +1312,7 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
-					Name="GMS2-32bit|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="2"
-						AdditionalIncludeDirectories=""
-						PreprocessorDefinitions="GMS2;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NoInherit)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Debug|x64"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="0"
-						AdditionalIncludeDirectories=""
-						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
-						BasicRuntimeChecks="3"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release MinSize|x64"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="1"
-						AdditionalIncludeDirectories=""
-						PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_DLL;$(NoInherit)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release MinDependency|x64"
+					Name="GMS2-64bit|Win32"
 					>
 					<Tool
 						Name="VCCLCompilerTool"
@@ -1143,6 +1332,16 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
+					Name="GMS2-32bit|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="2"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="GMS2;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NoInherit)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
 					Name="GMS2-32bit|x64"
 					>
 					<Tool
@@ -1150,6 +1349,28 @@
 						Optimization="2"
 						AdditionalIncludeDirectories=""
 						PreprocessorDefinitions="WIN32;NDEBUG;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NOINHERIT)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug-64|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="0"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
+						BasicRuntimeChecks="3"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug-64|x64"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="0"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
+						BasicRuntimeChecks="3"
 					/>
 				</FileConfiguration>
 			</File>
@@ -1168,7 +1389,28 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
+					Name="Debug|x64"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="0"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
+						BasicRuntimeChecks="3"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
 					Name="Release MinSize|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="1"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_DLL;$(NoInherit)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release MinSize|x64"
 					>
 					<Tool
 						Name="VCCLCompilerTool"
@@ -1188,7 +1430,7 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
-					Name="GMS2-64bit|Win32"
+					Name="Release MinDependency|x64"
 					>
 					<Tool
 						Name="VCCLCompilerTool"
@@ -1198,38 +1440,7 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
-					Name="GMS2-32bit|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="2"
-						AdditionalIncludeDirectories=""
-						PreprocessorDefinitions="GMS2;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NoInherit)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Debug|x64"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="0"
-						AdditionalIncludeDirectories=""
-						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
-						BasicRuntimeChecks="3"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release MinSize|x64"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="1"
-						AdditionalIncludeDirectories=""
-						PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_DLL;$(NoInherit)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release MinDependency|x64"
+					Name="GMS2-64bit|Win32"
 					>
 					<Tool
 						Name="VCCLCompilerTool"
@@ -1249,6 +1460,16 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
+					Name="GMS2-32bit|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="2"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="GMS2;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NoInherit)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
 					Name="GMS2-32bit|x64"
 					>
 					<Tool
@@ -1256,6 +1477,28 @@
 						Optimization="2"
 						AdditionalIncludeDirectories=""
 						PreprocessorDefinitions="WIN32;NDEBUG;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NOINHERIT)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug-64|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="0"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
+						BasicRuntimeChecks="3"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug-64|x64"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="0"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
+						BasicRuntimeChecks="3"
 					/>
 				</FileConfiguration>
 			</File>
@@ -1277,47 +1520,17 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
-					Name="Release MinSize|Win32"
-					>
-					<Tool
-						Name="VCMIDLTool"
-						TypeLibraryName=".\SerialEMCCD.tlb"
-						HeaderFileName="SerialEMCCD.h"
-						InterfaceIdentifierFileName="SerialEMCCD_i.c"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release MinDependency|Win32"
-					>
-					<Tool
-						Name="VCMIDLTool"
-						TypeLibraryName=".\SerialEMCCD.tlb"
-						HeaderFileName="SerialEMCCD.h"
-						InterfaceIdentifierFileName="SerialEMCCD_i.c"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="GMS2-64bit|Win32"
-					>
-					<Tool
-						Name="VCMIDLTool"
-						TypeLibraryName=".\SerialEMCCD.tlb"
-						HeaderFileName="SerialEMCCD.h"
-						InterfaceIdentifierFileName="SerialEMCCD_i.c"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="GMS2-32bit|Win32"
-					>
-					<Tool
-						Name="VCMIDLTool"
-						TypeLibraryName=".\SerialEMCCD.tlb"
-						HeaderFileName="SerialEMCCD.h"
-						InterfaceIdentifierFileName="SerialEMCCD_i.c"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
 					Name="Debug|x64"
+					>
+					<Tool
+						Name="VCMIDLTool"
+						TypeLibraryName=".\SerialEMCCD.tlb"
+						HeaderFileName="SerialEMCCD.h"
+						InterfaceIdentifierFileName="SerialEMCCD_i.c"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release MinSize|Win32"
 					>
 					<Tool
 						Name="VCMIDLTool"
@@ -1337,7 +1550,27 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
+					Name="Release MinDependency|Win32"
+					>
+					<Tool
+						Name="VCMIDLTool"
+						TypeLibraryName=".\SerialEMCCD.tlb"
+						HeaderFileName="SerialEMCCD.h"
+						InterfaceIdentifierFileName="SerialEMCCD_i.c"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
 					Name="Release MinDependency|x64"
+					>
+					<Tool
+						Name="VCMIDLTool"
+						TypeLibraryName=".\SerialEMCCD.tlb"
+						HeaderFileName="SerialEMCCD.h"
+						InterfaceIdentifierFileName="SerialEMCCD_i.c"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="GMS2-64bit|Win32"
 					>
 					<Tool
 						Name="VCMIDLTool"
@@ -1357,7 +1590,37 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
+					Name="GMS2-32bit|Win32"
+					>
+					<Tool
+						Name="VCMIDLTool"
+						TypeLibraryName=".\SerialEMCCD.tlb"
+						HeaderFileName="SerialEMCCD.h"
+						InterfaceIdentifierFileName="SerialEMCCD_i.c"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
 					Name="GMS2-32bit|x64"
+					>
+					<Tool
+						Name="VCMIDLTool"
+						TypeLibraryName=".\SerialEMCCD.tlb"
+						HeaderFileName="SerialEMCCD.h"
+						InterfaceIdentifierFileName="SerialEMCCD_i.c"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug-64|Win32"
+					>
+					<Tool
+						Name="VCMIDLTool"
+						TypeLibraryName=".\SerialEMCCD.tlb"
+						HeaderFileName="SerialEMCCD.h"
+						InterfaceIdentifierFileName="SerialEMCCD_i.c"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug-64|x64"
 					>
 					<Tool
 						Name="VCMIDLTool"
@@ -1380,43 +1643,16 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
-					Name="Release MinSize|Win32"
-					>
-					<Tool
-						Name="VCResourceCompilerTool"
-						PreprocessorDefinitions=""
-						AdditionalIncludeDirectories="$(OUTDIR)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release MinDependency|Win32"
-					>
-					<Tool
-						Name="VCResourceCompilerTool"
-						PreprocessorDefinitions=""
-						AdditionalIncludeDirectories="$(OUTDIR)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="GMS2-64bit|Win32"
-					>
-					<Tool
-						Name="VCResourceCompilerTool"
-						PreprocessorDefinitions=""
-						AdditionalIncludeDirectories="$(OUTDIR)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="GMS2-32bit|Win32"
-					>
-					<Tool
-						Name="VCResourceCompilerTool"
-						PreprocessorDefinitions=""
-						AdditionalIncludeDirectories="$(OUTDIR)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
 					Name="Debug|x64"
+					>
+					<Tool
+						Name="VCResourceCompilerTool"
+						PreprocessorDefinitions=""
+						AdditionalIncludeDirectories="$(OUTDIR)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release MinSize|Win32"
 					>
 					<Tool
 						Name="VCResourceCompilerTool"
@@ -1434,7 +1670,25 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
+					Name="Release MinDependency|Win32"
+					>
+					<Tool
+						Name="VCResourceCompilerTool"
+						PreprocessorDefinitions=""
+						AdditionalIncludeDirectories="$(OUTDIR)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
 					Name="Release MinDependency|x64"
+					>
+					<Tool
+						Name="VCResourceCompilerTool"
+						PreprocessorDefinitions=""
+						AdditionalIncludeDirectories="$(OUTDIR)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="GMS2-64bit|Win32"
 					>
 					<Tool
 						Name="VCResourceCompilerTool"
@@ -1452,7 +1706,34 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
+					Name="GMS2-32bit|Win32"
+					>
+					<Tool
+						Name="VCResourceCompilerTool"
+						PreprocessorDefinitions=""
+						AdditionalIncludeDirectories="$(OUTDIR)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
 					Name="GMS2-32bit|x64"
+					>
+					<Tool
+						Name="VCResourceCompilerTool"
+						PreprocessorDefinitions=""
+						AdditionalIncludeDirectories="$(OUTDIR)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug-64|Win32"
+					>
+					<Tool
+						Name="VCResourceCompilerTool"
+						PreprocessorDefinitions=""
+						AdditionalIncludeDirectories="$(OUTDIR)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug-64|x64"
 					>
 					<Tool
 						Name="VCResourceCompilerTool"
@@ -1477,7 +1758,30 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
+					Name="Debug|x64"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="0"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
+						BasicRuntimeChecks="3"
+						UsePrecompiledHeader="1"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
 					Name="Release MinSize|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="1"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_DLL;$(NoInherit)"
+						UsePrecompiledHeader="1"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release MinSize|x64"
 					>
 					<Tool
 						Name="VCCLCompilerTool"
@@ -1499,7 +1803,7 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
-					Name="GMS2-64bit|Win32"
+					Name="Release MinDependency|x64"
 					>
 					<Tool
 						Name="VCCLCompilerTool"
@@ -1510,41 +1814,7 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
-					Name="GMS2-32bit|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="2"
-						AdditionalIncludeDirectories=""
-						PreprocessorDefinitions="GMS2;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NoInherit)"
-						UsePrecompiledHeader="1"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Debug|x64"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="0"
-						AdditionalIncludeDirectories=""
-						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
-						BasicRuntimeChecks="3"
-						UsePrecompiledHeader="1"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release MinSize|x64"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="1"
-						AdditionalIncludeDirectories=""
-						PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_DLL;$(NoInherit)"
-						UsePrecompiledHeader="1"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release MinDependency|x64"
+					Name="GMS2-64bit|Win32"
 					>
 					<Tool
 						Name="VCCLCompilerTool"
@@ -1566,6 +1836,17 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
+					Name="GMS2-32bit|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="2"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="GMS2;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NoInherit)"
+						UsePrecompiledHeader="1"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
 					Name="GMS2-32bit|x64"
 					>
 					<Tool
@@ -1573,6 +1854,30 @@
 						Optimization="2"
 						AdditionalIncludeDirectories=""
 						PreprocessorDefinitions="WIN32;NDEBUG;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NOINHERIT)"
+						UsePrecompiledHeader="1"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug-64|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="0"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
+						BasicRuntimeChecks="3"
+						UsePrecompiledHeader="1"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug-64|x64"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="0"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
+						BasicRuntimeChecks="3"
 						UsePrecompiledHeader="1"
 					/>
 				</FileConfiguration>
@@ -1592,7 +1897,28 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
+					Name="Debug|x64"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="0"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
+						BasicRuntimeChecks="3"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
 					Name="Release MinSize|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="1"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_DLL;$(NoInherit)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release MinSize|x64"
 					>
 					<Tool
 						Name="VCCLCompilerTool"
@@ -1612,7 +1938,7 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
-					Name="GMS2-64bit|Win32"
+					Name="Release MinDependency|x64"
 					>
 					<Tool
 						Name="VCCLCompilerTool"
@@ -1622,38 +1948,7 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
-					Name="GMS2-32bit|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="2"
-						AdditionalIncludeDirectories=""
-						PreprocessorDefinitions="GMS2;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NoInherit)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Debug|x64"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="0"
-						AdditionalIncludeDirectories=""
-						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
-						BasicRuntimeChecks="3"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release MinSize|x64"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						Optimization="1"
-						AdditionalIncludeDirectories=""
-						PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_DLL;$(NoInherit)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release MinDependency|x64"
+					Name="GMS2-64bit|Win32"
 					>
 					<Tool
 						Name="VCCLCompilerTool"
@@ -1673,6 +1968,16 @@
 					/>
 				</FileConfiguration>
 				<FileConfiguration
+					Name="GMS2-32bit|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="2"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="GMS2;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NoInherit)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
 					Name="GMS2-32bit|x64"
 					>
 					<Tool
@@ -1680,6 +1985,28 @@
 						Optimization="2"
 						AdditionalIncludeDirectories=""
 						PreprocessorDefinitions="WIN32;NDEBUG;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NoInherit)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug-64|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="0"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
+						BasicRuntimeChecks="3"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug-64|x64"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						Optimization="0"
+						AdditionalIncludeDirectories=""
+						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
+						BasicRuntimeChecks="3"
 					/>
 				</FileConfiguration>
 			</File>
