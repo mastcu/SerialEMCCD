@@ -436,7 +436,7 @@
 			<Tool
 				Name="VCCustomBuildTool"
 				Description="Performing registration"
-				CommandLine="regsvr32 /s /u &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SEMCCD-GMS2-32.dll&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins&quot;&#x0D;&#x0A;regsvr32 /s /c &quot;C:\Program Files\Gatan\DigitalMicrograph\Plugins\SEMCCD-GMS2-32.dll&quot;&#x0D;&#x0A;echo regsvr32 exec. time &gt; &quot;$(OutDir)\regsvr32.trg&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; .&#x0D;&#x0A;"
+				CommandLine="regsvr32 /s /u &quot;C:\Program Files\Gatan\Plugins\SEMCCD-GMS2-32.dll&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; &quot;C:\Program Files\Gatan\Plugins&quot;&#x0D;&#x0A;regsvr32 /s /c &quot;C:\Program Files\Gatan\Plugins\SEMCCD-GMS2-32.dll&quot;&#x0D;&#x0A;echo regsvr32 exec. time &gt; &quot;$(OutDir)\regsvr32.trg&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; .&#x0D;&#x0A;"
 				Outputs="$(OutDir)\regsvr32.trg"
 			/>
 			<Tool
