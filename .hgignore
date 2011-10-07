@@ -1,0 +1,25 @@
+syntax: glob
+
+*.obj
+*.exe
+*.exp
+*.chm
+*.dll
+*.lib
+*~
+*.\#*
+\#*\#
+
+Debug
+ReleaseMinDependency
+GMS2-64bit
+GMS2-32bit
+SerialEMCCD.h
+SerialEMCCD.ncb
+SerialEMCCD.sln
+SerialEMCCD.suo
+SerialEMCCD.tlb
+SerialEMCCD.vcproj
+SerialEMCCD_i.c
+SerialEMCCD_p.c
+dlldata.c
