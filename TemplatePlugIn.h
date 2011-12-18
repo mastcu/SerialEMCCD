@@ -45,6 +45,12 @@ public:
 	void SetDMVersion(long inVal);
 	void SetDebugMode(int inVal);
 	double ExecuteScript(char *strScript, BOOL selectCamera);
+  int GetDSProperties(double *flyback, double *lineFreq);
+  int AcquireDSImage(short array[], long *arrSize, long *width, 
+    long *height, double rotation, double pixelTime, 
+    long lineSync, long numChan, long channels[], long divideBy2);
+  int ReturnDSChannel(short array[], long *arrSize, long *width, 
+    long *height, long channel, long divideBy2);
 	BOOL GetCameraBusy();
 	PlugInWrapper();
 	BOOL GetPlugInRunning();

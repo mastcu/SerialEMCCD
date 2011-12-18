@@ -33,6 +33,9 @@ import "ocidl.idl";
 		[id(18), helpstring("method GetDMCapabilities")] HRESULT GetDMCapabilities([out]BOOL *canSelectShutter, [out]BOOL *canSetSettling, [out]BOOL *openShutterWorks);
 		[id(19), helpstring("method SetShutterNormallyClosed")] HRESULT SetShutterNormallyClosed([in]long camera, [in]long shutter);
 		[id(20), helpstring("method SetNoDMSettling")] HRESULT SetNoDMSettling([in]long camera);
+		[id(21), helpstring("method GetDSProperties")] HRESULT GetDSProperties([out]double *flyback, [out]double *lineFreq);
+		[id(22), helpstring("method AcquireDSImage")] HRESULT AcquireDSImage([out, size_is(*arrSize)]short array[], [in, out]long *arrSize, [in, out]long *width, [in, out]long *height, [in]double rotation, [in]double pixelTime, [in]long lineSync, [in]long numChan, [in, size_is(numChan)]long channels[], [in]long divideBy2);
+		[id(23), helpstring("method ReturnDSChannel")] HRESULT ReturnDSChannel([out, size_is(*arrSize)]short array[], [in, out]long *arrSize, [in, out]long *width, [in, out]long *height, [in]long channel, [in]long divideBy2);
 	};
 	
 	

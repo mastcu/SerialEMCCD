@@ -1,4 +1,4 @@
-// DMCamera.cpp : Implementation of CSerialEMCCDApp and DLL registration.
+// DMCamera.cpp : Implementation of COM object methods that call in to TemplatePlugin
 
 #include "stdafx.h"
 #include "SerialEMCCD.h"
@@ -205,5 +205,35 @@ STDMETHODIMP CDMCamera::SetShutterNormallyClosed(long camera, long shutter)
 STDMETHODIMP CDMCamera::SetNoDMSettling(long camera)
 {
 	gPlugInWrapper.SetNoDMSettling(camera);
+	return S_OK;
+}
+
+STDMETHODIMP CDMCamera::GetDSProperties(double *flyback, double *lineFreq)
+{
+	int retval = gPlugInWrapper.GetDSProperties(flyback, lineFreq);
+	if (retval)
+		return E_FAIL;
+	return S_OK;
+}
+
+STDMETHODIMP CDMCamera::AcquireDSImage(short array[], long *arrSize, long *width, 
+                                       long *height, double rotation, double pixelTime, 
+                                       long lineSync, long numChan, long channels[],
+                                       long divideBy2)
+{
+	int retval = gPlugInWrapper.AcquireDSImage(array, arrSize, width, height, rotation, 
+    pixelTime, lineSync, numChan, channels, divideBy2);
+	if (retval)
+		return E_FAIL;
+	return S_OK;
+}
+
+STDMETHODIMP CDMCamera::ReturnDSChannel(short array[], long *arrSize, long *width, 
+                                        long *height, long channel, long divideBy2)
+{
+	int retval = gPlugInWrapper.ReturnDSChannel(array, arrSize, width, height, channel,
+    divideBy2);
+	if (retval)
+		return E_FAIL;
 	return S_OK;
 }

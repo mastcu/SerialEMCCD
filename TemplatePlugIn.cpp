@@ -16,6 +16,8 @@ using namespace std ;
 
 #define MAX_TEMP_STRING   1000
 #define MAX_CAMERAS  4
+#define MAX_DS_CHANNELS 8
+enum {CHAN_UNUSED = 0, CHAN_ACQUIRED, CHAN_RETURNED};
 
 class TemplatePlugIn : 	public Gatan::PlugIn::PlugInMain
 {
@@ -29,7 +31,7 @@ public:
 	int SelectCamera(long camera);
 	double ExecuteClientScript(char *strScript, BOOL selectCamera);
 	int AcquireAndTransferImage(void *array, int dataSize, long *arrSize, long *width,
-		long *height, long divideBy2, long transpose);
+		long *height, long divideBy2, long transpose, long delImage);
 	void AddCameraSelection(int camera = -1);
 	int GetGainReference(float *array, long *arrSize, long *width, 
 							long *height, long binning);
@@ -39,6 +41,12 @@ public:
 	void QueueScript(char *strScript);
 	void SetCurrentCamera(int inVal) {m_iCurrentCamera = inVal;};
 	void SetDMVersion(int inVal) {m_iDMVersion = inVal;};
+  int GetDSProperties(double *flyback, double *lineFreq);
+  int AcquireDSImage(short array[], long *arrSize, long *width, 
+    long *height, double rotation, double pixelTime, 
+    long lineSync, long numChan, long channels[], long divideBy2);
+  int ReturnDSChannel(short array[], long *arrSize, long *width, 
+    long *height, long channel, long divideBy2);
 	void SetDebugMode(BOOL inVal) {m_bDebug = inVal;};
 	double ExecuteScript(char *strScript);
 	void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
@@ -55,17 +63,26 @@ public:
 		m_strQueue.resize(0);
     for (int i = 0; i < MAX_CAMERAS; i++)
       m_iDMSettlingOK[i] = 1;
+    for (int j = 0; j < MAX_DS_CHANNELS; j++)
+      m_iDSAcquired[j] = CHAN_UNUSED;
+#ifdef GMS2
+    m_bGMS2 = true;
+#else
+    m_bGMS2 = false;
+#endif
 	}
 
 	
 private:
 	BOOL m_bDebug;
+  BOOL m_bGMS2;
 	int m_iDMVersion;
 	int m_iCurrentCamera;
   int m_iDMSettlingOK[MAX_CAMERAS];
 	string m_strQueue;
 	string m_strCommand;
 	char m_strTemp[MAX_TEMP_STRING];
+  int m_iDSAcquired[MAX_DS_CHANNELS];
 };
 
 void TerminateModuleUninitializeCOM();
@@ -152,6 +169,8 @@ void TemplatePlugIn::DebugToResult(const char *strMessage, const char *strPrefix
 	DM::Result(strMessage );
 }
 
+// Outputs messages to the results window upon error; just the message itself if in 
+// debug mode, or a supplied or defulat prefix first if not in debug mode
 void TemplatePlugIn::ErrorToResult(const char *strMessage, const char *strPrefix)
 {
   if (m_bDebug) {
@@ -166,6 +185,9 @@ void TemplatePlugIn::ErrorToResult(const char *strMessage, const char *strPrefix
   }
 }
 
+/*
+ * Executes a script, first printing it in the Results window if in debug mode
+ */
 double TemplatePlugIn::ExecuteScript(char *strScript)
 {
 	double retval;
@@ -200,6 +222,8 @@ double TemplatePlugIn::ExecuteScript(char *strScript)
 	return retval;
 }
 
+// The external call to execute a script, optionally placing commands to select the
+// camera first
 double TemplatePlugIn::ExecuteClientScript(char *strScript, BOOL selectCamera)
 {
 	m_strCommand.resize(0);
@@ -212,6 +236,7 @@ double TemplatePlugIn::ExecuteClientScript(char *strScript, BOOL selectCamera)
 	return ExecuteScript((char *)m_strCommand.c_str());
 }
 
+// Add a command to a script to be executed in the future
 void TemplatePlugIn::QueueScript(char *strScript)
 {
 	m_strQueue += strScript;
@@ -223,7 +248,9 @@ void TemplatePlugIn::QueueScript(char *strScript)
 		DM::Result((char *)m_strQueue.c_str());
 }
 
-// Common pathway for obtaining an acquired image or a dark reference
+/*
+ * Common pathway for obtaining an acquired image or a dark reference
+ */
 int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width, 
 							long *height, long processing, double exposure,
 							long binning, long top, long left, long bottom, 
@@ -373,11 +400,14 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   //sprintf(m_strTemp, "Calling AcquireAndTransferImage with divideBy2 %d\n", divideBy2);
   //DebugToResult(m_strTemp);
 	int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
-    divideBy2, 0);	
+    divideBy2, 0, 1);	
 
 	return retval;
 }
 
+/*
+ * Call for returning a gain reference
+ */
 int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width, 
 									long *height, long binning)
 {
@@ -400,11 +430,15 @@ int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width,
 		"number retval = GetImageID(img)\n"
 		"Exit(retval)", binning);
 	m_strCommand += m_strTemp;
-	return AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0, transpose);
+	return AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0, transpose, 1);
 }
 
+/*
+ * Common routine for executing the current command script, getting an image ID back from
+ * it, and copy the image into the supplied array with various transformations
+ */
 int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arrSize, 
-											long *width, long *height, long divideBy2, long transpose)
+											long *width, long *height, long divideBy2, long transpose, long delImage)
 {
 	long ID;
 	DM::Image image;
@@ -587,7 +621,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         }
       }
 		}
-		DM::DeleteImage(image.get());
+    if (delImage)
+  		DM::DeleteImage(image.get());
 	}
 	catch (exception exc) {
 		ErrorToResult("Caught an exception from a call to a DM:: function\n");
@@ -663,6 +698,7 @@ int TemplatePlugIn::IsCameraInserted(long camera)
 	return (int)(retval + 0.1);
 }
 
+// Set the insertion state of the given camera
 int TemplatePlugIn::InsertCamera(long camera, BOOL state)
 {
 	m_strCommand.resize(0);
@@ -732,6 +768,134 @@ void TemplatePlugIn::SetNoDMSettling(long camera)
     m_iDMSettlingOK[camera] = 0;
 }
 
+/*
+ * DIGISCAN: return flyback time and line frequency
+ */
+int TemplatePlugIn::GetDSProperties(double *flyback, double *lineFreq)
+{
+  DebugToResult("In GetDSProperties\n");
+	m_strCommand.resize(0);
+  sprintf(m_strTemp, "Number retval = DSGetFlyBackTime()\n"
+    "Exit(retval)\n");
+  m_strCommand += m_strTemp;
+	double retval = ExecuteScript((char *)m_strCommand.c_str());
+	if (retval == SCRIPT_ERROR_RETURN)
+		return 1;
+  *flyback = retval;
+	m_strCommand.resize(0);
+  sprintf(m_strTemp, "Number retval = DSGetLineFrequency()\n"
+    "Exit(retval)\n");
+  m_strCommand += m_strTemp;
+  retval = ExecuteScript((char *)m_strCommand.c_str());
+	if (retval == SCRIPT_ERROR_RETURN)
+		return 1;
+  *lineFreq = retval;
+  return 0;
+}
+
+/*
+ * Acquire DigiScan image from one or more channels, return first channel
+ */
+int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width, 
+                                  long *height, double rotation, double pixelTime, 
+                                  long lineSync, long numChan, long channels[],
+                                  long divideBy2)
+{
+  int chan, j, again, dataSize = 2;
+	m_strCommand.resize(0);
+  m_strCommand += "Number exists, xsize, ysize, oldx, oldy, nbytes, idchan, idfirst\n";
+  m_strCommand += "image imdel, imchan\n";
+  m_strCommand += "String channame\n";
+
+  // First see if there are channels that haven't been returned and need to be deleted
+  for (chan = 0; chan < MAX_DS_CHANNELS; chan++) {
+    if (m_iDSAcquired[chan] == CHAN_ACQUIRED || 
+      (!m_bGMS2 && m_iDSAcquired[chan] != CHAN_UNUSED)) {
+      again = 0;
+      for (j = 0; j < numChan; j++)
+        if (channels[j] == chan)
+          again = 1;
+      if (!again) {
+        sprintf(m_strTemp, "exists = GetNamedImage(imdel, \"SEMchan%d\")\n"
+          "if (exists)\n"
+          "  DeleteImage(imdel)\n", chan);
+        m_strCommand += m_strTemp;
+      }
+    }
+    m_iDSAcquired[chan] = CHAN_UNUSED;
+  }
+
+  // Set the parameters for acquisition
+  sprintf(m_strTemp, "xsize = %d\n"
+    "ysize = %d\n"
+    "Number paramID = DSCreateParameters(xsize, ysize, %f, %f, %d)\n", 
+    *width, *height, rotation, pixelTime, lineSync ? 1: 0);
+  m_strCommand += m_strTemp;
+
+  // Add commands for each channel
+  for (chan = 0; chan < numChan; chan++) {
+    sprintf(m_strTemp, "channame = \"SEMchan%d\"\n"
+      "nbytes = %d\n"
+      "exists = GetNamedImage(imchan, channame)\n"
+      "if (exists) {\n"
+    	"  Get2DSize(imchan, oldx, oldy)\n"
+	    "  if (! IsIntegerDataType(imchan, nbytes, 0) || oldx != xsize || oldy != ysize) {\n"
+		  "    exists = 0\n"
+      "    DeleteImage(imchan)\n"
+      "  }\n"
+      "}\n"
+      "if (! exists) {\n"
+      "  imchan := IntegerImage(channame, nbytes, 0, xsize, ysize)\n",
+      channels[chan], dataSize);
+    m_strCommand += m_strTemp;
+    if (!m_bGMS2)
+      m_strCommand += "  ShowImage(imchan)\n";
+    else
+      m_strCommand += "  KeepImage(imchan)\n";
+    m_strCommand += "}\n"
+      "idchan = GetImageID(imchan)\n";
+    if (!chan)
+      m_strCommand += "idfirst = idchan\n";
+    sprintf(m_strTemp, "DSSetParametersSignal(paramID, %d, nbytes, 1, idchan)\n", 
+      channels[chan]);
+    m_strCommand += m_strTemp;
+    m_iDSAcquired[channels[chan]] = CHAN_ACQUIRED;
+  }
+
+  // Acquisition and return commands
+  m_strCommand += "DSStartAcquisition(paramID, 0, 1)\n"
+    "DSDeleteParameters(paramID)\n"
+    "Exit(idfirst)\n";
+
+  again = AcquireAndTransferImage((void *)array, dataSize, arrSize, width, height,
+    divideBy2, 0, m_bGMS2 ? 1 : 0);
+  if (again != DM_CALL_EXCEPTION)
+    m_iDSAcquired[channels[0]] = CHAN_RETURNED;
+  return again;
+}
+
+/*
+ * Return image from another channel of already acquired image
+ */
+int TemplatePlugIn::ReturnDSChannel(short array[], long *arrSize, long *width, 
+                                   long *height, long channel, long divideBy2)
+{
+  if (m_iDSAcquired[channel] != CHAN_ACQUIRED)
+    return 1;
+  m_strCommand.resize(0);
+  sprintf(m_strTemp, "image imzero\n"
+    "Number idzero = -1.\n"
+    "Number exists = GetNamedImage(imzero, \"SEMchan%d\")\n"
+    "if (exists)\n" 
+    "  idzero = GetImageID(imzero)\n"
+    "Exit(idzero)\n", channel);
+  m_strCommand += m_strTemp;
+  int retval = AcquireAndTransferImage((void *)array, 2, arrSize,
+    width, height, divideBy2, 0, m_bGMS2 ? 1 : 0);
+  if (retval != DM_CALL_EXCEPTION)
+    m_iDSAcquired[channel] = CHAN_RETURNED;
+  return retval;
+}
 
 // Global instances of the plugin and the wrapper class for calling into this file
 TemplatePlugIn gTemplatePlugIn;
@@ -829,3 +993,23 @@ void PlugInWrapper::SetNoDMSettling(long camera)
   gTemplatePlugIn.SetNoDMSettling(camera);
 }
 
+int PlugInWrapper::GetDSProperties(double *flyback, double *lineFreq)
+{
+  return gTemplatePlugIn.GetDSProperties(flyback, lineFreq);
+}
+
+int PlugInWrapper::AcquireDSImage(short array[], long *arrSize, long *width, 
+                                  long *height, double rotation, double pixelTime, 
+                                  long lineSync, long numChan, long channels[],
+                                  long divideBy2)
+{
+  return gTemplatePlugIn.AcquireDSImage(array, arrSize, width, height, rotation, 
+    pixelTime, lineSync, numChan, channels, divideBy2);
+}
+
+int PlugInWrapper::ReturnDSChannel(short array[], long *arrSize, long *width, 
+                                   long *height, long channel, long divideBy2)
+{
+  return gTemplatePlugIn.ReturnDSChannel(array, arrSize, width, height, channel,
+    divideBy2);
+}

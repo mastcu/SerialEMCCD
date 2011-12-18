@@ -63,6 +63,9 @@ public:
 	STDMETHOD(ExecuteScript)(/*[in]*/long size, /*[in, size_is(size)]*/long script[],
 		/*[in]*/BOOL selectCamera, /*[out]*/double *retval);
 	STDMETHOD(GetTestArray)(/*[in]*/long width, /*[in]*/long height, /*[out]*/long *retSize, /*[out, size_is(*retSize)]*/short array[], /*[out]*/long *time, /*[out]*/unsigned long *receiptTime, /*[out]*/unsigned long *returnTime);
+  STDMETHOD(GetDSProperties)(/*[out]*/double *flyback, /*[out]*/double *lineFreq);
+  STDMETHOD(AcquireDSImage)(/*[out, size_is(*arrSize)]*/short array[], /*[in, out]*/long *arrSize, /*[in, out]*/long *width, /*[out]*/long *height, /*[in]*/double rotation, /*[in]*/double pixelTime, /*[in]*/long lineSync, /*[in]*/long numChan, /*[in, size_is(numChan)]*/long channels[], /*[in]*/long divideBy2);
+  STDMETHOD(ReturnDSChannel)(/*[out, size_is(*arrSize)]*/short array[], /*[in, out]*/long *arrSize, /*[in, out]*/long *width, /*[out]*/long *height, /*[in]*/long channel, /*[in]*/long divideBy2);
 };
 
 #endif // !defined(AFX_DMCAMERA_H__05E3210A_0D63_47FB_AA3E_CABD30B8E8A4__INCLUDED_)
