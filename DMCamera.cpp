@@ -208,9 +208,12 @@ STDMETHODIMP CDMCamera::SetNoDMSettling(long camera)
 	return S_OK;
 }
 
-STDMETHODIMP CDMCamera::GetDSProperties(double *flyback, double *lineFreq)
+STDMETHODIMP CDMCamera::GetDSProperties(long timeout, double addedFlyback, double margin,
+                                        double *flyback, double *lineFreq, 
+                                        double *rotOffset, long *doFlip)
 {
-	int retval = gPlugInWrapper.GetDSProperties(flyback, lineFreq);
+	int retval = gPlugInWrapper.GetDSProperties(timeout, addedFlyback, margin, flyback, 
+    lineFreq, rotOffset, doFlip);
 	if (retval)
 		return E_FAIL;
 	return S_OK;
@@ -218,11 +221,11 @@ STDMETHODIMP CDMCamera::GetDSProperties(double *flyback, double *lineFreq)
 
 STDMETHODIMP CDMCamera::AcquireDSImage(short array[], long *arrSize, long *width, 
                                        long *height, double rotation, double pixelTime, 
-                                       long lineSync, long numChan, long channels[],
-                                       long divideBy2)
+                                       long lineSync, long continuous, long numChan, 
+                                       long channels[], long divideBy2)
 {
 	int retval = gPlugInWrapper.AcquireDSImage(array, arrSize, width, height, rotation, 
-    pixelTime, lineSync, numChan, channels, divideBy2);
+    pixelTime, lineSync, continuous, numChan, channels, divideBy2);
 	if (retval)
 		return E_FAIL;
 	return S_OK;
@@ -233,6 +236,14 @@ STDMETHODIMP CDMCamera::ReturnDSChannel(short array[], long *arrSize, long *widt
 {
 	int retval = gPlugInWrapper.ReturnDSChannel(array, arrSize, width, height, channel,
     divideBy2);
+	if (retval)
+		return E_FAIL;
+	return S_OK;
+}
+
+STDMETHODIMP CDMCamera::StopDSAcquisition()
+{
+  int retval = gPlugInWrapper.StopDSAcquisition();
 	if (retval)
 		return E_FAIL;
 	return S_OK;

@@ -41,12 +41,14 @@ public:
 	void QueueScript(char *strScript);
 	void SetCurrentCamera(int inVal) {m_iCurrentCamera = inVal;};
 	void SetDMVersion(int inVal) {m_iDMVersion = inVal;};
-  int GetDSProperties(double *flyback, double *lineFreq);
+  int GetDSProperties(long timeout, double addedFlyback, double margin, double *flyback, 
+    double *lineFreq, double *rotOffset, long *doFlip);
   int AcquireDSImage(short array[], long *arrSize, long *width, 
     long *height, double rotation, double pixelTime, 
-    long lineSync, long numChan, long channels[], long divideBy2);
+    long lineSync, long continuous, long numChan, long channels[], long divideBy2);
   int ReturnDSChannel(short array[], long *arrSize, long *width, 
     long *height, long channel, long divideBy2);
+  int StopDSAcquisition();
 	void SetDebugMode(BOOL inVal) {m_bDebug = inVal;};
 	double ExecuteScript(char *strScript);
 	void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
@@ -70,6 +72,13 @@ public:
 #else
     m_bGMS2 = false;
 #endif
+    m_bContinuousDS = false;
+    m_iDSparamID = 0;
+    m_iDSimageID = 0;
+    m_iExtraDSdelay = 10;
+    m_dFlyback = 400.;
+    m_dLineFreq = 60.;
+    m_dSyncMargin = 10.;
 	}
 
 	
@@ -83,6 +92,15 @@ private:
 	string m_strCommand;
 	char m_strTemp[MAX_TEMP_STRING];
   int m_iDSAcquired[MAX_DS_CHANNELS];
+  BOOL m_bContinuousDS;
+  int m_iDSparamID;
+  int m_iDSimageID;
+  double m_dLastReturnTime;
+  double m_dContExpTime;
+  int m_iExtraDSdelay;
+  double m_dFlyback;
+  double m_dLineFreq;
+  double m_dSyncMargin;
 };
 
 void TerminateModuleUninitializeCOM();
@@ -447,10 +465,13 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   unsigned int *uiData;
   int *iData;
   unsigned short *usData;
+  GatanPlugIn::ImageDataLocker *imageLp;
+  void *imageData;
   short *outData;
   short *sData;
   float *flIn, *flOut, flTmp;
   bool isInteger;
+  double retval;
 
 	// Set these values to zero in case of error returns
 	*width = 0;
@@ -458,7 +479,11 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 	*arrSize = 0;
 
 	// Execute the command string as developed
-	double retval = ExecuteScript((char *)m_strCommand.c_str());
+  if (m_strCommand.length() > 0)
+  	retval = ExecuteScript((char *)m_strCommand.c_str());
+  else
+    retval = m_iDSimageID;
+  m_dLastReturnTime = GetTickCount();
 	
 	// If error, zero out the return values and return error code
 	if (retval == SCRIPT_ERROR_RETURN)
@@ -491,143 +516,143 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 		}
 		
 		// Get data pointer and transfer the data
-		{
-			GatanPlugIn::ImageDataLocker imageL( image );
+    imageLp = new GatanPlugIn::ImageDataLocker( image );
+    imageData = imageLp->get();
 
-      // Do a simple copy if sizes match and not dividing by 2 and not trasnposing
-      if (dataSize == byteSize && !divideBy2) {
-        if (!(transpose & 1)) {
-          DebugToResult("Copying data\n");
-          memcpy(array, imageL.get(), *width * *height * dataSize);
-        } else {
-
-          // Otherwise transpose floats around Y axis
-          DebugToResult("Copying float data with transposition around Y\n");
-          for (j = 0; j < *height; j++) {
-            flIn = (float *)imageL.get() + j * *width;
-            flOut = (float *)array + (j + 1) * *width - 1;
-            for (i = 0; i < *width; i++)
-              *flOut-- = *flIn++;
-          }
-        }
-
-        // Do further transpositions in place for float data
-        if (transpose & 2) {
-          DebugToResult("Transposing float data around X in place\n");
-          for (j = 0; j < *height / 2; j++) {
-            flIn = (float *)array + j * *width;
-            flOut = (float *)array + (*height - j - 1) * *width;
-            for (i = 0; i < *width; i++) {
-              flTmp = *flIn;
-              *flIn++ = *flOut;
-              *flOut++ = flTmp;
-            }
-          }
-        }
-        if ((transpose & 256) && *width == *height) {
-          DebugToResult("Transposing float data around diagonal in place\n");
-          for (j = 0; j < *height; j++) {
-            flIn = (float *)array + j * *width + j;
-            flOut = flIn;
-            for (i = j; i < *width; i++) {
-              flTmp = *flIn;
-              *flIn++ = *flOut;
-              *flOut = flTmp;
-              flOut += *width;
-            }
-          }
-        } 
-
-
-      } else if (divideBy2) {
-
-        // Divide by 2
-        outData = (short *)array;
-        if (DM::ImageIsDataTypeUnsignedInteger(image.get())) {
-          if (byteSize == 2) {
-
-            // unsigned short to short
-            DebugToResult("Dividing unsigned shorts by 2\n");
-            usData = (unsigned short *)imageL.get();
-            for (i = 0; i < *width * *height; i++)
-              outData[i] = (short)(usData[i] / 2);
-          } else {
-
-            // unsigned long to short
-            DebugToResult("Dividing unsigned integers by 2\n");
-            uiData = (unsigned int *)imageL.get();
-            for (i = 0; i < *width * *height; i++)
-              outData[i] = (short)(uiData[i] / 2);
-          }
-        } else if (isInteger) {
-          if (byteSize == 2) {
-
-            // signed short to short
-            DebugToResult("Dividing signed shorts by 2\n");
-            sData = (short *)imageL.get();
-            for (i = 0; i < *width * *height; i++)
-              outData[i] = sData[i] / 2;
-          } else {
-
-            // signed long to short
-            DebugToResult("Dividing signed integers by 2\n");
-            iData = (int *)imageL.get();
-            for (i = 0; i < *width * *height; i++)
-              outData[i] = (short)(iData[i] / 2);
-          }
-        } else {
-
-          // Float to short
-          DebugToResult("Dividing floats by 2\n");
-          flIn = (float *)imageL.get();
-          for (i = 0; i < *width * *height; i++)
-            outData[i] = (short)(flIn[i] / 2);
-        }
-
+    // Do a simple copy if sizes match and not dividing by 2 and not transposing
+    if (dataSize == byteSize && !divideBy2) {
+      if (!(transpose & 1)) {
+        DebugToResult("Copying data\n");
+        memcpy(array, imageLp->get(), *width * *height * dataSize);
       } else {
 
-        // No division by 2: Convert long integers to unsigned shorts
-        usData = (unsigned short *)array;
-        if (DM::ImageIsDataTypeUnsignedInteger(image.get())) {
-        
-          // If these are long integers and they are unsigned, just transfer
-          DebugToResult("Converting unsigned integers to unsigned shorts\n");
-          uiData = (unsigned int *)imageL.get();
-          for (i = 0; i < *width * *height; i++)
-            usData[i] = (unsigned short)uiData[i];
-        } else if (isInteger) {
+        // Otherwise transpose floats around Y axis
+        DebugToResult("Copying float data with transposition around Y\n");
+        for (j = 0; j < *height; j++) {
+          flIn = (float *)imageLp->get() + j * *width;
+          flOut = (float *)array + (j + 1) * *width - 1;
+          for (i = 0; i < *width; i++)
+            *flOut-- = *flIn++;
+        }
+      }
 
-          // Otherwise need to truncate at zero to copy signed to unsigned
-          DebugToResult("Converting signed integers to unsigned shorts with "
-            "truncation\n");
-          iData = (int *)imageL.get();
-          for (i = 0; i < *width * *height; i++) {
-            if (iData[i] >= 0)
-              usData[i] = (unsigned short)iData[i];
-            else
-              usData[i] = 0;
-          }
-        } else {
-
-          //Float to unsigned with truncation
-          DebugToResult("Converting floats to unsigned shorts with truncation\n");
-          flIn = (float *)imageL.get();
-          for (i = 0; i < *width * *height; i++) {
-            if (flIn[i] >= 0)
-              usData[i] = (unsigned short)flIn[i];
-            else
-              usData[i] = 0;
+      // Do further transpositions in place for float data
+      if (transpose & 2) {
+        DebugToResult("Transposing float data around X in place\n");
+        for (j = 0; j < *height / 2; j++) {
+          flIn = (float *)array + j * *width;
+          flOut = (float *)array + (*height - j - 1) * *width;
+          for (i = 0; i < *width; i++) {
+            flTmp = *flIn;
+            *flIn++ = *flOut;
+            *flOut++ = flTmp;
           }
         }
       }
-		}
+      if ((transpose & 256) && *width == *height) {
+        DebugToResult("Transposing float data around diagonal in place\n");
+        for (j = 0; j < *height; j++) {
+          flIn = (float *)array + j * *width + j;
+          flOut = flIn;
+          for (i = j; i < *width; i++) {
+            flTmp = *flIn;
+            *flIn++ = *flOut;
+            *flOut = flTmp;
+            flOut += *width;
+          }
+        }
+      } 
+
+
+    } else if (divideBy2) {
+
+      // Divide by 2
+      outData = (short *)array;
+      if (DM::ImageIsDataTypeUnsignedInteger(image.get())) {
+        if (byteSize == 2) {
+
+          // unsigned short to short
+          DebugToResult("Dividing unsigned shorts by 2\n");
+          usData = (unsigned short *)imageLp->get();
+          for (i = 0; i < *width * *height; i++)
+            outData[i] = (short)(usData[i] / 2);
+        } else {
+
+          // unsigned long to short
+          DebugToResult("Dividing unsigned integers by 2\n");
+          uiData = (unsigned int *)imageLp->get();
+          for (i = 0; i < *width * *height; i++)
+            outData[i] = (short)(uiData[i] / 2);
+        }
+      } else if (isInteger) {
+        if (byteSize == 2) {
+
+          // signed short to short
+          DebugToResult("Dividing signed shorts by 2\n");
+          sData = (short *)imageLp->get();
+          for (i = 0; i < *width * *height; i++)
+            outData[i] = sData[i] / 2;
+        } else {
+
+          // signed long to short
+          DebugToResult("Dividing signed integers by 2\n");
+          iData = (int *)imageLp->get();
+          for (i = 0; i < *width * *height; i++)
+            outData[i] = (short)(iData[i] / 2);
+        }
+      } else {
+
+        // Float to short
+        DebugToResult("Dividing floats by 2\n");
+        flIn = (float *)imageLp->get();
+        for (i = 0; i < *width * *height; i++)
+          outData[i] = (short)(flIn[i] / 2);
+      }
+
+    } else {
+
+      // No division by 2: Convert long integers to unsigned shorts
+      usData = (unsigned short *)array;
+      if (DM::ImageIsDataTypeUnsignedInteger(image.get())) {
+
+        // If these are long integers and they are unsigned, just transfer
+        DebugToResult("Converting unsigned integers to unsigned shorts\n");
+        uiData = (unsigned int *)imageLp->get();
+        for (i = 0; i < *width * *height; i++)
+          usData[i] = (unsigned short)uiData[i];
+      } else if (isInteger) {
+
+        // Otherwise need to truncate at zero to copy signed to unsigned
+        DebugToResult("Converting signed integers to unsigned shorts with "
+          "truncation\n");
+        iData = (int *)imageLp->get();
+        for (i = 0; i < *width * *height; i++) {
+          if (iData[i] >= 0)
+            usData[i] = (unsigned short)iData[i];
+          else
+            usData[i] = 0;
+        }
+      } else {
+
+        //Float to unsigned with truncation
+        DebugToResult("Converting floats to unsigned shorts with truncation\n");
+        flIn = (float *)imageLp->get();
+        for (i = 0; i < *width * *height; i++) {
+          if (flIn[i] >= 0)
+            usData[i] = (unsigned short)flIn[i];
+          else
+            usData[i] = 0;
+        }
+      }
+    }
     if (delImage)
-  		DM::DeleteImage(image.get());
+      DM::DeleteImage(image.get());
 	}
 	catch (exception exc) {
 		ErrorToResult("Caught an exception from a call to a DM:: function\n");
 		return DM_CALL_EXCEPTION;
 	}
+  delete imageLp;
 	*arrSize = *width * *height;
 	return 0;
 }
@@ -771,9 +796,13 @@ void TemplatePlugIn::SetNoDMSettling(long camera)
 /*
  * DIGISCAN: return flyback time and line frequency
  */
-int TemplatePlugIn::GetDSProperties(double *flyback, double *lineFreq)
+int TemplatePlugIn::GetDSProperties(long extraDelay, double addedFlyback, double margin,
+                                    double *flyback, double *lineFreq, double *rotOffset,
+                                    long *doFlip)
 {
   DebugToResult("In GetDSProperties\n");
+  m_iExtraDSdelay = extraDelay;
+  m_dSyncMargin = margin;
 	m_strCommand.resize(0);
   sprintf(m_strTemp, "Number retval = DSGetFlyBackTime()\n"
     "Exit(retval)\n");
@@ -782,6 +811,7 @@ int TemplatePlugIn::GetDSProperties(double *flyback, double *lineFreq)
 	if (retval == SCRIPT_ERROR_RETURN)
 		return 1;
   *flyback = retval;
+  m_dFlyback = retval + addedFlyback;
 	m_strCommand.resize(0);
   sprintf(m_strTemp, "Number retval = DSGetLineFrequency()\n"
     "Exit(retval)\n");
@@ -790,18 +820,64 @@ int TemplatePlugIn::GetDSProperties(double *flyback, double *lineFreq)
 	if (retval == SCRIPT_ERROR_RETURN)
 		return 1;
   *lineFreq = retval;
+  m_dLineFreq = retval;
+	m_strCommand.resize(0);
+  sprintf(m_strTemp, "Number retval = DSGetRotationOffset()\n"
+    "Exit(retval)\n");
+  m_strCommand += m_strTemp;
+  retval = ExecuteScript((char *)m_strCommand.c_str());
+	if (retval == SCRIPT_ERROR_RETURN)
+		return 1;
+  *rotOffset = retval;
+	m_strCommand.resize(0);
+  sprintf(m_strTemp, "Number retval = DSGetDoFlip()\n"
+    "Exit(retval)\n");
+  m_strCommand += m_strTemp;
+  retval = ExecuteScript((char *)m_strCommand.c_str());
+	if (retval == SCRIPT_ERROR_RETURN)
+		return 1;
+  *doFlip = retval != 0. ? 1 : 0;
   return 0;
 }
 
 /*
  * Acquire DigiScan image from one or more channels, return first channel
+ * If continuous = 1, start continuous acquire then return image
+ * If continuous = -1, return an image from continuous acquire
  */
 int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width, 
                                   long *height, double rotation, double pixelTime, 
-                                  long lineSync, long numChan, long channels[],
-                                  long divideBy2)
+                                  long lineSync, long continuous, long numChan, 
+                                  long channels[], long divideBy2)
 {
   int chan, j, again, dataSize = 2;
+  char strn[200];
+  double fullExpTime = *height * (*width * pixelTime + m_dFlyback + 
+    (lineSync ? m_dSyncMargin : 0.)) / 1000.;
+
+  // If continuing with continuous, 
+  if (continuous < 0) {
+
+    // Return with error if continuous is supposed to be started and isn't
+    if (!m_bContinuousDS)
+      return 1;
+
+    // Timeout since last return of data
+    double elapsed = GetTickCount() - m_dLastReturnTime;
+    if (elapsed < 0)
+      elapsed += 4294967296.;
+    again = (int)(fullExpTime + 180 - elapsed);
+    if (again > 0)
+      Sleep(again); 
+
+    // Continuing acquire: just get the image
+    return ReturnDSChannel(array, arrSize, width, height, channels[0], divideBy2);
+  }
+
+  // Stop continuous acquire if it was started
+  if (m_bContinuousDS)
+    StopDSAcquisition();
+
 	m_strCommand.resize(0);
   m_strCommand += "Number exists, xsize, ysize, oldx, oldy, nbytes, idchan, idfirst\n";
   m_strCommand += "image imdel, imchan\n";
@@ -863,15 +939,40 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
   }
 
   // Acquisition and return commands
-  m_strCommand += "DSStartAcquisition(paramID, 0, 1)\n"
-    "DSDeleteParameters(paramID)\n"
+  if (!continuous) {
+    j = (int)((fullExpTime + m_iExtraDSdelay) * 0.06 + 0.5);
+    if (m_iExtraDSdelay > 0) {
+      m_strCommand += "DSStartAcquisition(paramID, 0, 0)\n";
+      sprintf(m_strTemp, "Delay(%d)\n", j);
+      m_strCommand += m_strTemp;
+    } else {
+      m_strCommand += "DSStartAcquisition(paramID, 0, 1)\n";
+    }
+    m_strCommand += "DSDeleteParameters(paramID)\n"
     "Exit(idfirst)\n";
 
-  again = AcquireAndTransferImage((void *)array, dataSize, arrSize, width, height,
-    divideBy2, 0, m_bGMS2 ? 1 : 0);
-  if (again != DM_CALL_EXCEPTION)
-    m_iDSAcquired[channels[0]] = CHAN_RETURNED;
-  return again;
+    again = AcquireAndTransferImage((void *)array, dataSize, arrSize, width, height,
+      divideBy2, 0, m_bGMS2 ? 1 : 0);
+    if (again != DM_CALL_EXCEPTION)
+      m_iDSAcquired[channels[0]] = CHAN_RETURNED;
+    return again;
+  } else {
+
+    // For continuous acquire, start it, get the parameter ID, 
+    m_strCommand += "DSStartAcquisition(paramID, 1, 0)\n"
+      "Exit(paramID + 1000000. * idfirst)\n";
+    double retval = ExecuteScript((char *)m_strCommand.c_str());
+	  if (retval == SCRIPT_ERROR_RETURN)
+		  return 1;
+    m_iDSimageID = (int)(retval / 1000000. + 0.5);
+    m_iDSparamID = (int)(retval + 0.5 - 1000000. * m_iDSimageID);
+    m_bContinuousDS = true;
+    m_dContExpTime = *width * *height * pixelTime / 1000.;
+    for (j = 0; j < *width * *height; j++)
+      array[j] = 0;
+    m_dLastReturnTime = GetTickCount();
+    return 0;
+  }
 }
 
 /*
@@ -883,18 +984,38 @@ int TemplatePlugIn::ReturnDSChannel(short array[], long *arrSize, long *width,
   if (m_iDSAcquired[channel] != CHAN_ACQUIRED)
     return 1;
   m_strCommand.resize(0);
-  sprintf(m_strTemp, "image imzero\n"
-    "Number idzero = -1.\n"
-    "Number exists = GetNamedImage(imzero, \"SEMchan%d\")\n"
-    "if (exists)\n" 
-    "  idzero = GetImageID(imzero)\n"
-    "Exit(idzero)\n", channel);
-  m_strCommand += m_strTemp;
+  if (!m_bContinuousDS) {
+    sprintf(m_strTemp, "image imzero\n"
+      "Number idzero = -1.\n"
+      "Number exists = GetNamedImage(imzero, \"SEMchan%d\")\n"
+      "if (exists)\n" 
+      "  idzero = GetImageID(imzero)\n"
+      "Exit(idzero)\n", channel);
+    m_strCommand += m_strTemp;
+  }
   int retval = AcquireAndTransferImage((void *)array, 2, arrSize,
-    width, height, divideBy2, 0, m_bGMS2 ? 1 : 0);
-  if (retval != DM_CALL_EXCEPTION)
+    width, height, divideBy2, 0, (!m_bContinuousDS && m_bGMS2) ? 1 : 0);
+  if (retval != DM_CALL_EXCEPTION && !m_bContinuousDS)
     m_iDSAcquired[channel] = CHAN_RETURNED;
   return retval;
+}
+
+int TemplatePlugIn::StopDSAcquisition()
+{
+  if (!m_bContinuousDS)
+    return 1;
+  m_strCommand.resize(0);
+  sprintf(m_strTemp, "DSStopAcquisition(%d)\n"
+      "Delay(%d)\n"
+      "DSDeleteParameters(%d)\n"
+      "Exit(0)\n", m_iDSparamID, (int)(0.06 * m_iExtraDSdelay + 0.5), m_iDSparamID);
+  m_strCommand += m_strTemp;
+  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  m_iDSparamID = 0;
+  m_iDSimageID = 0;
+  m_bContinuousDS = false;
+  //m_dLastReturnTime = GetTickCount();
+  return (retval == SCRIPT_ERROR_RETURN) ? 1 : 0;
 }
 
 // Global instances of the plugin and the wrapper class for calling into this file
@@ -993,18 +1114,21 @@ void PlugInWrapper::SetNoDMSettling(long camera)
   gTemplatePlugIn.SetNoDMSettling(camera);
 }
 
-int PlugInWrapper::GetDSProperties(double *flyback, double *lineFreq)
+int PlugInWrapper::GetDSProperties(long timeout, double addedFlyback, double margin,
+                                   double *flyback, 
+                                   double *lineFreq, double *rotOffset, long *doFlip)
 {
-  return gTemplatePlugIn.GetDSProperties(flyback, lineFreq);
+  return gTemplatePlugIn.GetDSProperties(timeout, addedFlyback, margin, flyback, lineFreq, 
+    rotOffset, doFlip);
 }
 
 int PlugInWrapper::AcquireDSImage(short array[], long *arrSize, long *width, 
                                   long *height, double rotation, double pixelTime, 
-                                  long lineSync, long numChan, long channels[],
-                                  long divideBy2)
+                                  long lineSync, long continuous, long numChan, 
+                                  long channels[], long divideBy2)
 {
   return gTemplatePlugIn.AcquireDSImage(array, arrSize, width, height, rotation, 
-    pixelTime, lineSync, numChan, channels, divideBy2);
+    pixelTime, lineSync, continuous, numChan, channels, divideBy2);
 }
 
 int PlugInWrapper::ReturnDSChannel(short array[], long *arrSize, long *width, 
@@ -1012,4 +1136,9 @@ int PlugInWrapper::ReturnDSChannel(short array[], long *arrSize, long *width,
 {
   return gTemplatePlugIn.ReturnDSChannel(array, arrSize, width, height, channel,
     divideBy2);
+}
+
+int PlugInWrapper::StopDSAcquisition()
+{
+  return gTemplatePlugIn.StopDSAcquisition();
 }

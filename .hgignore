@@ -6,6 +6,10 @@ syntax: glob
 *.chm
 *.dll
 *.lib
+*.aps
+*.ncb
+*.suo
+*.vcproj.*.user
 *~
 *.\#*
 \#*\#
