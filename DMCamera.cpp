@@ -147,6 +147,12 @@ STDMETHODIMP CDMCamera::SelectCamera(long camera)
 	return S_OK;
 }
 
+STDMETHODIMP CDMCamera::SetReadMode(long mode)
+{
+	gPlugInWrapper.SetReadMode(mode);
+	return S_OK;
+}
+
 STDMETHODIMP CDMCamera::GetNumberOfCameras(long *numCameras)
 {
 	*numCameras = gPlugInWrapper.GetNumberOfCameras();

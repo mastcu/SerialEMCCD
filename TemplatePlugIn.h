@@ -10,6 +10,9 @@
 #define NEWCM_UNPROCESSED 1
 #define NEWCM_DARK_SUBTRACTED 2
 #define NEWCM_GAIN_NORMALIZED 3
+#define K2_LINEAR_READ_MODE 0
+#define K2_COUNTING_READ_MODE 2
+#define K2_SUPERRES_READ_MODE 3
 
 #define OLD_OPEN_SHUTTER_BROKEN    360
 #define OLD_SELECT_SHUTTER_BROKEN    360
@@ -33,6 +36,7 @@ public:
 	int IsCameraInserted(long camera);
 	int GetNumberOfCameras();
 	int SelectCamera(long camera);
+	void SetReadMode(long mode);
 	int GetImage(short *array, long *arrSize, long *width, 
 		long *height, long processing, double exposure,
 		long binning, long top, long left, long bottom, 

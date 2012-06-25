@@ -45,6 +45,7 @@ public:
 	STDMETHOD(IsCameraInserted)(/*[in]*/long camera, /*[out]*/BOOL *inserted);
 	STDMETHOD(GetNumberOfCameras)(/*[out]*/long *numCameras);
 	STDMETHOD(SelectCamera)(/*[in]*/long camera);
+	STDMETHOD(SetReadMode)(/*[in]*/long mode);
 	STDMETHOD(GetGainReference)(/*[out, size_is(*arrSize)]*/float array[], /*[in, out]*/long *arrSize, 
 		/*[out]*/long *width, /*[out]*/long *height, /*[in]*/long binning);
 	STDMETHOD(GetAcquiredImage)(/*[out, size_is(*arrSize)]*/short array[], /*[in, out]*/long *arrSize, 

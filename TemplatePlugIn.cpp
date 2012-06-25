@@ -29,6 +29,7 @@ public:
 	int IsCameraInserted(long camera);
 	int GetNumberOfCameras();
 	int SelectCamera(long camera);
+	void SetReadMode(long mode);
 	double ExecuteClientScript(char *strScript, BOOL selectCamera);
 	int AcquireAndTransferImage(void *array, int dataSize, long *arrSize, long *width,
 		long *height, long divideBy2, long transpose, long delImage);
@@ -79,6 +80,7 @@ public:
     m_dFlyback = 400.;
     m_dLineFreq = 60.;
     m_dSyncMargin = 10.;
+    m_iReadMode = -1;
 	}
 
 	
@@ -101,6 +103,7 @@ private:
   double m_dFlyback;
   double m_dLineFreq;
   double m_dSyncMargin;
+  int m_iReadMode;
 };
 
 void TerminateModuleUninitializeCOM();
@@ -275,6 +278,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 							long right, long shutter, double settling, long shutterDelay,
               long divideBy2, long corrections)
 {
+  int readModes[3] = {K2_LINEAR_READ_MODE, K2_COUNTING_READ_MODE, K2_SUPERRES_READ_MODE};
+
   //sprintf(m_strTemp, "Entering GetImage with divideBy2 %d\n", divideBy2);
   //DebugToResult(m_strTemp);
   // Workaround for Downing camera problem, inexplicable wild values coming through
@@ -311,6 +316,10 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 			"CM_SetBinnedReadArea(camera, acqParams, %d, %d, %d, %d)\n",
 			newProc, exposure, binning, binning, top, left, bottom, right);
 		m_strCommand += m_strTemp;
+    if (m_iReadMode >= 0) {
+      sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n", readModes[m_iReadMode]);
+		  m_strCommand += m_strTemp;
+    }
 
     // Specify corrections if incoming value is >= 0
     // As of DM 3.9.3 (3.9?) need to modify only the allowed coorections to avoid an
@@ -682,6 +691,13 @@ int TemplatePlugIn::SelectCamera(long camera)
 	if (retval == SCRIPT_ERROR_RETURN)
 		return 1;
 	return 0;
+}
+
+void TemplatePlugIn::SetReadMode(long mode)
+{
+  if (mode > 2)
+    mode = 2;
+  m_iReadMode = mode;
 }
 
 // Return number of cameras or -1 for error
@@ -1082,6 +1098,11 @@ int PlugInWrapper::GetGainReference(float *array, long *arrSize, long *width,
 int PlugInWrapper::SelectCamera(long camera)
 {
 	return gTemplatePlugIn.SelectCamera(camera);
+}
+
+void PlugInWrapper::SetReadMode(long mode)
+{
+	gTemplatePlugIn.SetReadMode(mode);
 }
 
 int PlugInWrapper::GetNumberOfCameras()
