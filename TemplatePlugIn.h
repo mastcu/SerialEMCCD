@@ -60,4 +60,7 @@ public:
 	BOOL GetCameraBusy();
 	PlugInWrapper();
 	BOOL GetPlugInRunning();
+	void ErrorToResult(const char *strMessage, const char *strPrefix = NULL);
+	void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
+  int GetDebugVal();
 };

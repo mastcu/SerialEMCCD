@@ -14,6 +14,7 @@ using namespace Gatan;
 #include <string>
 using namespace std ;
 
+
 #define MAX_TEMP_STRING   1000
 #define MAX_CAMERAS  4
 #define MAX_DS_CHANNELS 8
@@ -61,6 +62,10 @@ public:
 	TemplatePlugIn()
 	{
 		m_bDebug = getenv("SERIALEMCCD_DEBUG") != NULL;
+    m_iDebugVal = 0;
+    if (m_bDebug)
+      m_iDebugVal = atoi(getenv("SERIALEMCCD_DEBUG"));
+
 		m_iDMVersion = 340;
 		m_iCurrentCamera = 0;
 		m_strQueue.resize(0);
@@ -83,6 +88,7 @@ public:
     m_iReadMode = -1;
 	}
 
+  int m_iDebugVal;
 	
 private:
 	BOOL m_bDebug;
@@ -106,8 +112,12 @@ private:
   int m_iReadMode;
 };
 
+// Declarations of global functions called from here
 void TerminateModuleUninitializeCOM();
 BOOL WasCOMInitialized();
+int GetSocketInitialization(int &wsaError);
+int StartSocket(int &wsaError);
+void ShutdownSocket(void);
 
 ///
 /// This is called when the plugin is loaded.  Whenever DM is
@@ -128,8 +138,11 @@ void TemplatePlugIn::Start()
 /// for all such plugins and all script packages have been installed.
 /// Thus it is ok to use script functions provided by other plugins.
 ///
+int StartSocket(int &wsaError);
 void TemplatePlugIn::Run()
 {
+  int socketRet, wsaError;
+  char buff[80];
 #ifndef GMS2
 	DM::Window results = DM::GetResultsWindow( true );
 #endif
@@ -146,6 +159,13 @@ void TemplatePlugIn::Run()
 		m_bDebug = true;
 		DebugToResult("SerialEMCCD: Error getting Digital Micrograph version\n");
 	}
+  DebugToResult("Going to start socket\n");
+  socketRet = StartSocket(wsaError);
+  if (socketRet) {
+    sprintf(buff, "Socket initialization failed, return value %d, WSA error %d\n", 
+      socketRet, wsaError);
+    ErrorToResult(buff, "SerialEMCCD: ");
+  }
 }
 
 ///
@@ -171,6 +191,7 @@ void TemplatePlugIn::Cleanup()
 ///
 void TemplatePlugIn::End()
 {
+  ShutdownSocket();
 	TerminateModuleUninitializeCOM();
 }
 
@@ -1162,4 +1183,17 @@ int PlugInWrapper::ReturnDSChannel(short array[], long *arrSize, long *width,
 int PlugInWrapper::StopDSAcquisition()
 {
   return gTemplatePlugIn.StopDSAcquisition();
+}
+
+void PlugInWrapper::ErrorToResult(const char *strMessage, const char *strPrefix)
+{
+  gTemplatePlugIn.ErrorToResult(strMessage, strPrefix);
+}
+void PlugInWrapper::DebugToResult(const char *strMessage, const char *strPrefix)
+{
+  gTemplatePlugIn.DebugToResult(strMessage, strPrefix);
+}
+int PlugInWrapper::GetDebugVal()
+{
+  return gTemplatePlugIn.m_iDebugVal;
 }

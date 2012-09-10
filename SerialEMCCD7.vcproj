@@ -204,7 +204,7 @@ copy &quot;$(TargetPath)&quot; .
 				Name="VCLinkerTool"
 				IgnoreImportLibrary="TRUE"
 				AdditionalOptions="/force:unresolved"
-				AdditionalDependencies="&quot;..\DMSDK\Win32\VisualStudio.NET\lib\DMPlugInBasic.lib&quot; odbc32.lib odbccp32.lib"
+				AdditionalDependencies="&quot;..\DMSDK\Win32\VisualStudio.NET\lib\DMPlugInBasic.lib&quot; odbc32.lib odbccp32.lib Ws2_32.lib"
 				OutputFile=".\ReleaseMinDependency/SerialEMCCD.dll"
 				LinkIncremental="1"
 				SuppressStartupBanner="TRUE"
@@ -360,6 +360,15 @@ regsvr32 /s SerialEMCCDps.dll
 						Name="VCResourceCompilerTool"
 						PreprocessorDefinitions=""
 						AdditionalIncludeDirectories="$(OUTDIR)"/>
+				</FileConfiguration>
+			</File>
+			<File
+				RelativePath=".\SocketPathway.cpp">
+				<FileConfiguration
+					Name="Release MinDependency|Win32">
+					<Tool
+						Name="VCCLCompilerTool"
+						PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL"/>
 				</FileConfiguration>
 			</File>
 			<File
