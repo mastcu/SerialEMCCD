@@ -5,6 +5,9 @@
 #include "TemplatePlugIn.h"
 #include <stdio.h>
 #include <winsock.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <time.h>
 
 extern PlugInWrapper gPlugInWrapper;
 
@@ -35,7 +38,7 @@ enum {GS_ExecuteScript = 1, GS_SetDebugMode, GS_SetDMVersion, GS_SetCurrentCamer
       GS_SelectCamera, GS_SetReadMode, GS_GetNumberOfCameras, GS_IsCameraInserted,
       GS_InsertCamera, GS_GetDMVersion, GS_GetDMCapabilities,
       GS_SetShutterNormallyClosed, GS_SetNoDMSettling, GS_GetDSProperties,
-      GS_AcquireDSImage, GS_ReturnDSChannel, GS_StopDSAcquisition};
+      GS_AcquireDSImage, GS_ReturnDSChannel, GS_StopDSAcquisition, GS_CheckReferenceTime};
 
 static int sNumLongSend;
 static int sNumBoolSend;
@@ -89,6 +92,7 @@ static ArgDescriptor sFuncTable[] = {
   {GS_AcquireDSImage, 7, 0, 2, 3, 0, 0, TRUE},
   {GS_ReturnDSChannel, 5, 0, 0, 3, 0, 0, FALSE},
   {GS_StopDSAcquisition, 0, 0, 0, 0, 0, 0, FALSE},
+  {GS_CheckReferenceTime, 1, 0, 0, 2, 0, 0, TRUE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -376,6 +380,7 @@ static int ProcessCommand(int numBytes)
 {
   int funcCode, ind, needed, version;
   short *imArray;
+  struct __stat64 statbuf;
 
   // Get the function code as the second element of the buffer
   if (numBytes < 8 || numBytes > ARGS_BUFFER_SIZE) {
@@ -420,6 +425,9 @@ static int ProcessCommand(int numBytes)
   if (sFuncTable[ind].hasLongArray)
     needed += sLongArgs[sNumLongRecv - 1] * sizeof(long);
   if (needed != numBytes) {
+    sprintf(sMessageBuf, "Command wrong length: needed = %d  numBytes = %d\n", needed, 
+      numBytes);
+    gPlugInWrapper.ErrorToResult(sMessageBuf, "SerialEMSocket: ");
     SendArgsBack(-6);   // Wrong length
     return 1;
   }
@@ -550,6 +558,17 @@ static int ProcessCommand(int numBytes)
 
     case GS_StopDSAcquisition:
       SendArgsBack(gPlugInWrapper.StopDSAcquisition());
+      break;
+
+    case GS_CheckReferenceTime:
+      ind = _stat64((char *)sLongArray, &statbuf) ? 1 : 0;
+      if (!ind) {
+        memcpy(&sLongArgs[1], &statbuf.st_mtime, 2 * sizeof(long));
+        sprintf(sMessageBuf, "%s has time %s\n", (char *)sLongArray, 
+          _ctime64(&statbuf.st_mtime));
+        gPlugInWrapper.DebugToResult(sMessageBuf);
+      }
+      SendArgsBack(ind);
       break;
 
     default:
