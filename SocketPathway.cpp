@@ -25,8 +25,8 @@ static int sLastWSAerror = 0;
 static bool sCloseForExit = false;
 static char sMessageBuf[160];
 static SOCKET sHListener;
-static SOCKET sHClient = INVALID_SOCKET;
-static int sChunkSize = 65536;
+static SOCKET sHClient = INVALID_SOCKET; 
+static int sChunkSize = 16777216;     // Tests indicated this size was optimal
 
 // Declarations needed on both sides
 #define ARGS_BUFFER_SIZE 1024
