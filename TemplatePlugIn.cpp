@@ -888,7 +888,6 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
                                   long channels[], long divideBy2)
 {
   int chan, j, again, dataSize = 2;
-  char strn[200];
   double fullExpTime = *height * (*width * pixelTime + m_dFlyback + 
     (lineSync ? m_dSyncMargin : 0.)) / 1000.;
 
