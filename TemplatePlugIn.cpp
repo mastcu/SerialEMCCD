@@ -725,7 +725,7 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
   if (mode > 2)
     mode = 2;
   m_iReadMode = mode;
-  m_fFloatScaling = mode > 0 ? scaling : 1.;
+  m_fFloatScaling = (float)(mode > 0 ? scaling : 1.);
 }
 
 // Return number of cameras or -1 for error
