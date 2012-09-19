@@ -30,7 +30,7 @@ public:
 	int IsCameraInserted(long camera);
 	int GetNumberOfCameras();
 	int SelectCamera(long camera);
-	void SetReadMode(long mode);
+	void SetReadMode(long mode, double scaling);
 	double ExecuteClientScript(char *strScript, BOOL selectCamera);
 	int AcquireAndTransferImage(void *array, int dataSize, long *arrSize, long *width,
 		long *height, long divideBy2, long transpose, long delImage);
@@ -86,6 +86,7 @@ public:
     m_dLineFreq = 60.;
     m_dSyncMargin = 10.;
     m_iReadMode = -1;
+    m_fFloatScaling = 1.;
 	}
 
   int m_iDebugVal;
@@ -110,6 +111,7 @@ private:
   double m_dLineFreq;
   double m_dSyncMargin;
   int m_iReadMode;
+  float m_fFloatScaling;
 };
 
 // Declarations of global functions called from here
@@ -339,6 +341,10 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 		m_strCommand += m_strTemp;
     if (m_iReadMode >= 0) {
       sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n", readModes[m_iReadMode]);
+		  m_strCommand += m_strTemp;
+    }
+    if (m_iReadMode > 0) {
+      sprintf(m_strTemp, "K2_SetHardwareProcessing(camera, 6)\n");
 		  m_strCommand += m_strTemp;
     }
 
@@ -636,7 +642,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         DebugToResult("Dividing floats by 2\n");
         flIn = (float *)imageLp->get();
         for (i = 0; i < *width * *height; i++)
-          outData[i] = (short)(flIn[i] / 2);
+          outData[i] = (short)(flIn[i] * m_fFloatScaling / 2. + 0.5);
       }
 
     } else {
@@ -669,7 +675,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         flIn = (float *)imageLp->get();
         for (i = 0; i < *width * *height; i++) {
           if (flIn[i] >= 0)
-            usData[i] = (unsigned short)flIn[i];
+            usData[i] = (unsigned short)(flIn[i] * m_fFloatScaling + 0.5);
           else
             usData[i] = 0;
         }
@@ -714,11 +720,12 @@ int TemplatePlugIn::SelectCamera(long camera)
 	return 0;
 }
 
-void TemplatePlugIn::SetReadMode(long mode)
+void TemplatePlugIn::SetReadMode(long mode, double scaling)
 {
   if (mode > 2)
     mode = 2;
   m_iReadMode = mode;
+  m_fFloatScaling = mode > 0 ? scaling : 1.;
 }
 
 // Return number of cameras or -1 for error
@@ -1120,9 +1127,9 @@ int PlugInWrapper::SelectCamera(long camera)
 	return gTemplatePlugIn.SelectCamera(camera);
 }
 
-void PlugInWrapper::SetReadMode(long mode)
+void PlugInWrapper::SetReadMode(long mode, double scaling)
 {
-	gTemplatePlugIn.SetReadMode(mode);
+	gTemplatePlugIn.SetReadMode(mode, scaling);
 }
 
 int PlugInWrapper::GetNumberOfCameras()

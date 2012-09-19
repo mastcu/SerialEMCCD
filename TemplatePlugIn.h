@@ -36,7 +36,7 @@ public:
 	int IsCameraInserted(long camera);
 	int GetNumberOfCameras();
 	int SelectCamera(long camera);
-	void SetReadMode(long mode);
+	void SetReadMode(long mode, double scaling);
 	int GetImage(short *array, long *arrSize, long *width, 
 		long *height, long processing, double exposure,
 		long binning, long top, long left, long bottom, 

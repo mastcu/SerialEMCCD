@@ -147,9 +147,9 @@ STDMETHODIMP CDMCamera::SelectCamera(long camera)
 	return S_OK;
 }
 
-STDMETHODIMP CDMCamera::SetReadMode(long mode)
+STDMETHODIMP CDMCamera::SetReadMode(long mode, double scaling)
 {
-	gPlugInWrapper.SetReadMode(mode);
+	gPlugInWrapper.SetReadMode(mode, scaling);
 	return S_OK;
 }
 
