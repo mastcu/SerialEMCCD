@@ -343,7 +343,10 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n", readModes[m_iReadMode]);
 		  m_strCommand += m_strTemp;
     }
-    if (m_iReadMode > 0) {
+
+    // This needs to be done for all modes unless a potential Gatan bug gets fixed,
+    // then it can be if > 0
+    if (m_iReadMode >= 0) {
       sprintf(m_strTemp, "K2_SetHardwareProcessing(camera, 6)\n");
 		  m_strCommand += m_strTemp;
     }
