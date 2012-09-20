@@ -80,7 +80,7 @@ static ArgDescriptor sFuncTable[] = {
   {GS_GetDarkReference, 11, 0, 2, 3, 0, 0, FALSE},
   {GS_GetGainReference, 4, 0, 0, 3, 0, 0, FALSE},
   {GS_SelectCamera, 1, 0, 0, 0, 0, 0, FALSE},
-  {GS_SetReadMode, 1, 0, 0, 1, 0, 0, FALSE},
+  {GS_SetReadMode, 1, 0, 1, 0, 0, 0, FALSE},
   {GS_GetNumberOfCameras, 0, 0, 0, 1, 0, 0, FALSE},
   {GS_IsCameraInserted, 1, 0, 0, 0, 1, 0, FALSE},
   {GS_InsertCamera, 1, 1, 0, 0, 0, 0, FALSE},
