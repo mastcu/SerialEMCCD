@@ -340,16 +340,6 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 			newProc, exposure, binning, binning, top, left, bottom, right);
 		m_strCommand += m_strTemp;
 
-    // Commands for K2 camera
-    if (m_iReadMode >= 0) {
-      sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
-        "K2_SetHardwareProcessing(camera, %d)\n"
-        "Number wait_time_s\n"
-        "CM_PrepareCameraForAcquire(manager, camera, acqParams, NULL, wait_time_s)\n"
-        "Sleep(wait_time_s)\n", readModes[m_iReadMode], m_iReadMode ? 6 : 0);
-		  m_strCommand += m_strTemp;
-    }
-
     // Specify corrections if incoming value is >= 0
     // As of DM 3.9.3 (3.9?) need to modify only the allowed coorections to avoid an
     // overscan image in simulator, so change 255 to 49
@@ -386,6 +376,16 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 		sprintf(m_strTemp, "CM_SetShutterIndex(acqParams, %d)\n", shutter);
 		m_strCommand += m_strTemp;
 	}
+
+  // Commands for K2 camera
+  if (m_iReadMode >= 0) {
+    sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
+      "K2_SetHardwareProcessing(camera, %d)\n"
+      "Number wait_time_s\n"
+      "CM_PrepareCameraForAcquire(manager, camera, acqParams, NULL, wait_time_s)\n"
+      "Sleep(wait_time_s)\n", readModes[m_iReadMode], m_iReadMode ? 6 : 0);
+    m_strCommand += m_strTemp;
+  }
 
 	// Open shutter if a delay is set
 	if (shutterDelay) {
