@@ -339,15 +339,14 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 			"CM_SetBinnedReadArea(camera, acqParams, %d, %d, %d, %d)\n",
 			newProc, exposure, binning, binning, top, left, bottom, right);
 		m_strCommand += m_strTemp;
-    if (m_iReadMode >= 0) {
-      sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n", readModes[m_iReadMode]);
-		  m_strCommand += m_strTemp;
-    }
 
-    // This needs to be done for all modes unless a potential Gatan bug gets fixed,
-    // then it can be if > 0
+    // Commands for K2 camera
     if (m_iReadMode >= 0) {
-      sprintf(m_strTemp, "K2_SetHardwareProcessing(camera, 6)\n");
+      sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
+        "K2_SetHardwareProcessing(camera, %d)\n"
+        "Number wait_time_s\n"
+        "CM_PrepareCameraForAcquire(manager, camera, acqParams, NULL, wait_time_s)\n"
+        "Sleep(wait_time_s)\n", readModes[m_iReadMode], m_iReadMode ? 6 : 0);
 		  m_strCommand += m_strTemp;
     }
 
