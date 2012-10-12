@@ -153,6 +153,15 @@ STDMETHODIMP CDMCamera::SetReadMode(long mode, double scaling)
 	return S_OK;
 }
 
+STDMETHODIMP CDMCamera::SetK2Parameters(long readMode, double scaling, long hardwareProc,
+                                        BOOL doseFrac, double frameTime, BOOL alignFrames,
+                                        BOOL saveFrames, long filtSize, long filter[])
+{
+	gPlugInWrapper.SetK2Parameters(readMode, scaling, hardwareProc, doseFrac, frameTime,
+    alignFrames, saveFrames, (char *)filter);
+	return S_OK;
+}
+
 STDMETHODIMP CDMCamera::GetNumberOfCameras(long *numCameras)
 {
 	*numCameras = gPlugInWrapper.GetNumberOfCameras();

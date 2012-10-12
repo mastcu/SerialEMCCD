@@ -38,7 +38,8 @@ enum {GS_ExecuteScript = 1, GS_SetDebugMode, GS_SetDMVersion, GS_SetCurrentCamer
       GS_SelectCamera, GS_SetReadMode, GS_GetNumberOfCameras, GS_IsCameraInserted,
       GS_InsertCamera, GS_GetDMVersion, GS_GetDMCapabilities,
       GS_SetShutterNormallyClosed, GS_SetNoDMSettling, GS_GetDSProperties,
-      GS_AcquireDSImage, GS_ReturnDSChannel, GS_StopDSAcquisition, GS_CheckReferenceTime};
+      GS_AcquireDSImage, GS_ReturnDSChannel, GS_StopDSAcquisition, GS_CheckReferenceTime,
+      GS_SetK2Parameters};
 
 static int sNumLongSend;
 static int sNumBoolSend;
@@ -67,8 +68,8 @@ struct ArgDescriptor {
   BOOL hasLongArray;
 };
 
-// Table of functions, with # of incoming long, boo, and double, # of outgoing
-// long, bool and double, and whether there is a long array at then, whose size is
+// Table of functions, with # of incoming long, bool, and double, # of outgoing
+// long, bool and double, and whether there is a long array at the end, whose size is
 // in the last long argument
 static ArgDescriptor sFuncTable[] = {
   {GS_ExecuteScript,        1, 1, 0,   0, 0, 1,   TRUE},
@@ -93,6 +94,7 @@ static ArgDescriptor sFuncTable[] = {
   {GS_ReturnDSChannel,      5, 0, 0,   3, 0, 0,   FALSE},
   {GS_StopDSAcquisition,    0, 0, 0,   0, 0, 0,   FALSE},
   {GS_CheckReferenceTime,   1, 0, 0,   2, 0, 0,   TRUE},
+  {GS_SetK2Parameters,      3, 3, 2,   0, 0, 0,   TRUE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -489,6 +491,12 @@ static int ProcessCommand(int numBytes)
 
     case GS_SetReadMode:
       gPlugInWrapper.SetReadMode(sLongArgs[1], sDoubleArgs[0]);
+      SendArgsBack(0);
+      break;
+
+    case GS_SetK2Parameters:
+      gPlugInWrapper.SetK2Parameters(sLongArgs[1], sDoubleArgs[0], sLongArgs[2], 
+        sBoolArgs[0], sDoubleArgs[1], sBoolArgs[1], sBoolArgs[2], (char *)sLongArray);
       SendArgsBack(0);
       break;
 

@@ -46,6 +46,7 @@ public:
 	STDMETHOD(GetNumberOfCameras)(/*[out]*/long *numCameras);
 	STDMETHOD(SelectCamera)(/*[in]*/long camera);
 	STDMETHOD(SetReadMode)(/*[in]*/long mode, /*[in]*/double scaling);
+  STDMETHOD(SetK2Parameters)(/*[in]*/long mode, /*[in]*/double scaling, /*[in]*/long hardwareProc, /*[in]*/BOOL doseFrac, /*[in]*/double frameTime, /*[in]*/BOOL alignFrames, /*[in]*/BOOL saveFrames, /*[in]*/long filtSize, /*[in, size_is(filtSize)]*/long filter[]);
 	STDMETHOD(GetGainReference)(/*[out, size_is(*arrSize)]*/float array[], /*[in, out]*/long *arrSize, 
 		/*[out]*/long *width, /*[out]*/long *height, /*[in]*/long binning);
 	STDMETHOD(GetAcquiredImage)(/*[out, size_is(*arrSize)]*/short array[], /*[in, out]*/long *arrSize, 

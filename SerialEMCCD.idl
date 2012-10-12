@@ -38,6 +38,7 @@ import "ocidl.idl";
 		[id(23), helpstring("method ReturnDSChannel")] HRESULT ReturnDSChannel([out, size_is(*arrSize)]short array[], [in, out]long *arrSize, [in, out]long *width, [in, out]long *height, [in]long channel, [in]long divideBy2);
 	  [id(24), helpstring("method StopDSAcquisition")] HRESULT StopDSAcquisition();
 		[id(25), helpstring("method SetReadMode")] HRESULT SetReadMode([in]long mode, [in]double scaling);
+		[id(26), helpstring("method SetK2Parameters")] HRESULT SetK2Parameters([in]long mode, [in]double scaling, [in]long hardwareProc, [in]BOOL doseFrac, [in]double frameTime, [in]BOOL alignFrames, [in]BOOL saveFrames, [in]long filtSize, [in, size_is(filtSize)]long filter[]);
   };
 	
 	

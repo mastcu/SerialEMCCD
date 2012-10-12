@@ -37,6 +37,8 @@ public:
 	int GetNumberOfCameras();
 	int SelectCamera(long camera);
 	void SetReadMode(long mode, double scaling);
+  void SetK2Parameters(long readMode, double scaling, long hardwareProc, BOOL doseFrac, 
+    double frameTime, BOOL alignFrames, BOOL saveFrames, char *filter);
 	int GetImage(short *array, long *arrSize, long *width, 
 		long *height, long processing, double exposure,
 		long binning, long top, long left, long bottom, 

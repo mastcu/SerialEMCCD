@@ -16,7 +16,8 @@ using namespace std ;
 
 
 #define MAX_TEMP_STRING   1000
-#define MAX_CAMERAS  4
+#define MAX_FILTER_NAME   64
+#define MAX_CAMERAS  10
 #define MAX_DS_CHANNELS 8
 enum {CHAN_UNUSED = 0, CHAN_ACQUIRED, CHAN_RETURNED};
 
@@ -31,6 +32,8 @@ public:
 	int GetNumberOfCameras();
 	int SelectCamera(long camera);
 	void SetReadMode(long mode, double scaling);
+  void SetK2Parameters(long readMode, double scaling, long hardwareProc, BOOL doseFrac, 
+    double frameTime, BOOL alignFrames, BOOL saveFrames, char *filter);
 	double ExecuteClientScript(char *strScript, BOOL selectCamera);
 	int AcquireAndTransferImage(void *array, int dataSize, long *arrSize, long *width,
 		long *height, long divideBy2, long transpose, long delImage);
@@ -59,35 +62,7 @@ public:
 	virtual void Run();
 	virtual void Cleanup();
 	virtual void End();
-	TemplatePlugIn()
-	{
-		m_bDebug = getenv("SERIALEMCCD_DEBUG") != NULL;
-    m_iDebugVal = 0;
-    if (m_bDebug)
-      m_iDebugVal = atoi(getenv("SERIALEMCCD_DEBUG"));
-
-		m_iDMVersion = 340;
-		m_iCurrentCamera = 0;
-		m_strQueue.resize(0);
-    for (int i = 0; i < MAX_CAMERAS; i++)
-      m_iDMSettlingOK[i] = 1;
-    for (int j = 0; j < MAX_DS_CHANNELS; j++)
-      m_iDSAcquired[j] = CHAN_UNUSED;
-#ifdef GMS2
-    m_bGMS2 = true;
-#else
-    m_bGMS2 = false;
-#endif
-    m_bContinuousDS = false;
-    m_iDSparamID = 0;
-    m_iDSimageID = 0;
-    m_iExtraDSdelay = 10;
-    m_dFlyback = 400.;
-    m_dLineFreq = 60.;
-    m_dSyncMargin = 10.;
-    m_iReadMode = -1;
-    m_fFloatScaling = 1.;
-	}
+	TemplatePlugIn();
 
   int m_iDebugVal;
 	
@@ -112,6 +87,12 @@ private:
   double m_dSyncMargin;
   int m_iReadMode;
   float m_fFloatScaling;
+  BOOL m_bDoseFrac;
+  double m_dFrameTime;
+  BOOL m_bAlignFrames;
+  char m_strFilterName[MAX_FILTER_NAME];
+  BOOL m_bSaveFrames;
+  int m_iHardwareProc;
 };
 
 // Declarations of global functions called from here
@@ -120,6 +101,39 @@ BOOL WasCOMInitialized();
 int GetSocketInitialization(int &wsaError);
 int StartSocket(int &wsaError);
 void ShutdownSocket(void);
+
+TemplatePlugIn::TemplatePlugIn()
+{
+  m_bDebug = getenv("SERIALEMCCD_DEBUG") != NULL;
+  m_iDebugVal = 0;
+  if (m_bDebug)
+    m_iDebugVal = atoi(getenv("SERIALEMCCD_DEBUG"));
+
+  m_iDMVersion = 340;
+  m_iCurrentCamera = 0;
+  m_strQueue.resize(0);
+  for (int i = 0; i < MAX_CAMERAS; i++)
+    m_iDMSettlingOK[i] = 1;
+  for (int j = 0; j < MAX_DS_CHANNELS; j++)
+    m_iDSAcquired[j] = CHAN_UNUSED;
+#ifdef GMS2
+  m_bGMS2 = true;
+#else
+  m_bGMS2 = false;
+#endif
+  m_bContinuousDS = false;
+  m_iDSparamID = 0;
+  m_iDSimageID = 0;
+  m_iExtraDSdelay = 10;
+  m_dFlyback = 400.;
+  m_dLineFreq = 60.;
+  m_dSyncMargin = 10.;
+  m_iReadMode = -1;
+  m_fFloatScaling = 1.;
+  m_iHardwareProc = 6;
+  m_bDoseFrac = false;
+}
+
 
 ///
 /// This is called when the plugin is loaded.  Whenever DM is
@@ -379,11 +393,22 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
   // Commands for K2 camera
   if (m_iReadMode >= 0) {
+    if (m_bDoseFrac) {
+      sprintf(m_strTemp, "Object k2dfa = alloc(K2_DoseFracAcquisition)\n"
+        "k2dfa.DoseFrac_SetHardwareProcessing(%d)\n"
+        "k2dfa.DoseFrac_SetAlignOption(%d)\n"
+        "k2dfa.DoseFrac_SetFrameExposure(%f)\n", m_iReadMode ? m_iHardwareProc : 0,
+        m_bAlignFrames ? 1 : 0, m_dFrameTime);
+      m_strCommand += m_strTemp;
+      if (m_bAlignFrames) 
+        sprintf(m_strTemp, "k2dfa.DoseFrac_SetFilter(%s)\n", m_strFilterName);
+      m_strCommand += m_strTemp;
+    }
     sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
       "K2_SetHardwareProcessing(camera, %d)\n"
       "Number wait_time_s\n"
       "CM_PrepareCameraForAcquire(manager, camera, acqParams, NULL, wait_time_s)\n"
-      "Sleep(wait_time_s)\n", readModes[m_iReadMode], m_iReadMode ? 6 : 0);
+      "Sleep(wait_time_s)\n", readModes[m_iReadMode], m_iReadMode ? m_iHardwareProc : 0);
     m_strCommand += m_strTemp;
   }
 
@@ -439,6 +464,9 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 					"Image img := CM_AcquireImage(camera, acqParams)\n";
 //			"Image img := CM_CreateImageForAcquire(camera, acqParams, \"temp\")\n"
 //						"CM_AcquireDarkReference(camera, acqParams, img, NULL)\n";
+    else if (m_iReadMode >= 0 && m_bDoseFrac)
+      m_strCommand += "Image img := k2dfa.DoseFrac_AcquireImage(camera, acqParams)\n";
+
 		else
 			m_strCommand += "Image img := CM_AcquireImage(camera, acqParams)\n";
 	}
@@ -728,6 +756,24 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
     mode = 2;
   m_iReadMode = mode;
   m_fFloatScaling = (float)(mode > 0 ? scaling : 1.);
+}
+
+void TemplatePlugIn::SetK2Parameters(long readMode, double scaling, long hardwareProc, 
+                                     BOOL doseFrac, double frameTime, BOOL alignFrames, 
+                                     BOOL saveFrames, char *filter)
+{
+  m_iReadMode = readMode;
+  m_fFloatScaling = scaling;
+  m_iHardwareProc = hardwareProc;
+  m_bDoseFrac = doseFrac;
+  m_dFrameTime = frameTime;
+  m_bAlignFrames = alignFrames;
+  if (alignFrames) {
+    strncpy(m_strFilterName, filter, MAX_FILTER_NAME - 1);
+    m_strFilterName[MAX_FILTER_NAME - 1] = 0x00;
+  }
+  m_bSaveFrames = saveFrames;
+
 }
 
 // Return number of cameras or -1 for error
@@ -1132,6 +1178,14 @@ int PlugInWrapper::SelectCamera(long camera)
 void PlugInWrapper::SetReadMode(long mode, double scaling)
 {
 	gTemplatePlugIn.SetReadMode(mode, scaling);
+}
+
+void PlugInWrapper::SetK2Parameters(long readMode, double scaling, long hardwareProc, 
+                                    BOOL doseFrac, double frameTime, BOOL alignFrames, 
+                                    BOOL saveFrames, char *filter)
+{
+  gTemplatePlugIn.SetK2Parameters(readMode, scaling, hardwareProc, doseFrac, frameTime, 
+    alignFrames, saveFrames, filter);
 }
 
 int PlugInWrapper::GetNumberOfCameras()
