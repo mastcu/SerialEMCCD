@@ -400,9 +400,10 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
         "k2dfa.DoseFrac_SetFrameExposure(%f)\n", m_iReadMode ? m_iHardwareProc : 0,
         m_bAlignFrames ? 1 : 0, m_dFrameTime);
       m_strCommand += m_strTemp;
-      if (m_bAlignFrames) 
-        sprintf(m_strTemp, "k2dfa.DoseFrac_SetFilter(%s)\n", m_strFilterName);
-      m_strCommand += m_strTemp;
+      if (m_bAlignFrames) {
+        sprintf(m_strTemp, "k2dfa.DoseFrac_SetFilter(\"%s\")\n", m_strFilterName);
+        m_strCommand += m_strTemp;
+      }
     }
     sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
       "K2_SetHardwareProcessing(camera, %d)\n"
@@ -465,7 +466,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 //			"Image img := CM_CreateImageForAcquire(camera, acqParams, \"temp\")\n"
 //						"CM_AcquireDarkReference(camera, acqParams, img, NULL)\n";
     else if (m_iReadMode >= 0 && m_bDoseFrac)
-      m_strCommand += "Image img := k2dfa.DoseFrac_AcquireImage(camera, acqParams)\n";
+      m_strCommand += "Image stack\n"
+      "Image img := k2dfa.DoseFrac_AcquireImage(camera, acqParams, stack)\n";
 
 		else
 			m_strCommand += "Image img := CM_AcquireImage(camera, acqParams)\n";
@@ -642,13 +644,20 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           usData = (unsigned short *)imageLp->get();
           for (i = 0; i < *width * *height; i++)
             outData[i] = (short)(usData[i] / 2);
-        } else {
+        } else if (m_fFloatScaling == 1.) {
 
           // unsigned long to short
           DebugToResult("Dividing unsigned integers by 2\n");
           uiData = (unsigned int *)imageLp->get();
           for (i = 0; i < *width * *height; i++)
             outData[i] = (short)(uiData[i] / 2);
+        } else {
+
+          // unsigned long to short with scaling
+          DebugToResult("Dividing unsigned integers by 2 with scaling\n");
+          uiData = (unsigned int *)imageLp->get();
+          for (i = 0; i < *width * *height; i++)
+            outData[i] = (short)(uiData[i] * m_fFloatScaling / 2. + 0.5);
         }
       } else if (isInteger) {
         if (byteSize == 2) {
@@ -669,7 +678,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       } else {
 
         // Float to short
-        DebugToResult("Dividing floats by 2\n");
+        DebugToResult("Dividing floats by 2 with scaling\n");
         flIn = (float *)imageLp->get();
         for (i = 0; i < *width * *height; i++)
           outData[i] = (short)(flIn[i] * m_fFloatScaling / 2. + 0.5);
@@ -680,12 +689,21 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       // No division by 2: Convert long integers to unsigned shorts
       usData = (unsigned short *)array;
       if (DM::ImageIsDataTypeUnsignedInteger(image.get())) {
+        if (m_fFloatScaling == 1.) {
 
-        // If these are long integers and they are unsigned, just transfer
-        DebugToResult("Converting unsigned integers to unsigned shorts\n");
-        uiData = (unsigned int *)imageLp->get();
-        for (i = 0; i < *width * *height; i++)
-          usData[i] = (unsigned short)uiData[i];
+          // If these are long integers and they are unsigned, just transfer
+          DebugToResult("Converting unsigned integers to unsigned shorts\n");
+          uiData = (unsigned int *)imageLp->get();
+          for (i = 0; i < *width * *height; i++)
+            usData[i] = (unsigned short)uiData[i];
+        } else {
+
+          // Or scale them
+          DebugToResult("Converting unsigned integers to unsigned shorts with scaling\n");
+          uiData = (unsigned int *)imageLp->get();
+          for (i = 0; i < *width * *height; i++)
+            usData[i] = (unsigned short)(uiData[i] * m_fFloatScaling + 0.5);
+        }
       } else if (isInteger) {
 
         // Otherwise need to truncate at zero to copy signed to unsigned
@@ -701,7 +719,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       } else {
 
         //Float to unsigned with truncation
-        DebugToResult("Converting floats to unsigned shorts with truncation\n");
+        DebugToResult("Converting floats to unsigned shorts with truncation and "
+            "scaling\n");
         flIn = (float *)imageLp->get();
         for (i = 0; i < *width * *height; i++) {
           if (flIn[i] >= 0)
@@ -758,12 +777,14 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
   m_fFloatScaling = (float)(mode > 0 ? scaling : 1.);
 }
 
-void TemplatePlugIn::SetK2Parameters(long readMode, double scaling, long hardwareProc, 
+void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwareProc, 
                                      BOOL doseFrac, double frameTime, BOOL alignFrames, 
                                      BOOL saveFrames, char *filter)
 {
-  m_iReadMode = readMode;
-  m_fFloatScaling = scaling;
+  if (mode > 2)
+    mode = 2;
+  m_iReadMode = mode;
+  m_fFloatScaling = (float)(mode > 0 ? scaling : 1.);
   m_iHardwareProc = hardwareProc;
   m_bDoseFrac = doseFrac;
   m_dFrameTime = frameTime;
