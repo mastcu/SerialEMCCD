@@ -27,6 +27,8 @@ static char sMessageBuf[160];
 static SOCKET sHListener;
 static SOCKET sHClient = INVALID_SOCKET; 
 static int sChunkSize = 16777216;     // Tests indicated this size was optimal
+// This is exactly 4K x 2K x 2, failures occurred above twice this size
+static int sSuperChunkSize = 33554432;  
 
 // Declarations needed on both sides
 #define ARGS_BUFFER_SIZE 1024
@@ -39,7 +41,7 @@ enum {GS_ExecuteScript = 1, GS_SetDebugMode, GS_SetDMVersion, GS_SetCurrentCamer
       GS_InsertCamera, GS_GetDMVersion, GS_GetDMCapabilities,
       GS_SetShutterNormallyClosed, GS_SetNoDMSettling, GS_GetDSProperties,
       GS_AcquireDSImage, GS_ReturnDSChannel, GS_StopDSAcquisition, GS_CheckReferenceTime,
-      GS_SetK2Parameters};
+      GS_SetK2Parameters, GS_ChunkHandshake};
 
 static int sNumLongSend;
 static int sNumBoolSend;
@@ -77,9 +79,9 @@ static ArgDescriptor sFuncTable[] = {
   {GS_SetDMVersion,         1, 0, 0,   0, 0, 0,   FALSE},
   {GS_SetCurrentCamera,     1, 0, 0,   0, 0, 0,   FALSE},
   {GS_QueueScript,          1, 0, 0,   0, 0, 0,   TRUE},
-  {GS_GetAcquiredImage,    13, 0, 2,   3, 0, 0,   FALSE},
-  {GS_GetDarkReference,    11, 0, 2,   3, 0, 0,   FALSE},
-  {GS_GetGainReference,     4, 0, 0,   3, 0, 0,   FALSE},
+  {GS_GetAcquiredImage,    13, 0, 2,   4, 0, 0,   FALSE},
+  {GS_GetDarkReference,    11, 0, 2,   4, 0, 0,   FALSE},
+  {GS_GetGainReference,     4, 0, 0,   4, 0, 0,   FALSE},
   {GS_SelectCamera,         1, 0, 0,   0, 0, 0,   FALSE},
   {GS_SetReadMode,          1, 0, 1,   0, 0, 0,   FALSE},
   {GS_GetNumberOfCameras,   0, 0, 0,   1, 0, 0,   FALSE},
@@ -90,8 +92,8 @@ static ArgDescriptor sFuncTable[] = {
   {GS_SetShutterNormallyClosed,   2, 0, 0,   0, 0, 0,   FALSE},
   {GS_SetNoDMSettling,      1, 0, 0,   0, 0, 0,   FALSE},
   {GS_GetDSProperties,      1, 0, 2,   1, 0, 3,   FALSE},
-  {GS_AcquireDSImage,       7, 0, 2,   3, 0, 0,   TRUE},
-  {GS_ReturnDSChannel,      5, 0, 0,   3, 0, 0,   FALSE},
+  {GS_AcquireDSImage,       7, 0, 2,   4, 0, 0,   TRUE},
+  {GS_ReturnDSChannel,      5, 0, 0,   4, 0, 0,   FALSE},
   {GS_StopDSAcquisition,    0, 0, 0,   0, 0, 0,   FALSE},
   {GS_CheckReferenceTime,   1, 0, 0,   2, 0, 0,   TRUE},
   {GS_SetK2Parameters,      3, 3, 2,   0, 0, 0,   TRUE},
@@ -377,7 +379,58 @@ static void ReportErrorAndClose(int retval, const char *message)
   CloseClient();
 }
 
-// Process a recieved message
+// Close up on error or signal from plugin
+static void CloseOnExitOrSelectError(int err)
+{
+  //gPlugInWrapper.DebugToResult("Closing socket\n");
+  CloseClient();
+  closesocket(sHListener);
+  //if (sCloseForExit)
+  //Cleanup();
+  if (err < 0) {
+    sLastWSAerror = WSAGetLastError();
+    sStartupError = 7;
+    sprintf(sMessageBuf, "WSA Error %d on select command\n");
+    gPlugInWrapper.ErrorToResult(sMessageBuf, "SerialEMSocket: ");
+  }
+}
+
+// Wait for the client to acknowledge receipt of a superchunk of image
+static int ListenForHandshake(int superChunk)
+{
+  struct timeval tv;
+  int numBytes, err, numExpected, command;
+  fd_set readFds;      // file descriptor list for select()
+  tv.tv_sec = 0;
+  tv.tv_usec = superChunk / 5;    // This is 5 MB /sec
+
+  FD_ZERO(&readFds);
+  FD_SET(sHClient, &readFds);
+  err = select(1, &readFds, NULL, NULL, &tv);
+  if (err < 0 || sCloseForExit) {
+    CloseOnExitOrSelectError(err);
+    return sStartupError;
+  }
+
+  // A timeout - close client for this so client fails
+  if (!err) {
+    ReportErrorAndClose(0, "timeout on handshake from client");
+    return 1;
+  }
+
+  numBytes = recv(sHClient, sArgsBuffer, ARGS_BUFFER_SIZE, 0);
+
+  // Close client on error or disconnect or too few bytes or anything wrong
+  memcpy(&numExpected, &sArgsBuffer[0], sizeof(int));
+  memcpy(&command, &sArgsBuffer[4], sizeof(int));
+  if (command != GS_ChunkHandshake || numExpected != 8 || numBytes != 8) {
+    ReportErrorAndClose(numBytes, "recv handshake from ready client");
+    return 1;
+  }
+  return 0;
+}
+
+// Process a received message
 static int ProcessCommand(int numBytes)
 {
   int funcCode, ind, needed, version;
@@ -614,12 +667,32 @@ static int SendArgsBack(int retval)
 // error
 static void SendImageBack(int retval, short *imArray, int bytesPerPixel)
 {
-  int err = SendArgsBack(retval);
-  sprintf(sMessageBuf, "retval = %d, err sending args %d, sending image %d\n", retval, 
-    err, sLongArgs[1] * bytesPerPixel);
+  int numChunks, chunkSize, numToSend, numLeft, err, imSize, totalSent = 0;
+
+  // determine number of superchunks and send that back as fourth long
+  imSize = sLongArgs[1] * bytesPerPixel;
+  numChunks = (imSize + sSuperChunkSize - 1) / sSuperChunkSize;
+  sLongArgs[4] = numChunks;
+  err = SendArgsBack(retval);
+  sprintf(sMessageBuf, "retval = %d, err sending args %d, sending image %d in %d chunks\n"
+    , retval, err, imSize, numChunks);
   gPlugInWrapper.DebugToResult(sMessageBuf);
-  if (!err && !retval)
-    SendBuffer((char *)imArray, sLongArgs[1] * bytesPerPixel);
+  if (!err && !retval) {
+
+    // Loop on the chunks until done, getting acknowledgement after each
+    numLeft = imSize;
+    chunkSize = (imSize + numChunks - 1) / numChunks;
+    while (totalSent < imSize) {
+      numToSend = chunkSize;
+      if (chunkSize > imSize - totalSent)
+        numToSend = imSize - totalSent;
+      if (SendBuffer((char *)imArray + totalSent, numToSend))
+        break;
+      totalSent += numToSend;
+      if (totalSent < imSize && ListenForHandshake(numToSend))
+        break;
+    }
+  }
   delete [] imArray;
 }
 
