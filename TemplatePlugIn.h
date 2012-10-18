@@ -1,8 +1,9 @@
 #pragma once
 #define SCRIPT_ERROR_RETURN  -999.
-#define IMAGE_NOT_FOUND  1
-#define WRONG_DATA_TYPE  2
-#define DM_CALL_EXCEPTION 3
+enum {IMAGE_NOT_FOUND = 1, WRONG_DATA_TYPE, DM_CALL_EXCEPTION, NO_STACK_ID, STACK_NOT_3D,
+FILE_OPEN_ERROR, SEEK_ERROR, WRITE_DATA_ERROR, HEADER_ERROR, ROTBUF_MEMORY_ERROR, 
+DIR_ALREADY_EXISTS, DIR_CREATE_ERROR, DIR_NOT_EXIST, SAVEDIR_IS_FILE, DIR_NOT_WRITABLE,
+FILE_ALREADY_EXISTS};
 #define DARK_REFERENCE  -1
 #define UNPROCESSED 0
 #define DARK_SUBTRACTED 1
@@ -39,6 +40,9 @@ public:
 	void SetReadMode(long mode, double scaling);
   void SetK2Parameters(long readMode, double scaling, long hardwareProc, BOOL doseFrac, 
     double frameTime, BOOL alignFrames, BOOL saveFrames, char *filter);
+  void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize,
+    char *dirName, char *rootName, long *error);
+  void GetFileSaveResult(long *numSaved, long *error);
 	int GetImage(short *array, long *arrSize, long *width, 
 		long *height, long processing, double exposure,
 		long binning, long top, long left, long bottom, 

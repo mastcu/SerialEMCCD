@@ -14,12 +14,22 @@ using namespace Gatan;
 #include <string>
 using namespace std ;
 
+#include <stdio.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <direct.h>
+#include "Shared\mrcfiles.h"
+#include "Shared\b3dutil.h"
 
 #define MAX_TEMP_STRING   1000
 #define MAX_FILTER_NAME   64
 #define MAX_CAMERAS  10
 #define MAX_DS_CHANNELS 8
+#define ID_MULTIPLIER 100000
 enum {CHAN_UNUSED = 0, CHAN_ACQUIRED, CHAN_RETURNED};
+enum {NO_SAVE = 0, SAVE_FRAMES};
+enum {NO_DEL_IM = 0, DEL_IMAGE};
 
 class TemplatePlugIn : 	public Gatan::PlugIn::PlugInMain
 {
@@ -34,9 +44,18 @@ public:
 	void SetReadMode(long mode, double scaling);
   void SetK2Parameters(long readMode, double scaling, long hardwareProc, BOOL doseFrac, 
     double frameTime, BOOL alignFrames, BOOL saveFrames, char *filter);
+  void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, 
+    char *dirName, char *rootName, long *error);
+  void GetFileSaveResult(long *numSaved, long *error);
 	double ExecuteClientScript(char *strScript, BOOL selectCamera);
 	int AcquireAndTransferImage(void *array, int dataSize, long *arrSize, long *width,
-		long *height, long divideBy2, long transpose, long delImage);
+		long *height, long divideBy2, long transpose, long delImage, long saveFrames);
+  void  ProcessImage(void *imageData, void *array, int dataSize, 
+											            long width, long height, long divideBy2, 
+                                  long transpose, int byteSize, bool isInteger,
+                                  bool isUnsignedInt);
+  void RotateFlip(short int *array, int mode, int nx, int ny, int operation, 
+                    short int *brray, int *nxout, int *nyout);
 	void AddCameraSelection(int camera = -1);
 	int GetGainReference(float *array, long *arrSize, long *width, 
 							long *height, long binning);
@@ -93,6 +112,13 @@ private:
   char m_strFilterName[MAX_FILTER_NAME];
   BOOL m_bSaveFrames;
   int m_iHardwareProc;
+  char *m_strRootName;
+  char *m_strSaveDir;
+  BOOL m_bFilePerImage;
+  int m_iFramesSaved;
+  int m_iErrorFromSave;
+  double m_dPixelSize;
+  int m_iRotationFlip;
 };
 
 // Declarations of global functions called from here
@@ -132,6 +158,18 @@ TemplatePlugIn::TemplatePlugIn()
   m_fFloatScaling = 1.;
   m_iHardwareProc = 6;
   m_bDoseFrac = false;
+  m_bSaveFrames = false;
+  m_strRootName = NULL;
+  m_strSaveDir = NULL;
+  m_bFilePerImage = true;
+  m_iRotationFlip = 7;
+  m_dPixelSize = 5.;
+  const char *temp = getenv("SERIALEMCCD_ROOTNAME");
+  if (temp)
+    m_strRootName = _strdup(temp);
+  temp = getenv("SERIALEMCCD_SAVEDIR");
+  if (temp)
+    m_strSaveDir = _strdup(temp);
 }
 
 
@@ -316,6 +354,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
               long divideBy2, long corrections)
 {
   int readModes[3] = {K2_LINEAR_READ_MODE, K2_COUNTING_READ_MODE, K2_SUPERRES_READ_MODE};
+  int saveFrames = NO_SAVE;
 
   //sprintf(m_strTemp, "Entering GetImage with divideBy2 %d\n", divideBy2);
   //DebugToResult(m_strTemp);
@@ -479,14 +518,27 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 	
 	// Final calls to retain image and return its ID
 	sprintf(m_strTemp, "KeepImage(img)\n"
-		"number retval = GetImageID(img)\n"
-		"Exit(retval)");
+		"number retval = GetImageID(img)\n");
+	m_strCommand += m_strTemp;
+  if (m_bSaveFrames && m_iReadMode >= 0 && m_bDoseFrac && m_strSaveDir && m_strRootName) {
+    saveFrames = SAVE_FRAMES;
+  	sprintf(m_strTemp, "KeepImage(stack)\n"
+      "number stackID = GetImageID(stack)\n"
+      "Result(retval + \"  \" + stackID + \"\\n\")\n"
+	  	"retval = retval + %d * stackID\n", ID_MULTIPLIER);
+  	m_strCommand += m_strTemp;
+  } else if (m_bSaveFrames) {
+    sprintf(m_strTemp, "Save set but %d %d   %s   %s\n", m_iReadMode, m_bDoseFrac ? 1 : 0,
+      m_strSaveDir ? m_strSaveDir : "NO DIR", m_strRootName ? m_strRootName : "NO ROOT");
+    DebugToResult(m_strTemp);
+  }
+  sprintf(m_strTemp, "Exit(retval)");
 	m_strCommand += m_strTemp;
 
   //sprintf(m_strTemp, "Calling AcquireAndTransferImage with divideBy2 %d\n", divideBy2);
   //DebugToResult(m_strTemp);
 	int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
-    divideBy2, 0, 1);	
+    divideBy2, 0, DEL_IMAGE, saveFrames);	
 
 	return retval;
 }
@@ -516,35 +568,49 @@ int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width,
 		"number retval = GetImageID(img)\n"
 		"Exit(retval)", binning);
 	m_strCommand += m_strTemp;
-	return AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0, transpose, 1);
+	return AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0, transpose, 
+    DEL_IMAGE, NO_SAVE);
 }
+
+#define SET_ERROR(a) if (doingStack) \
+        m_iErrorFromSave = a; \
+      else \
+        errorRet = a; \
+      continue;
 
 /*
  * Common routine for executing the current command script, getting an image ID back from
  * it, and copy the image into the supplied array with various transformations
  */
 int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arrSize, 
-											long *width, long *height, long divideBy2, long transpose, long delImage)
+											long *width, long *height, long divideBy2, long transpose, 
+                      long delImage, long saveFrames)
 {
-	long ID;
+	long ID, imageID, stackID;
 	DM::Image image;
 	long outLimit = *arrSize;
-  int byteSize, i, j;
-  unsigned int *uiData;
-  int *iData;
+  int byteSize, i, j, numDim, loop, numLoop = 1;
   unsigned short *usData;
-  GatanPlugIn::ImageDataLocker *imageLp;
+  unsigned char *bData;
+  GatanPlugIn::ImageDataLocker *imageLp = NULL;
+  ImageData::image_data_t fData;
   void *imageData;
-  short *outData;
+  short *outData, *outForRot, *rotBuf = NULL;
   short *sData;
-  float *flIn, *flOut, flTmp;
-  bool isInteger;
-  double retval;
+  bool isInteger, isUnsignedInt, doingStack;
+  double retval, procWall, saveWall, wallStart, wallNow;
+  FILE *fp = NULL;
+  MrcHeader hdata;
+  int fileSlice, tmin, tmax, tsum, val, numSlices, fileMode, nxout, nyout;
+  float tmean, meanSum;
+  int errorRet = 0;
 
 	// Set these values to zero in case of error returns
 	*width = 0;
 	*height = 0;
 	*arrSize = 0;
+  m_iFramesSaved = 0;
+  m_iErrorFromSave = 0;
 
 	// Execute the command string as developed
   if (m_strCommand.length() > 0)
@@ -557,190 +623,626 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 	if (retval == SCRIPT_ERROR_RETURN)
 		return (int)retval;
 
-	// Could there be exceptions? Play it safe
-	try {
-		// Get the image
-		ID = (long)(retval + 0.01);
-		if (!DM::GetImageFromID(image, ID)) {
-			ErrorToResult("Image not found from ID\n");
-			return IMAGE_NOT_FOUND;
-		}
-		
-		// Check the data type (may need to be fancier)
-		byteSize = DM::ImageGetDataElementByteSize(image.get());
-    isInteger = DM::ImageIsDataTypeInteger(image.get());
-    if (byteSize != dataSize && !(dataSize == 2 && byteSize == 4 && 
-      (isInteger || DM::ImageIsDataTypeFloat(image.get())))) {
-			ErrorToResult("Image data are not of the expected type\n");
-			return WRONG_DATA_TYPE;
-		}
+  // Get the image ID(s)
+  ID = imageID = (long)(retval + 0.01);
+  if (saveFrames) {
+    stackID = B3DNINT(retval / ID_MULTIPLIER);
+    imageID = B3DNINT(retval - stackID * ID_MULTIPLIER);
+    if (stackID) {
+      numLoop = 2;
+      ID = stackID;
+    } else {
+      saveFrames = 0;
+      m_iErrorFromSave = NO_STACK_ID;
+    }
+    sprintf(m_strTemp, "Image ID %d  stack ID %d\n", imageID, stackID);
+    DebugToResult(m_strTemp);
+  }
 
-		// Get the size and adjust if necessary to fit output array
-		DM::GetSize( image.get(), width, height );
-		if (*width * *height > outLimit) {
-			ErrorToResult("Warning: image is larger than the supplied array\n",
-        "\nA problem occurred acquiring an image for SerialEM:\n");
-			*height = outLimit / *width;
-		}
-		
-		// Get data pointer and transfer the data
-    imageLp = new GatanPlugIn::ImageDataLocker( image );
-    imageData = imageLp->get();
+  // Loop on stack then image if there are both
+  for (loop = 0; loop < numLoop; loop++) {
+    doingStack = saveFrames && !loop;
+    delete imageLp;
+    imageLp = NULL;
+    if (loop)
+      ID = imageID;
+    try {
 
-    // Do a simple copy if sizes match and not dividing by 2 and not transposing
-    if (dataSize == byteSize && !divideBy2) {
-      if (!(transpose & 1)) {
-        DebugToResult("Copying data\n");
-        memcpy(array, imageLp->get(), *width * *height * dataSize);
-      } else {
-
-        // Otherwise transpose floats around Y axis
-        DebugToResult("Copying float data with transposition around Y\n");
-        for (j = 0; j < *height; j++) {
-          flIn = (float *)imageLp->get() + j * *width;
-          flOut = (float *)array + (j + 1) * *width - 1;
-          for (i = 0; i < *width; i++)
-            *flOut-- = *flIn++;
-        }
+      if (!DM::GetImageFromID(image, ID)) {
+        sprintf(m_strTemp, "Image not found from ID %d\n", ID);
+        ErrorToResult(m_strTemp);
+        SET_ERROR(IMAGE_NOT_FOUND);
       }
 
-      // Do further transpositions in place for float data
-      if (transpose & 2) {
-        DebugToResult("Transposing float data around X in place\n");
-        for (j = 0; j < *height / 2; j++) {
-          flIn = (float *)array + j * *width;
-          flOut = (float *)array + (*height - j - 1) * *width;
-          for (i = 0; i < *width; i++) {
-            flTmp = *flIn;
-            *flIn++ = *flOut;
-            *flOut++ = flTmp;
+      // Check the data type (may need to be fancier)
+      byteSize = DM::ImageGetDataElementByteSize(image.get());
+      isInteger = DM::ImageIsDataTypeInteger(image.get());
+      isUnsignedInt = DM::ImageIsDataTypeUnsignedInteger(image.get());
+      if (byteSize != dataSize && !((dataSize == 2 && byteSize == 4 && 
+        (isInteger || DM::ImageIsDataTypeFloat(image.get()))) ||
+        (dataSize == 2 && byteSize == 1 && isUnsignedInt && doingStack))) {
+          sprintf(m_strTemp, "Image data are not of the expected type (bs %d  ds %d  int"
+             " %d  uint %d)\n", byteSize, dataSize, isInteger ? 1:0, isUnsignedInt?1:0);
+          ErrorToResult(m_strTemp);
+          SET_ERROR(WRONG_DATA_TYPE);
+      }
+
+      // Get the size and adjust if necessary to fit output array
+      DM::GetSize( image.get(), width, height );
+      if (*width * *height > outLimit) {
+        ErrorToResult("Warning: image is larger than the supplied array\n",
+          "\nA problem occurred acquiring an image for SerialEM:\n");
+        *height = outLimit / *width;
+      }
+
+      // Get data pointer and transfer the data
+      imageLp = new GatanPlugIn::ImageDataLocker( image );
+      if (doingStack) {
+        numDim = DM::ImageGetNumDimensions(image.get());
+        if (numDim < 3) {
+          m_iErrorFromSave = STACK_NOT_3D;
+          continue;
+        }
+        numSlices = DM::ImageGetDimensionSize(image.get(), 2);
+        if (byteSize == 1)
+          fileMode = MRC_MODE_BYTE;
+        else if ((divideBy2 && byteSize != 2) || (dataSize == byteSize && !isUnsignedInt))
+          fileMode = MRC_MODE_SHORT;
+        else
+          fileMode = MRC_MODE_USHORT;
+
+        // Allocate buffer for rotation/flip
+        if (byteSize > 2 && m_iRotationFlip) {
+          try {
+            if (byteSize == 1)
+              rotBuf = (short *)(new unsigned char [*width * *height]);
+            else
+              rotBuf = new short [*width * *height];
+          }
+          catch (...) {
+            m_iErrorFromSave = ROTBUF_MEMORY_ERROR;
+            rotBuf = NULL;
+            continue;
           }
         }
-      }
-      if ((transpose & 256) && *width == *height) {
-        DebugToResult("Transposing float data around diagonal in place\n");
-        for (j = 0; j < *height; j++) {
-          flIn = (float *)array + j * *width + j;
-          flOut = flIn;
-          for (i = j; i < *width; i++) {
-            flTmp = *flIn;
-            *flIn++ = *flOut;
-            *flOut = flTmp;
-            flOut += *width;
+
+        procWall = saveWall = 0.;
+        wallStart = wallTime();
+        for (int slice = 0; slice < numSlices; slice++) {
+          imageLp->GetImageData(2, slice, fData);
+          imageData = fData.get_data();
+          outData = (short *)imageData;
+          outForRot = (short *)array;
+          if (byteSize > 2) {
+            ProcessImage(imageData, array, dataSize, *width, *height, divideBy2, transpose, 
+              byteSize, isInteger, isUnsignedInt);
+            outData = (short *)array;
+            outForRot = rotBuf; 
           }
+
+          // Rotate and flip if desired and change the array pointer
+          if (m_iRotationFlip) {
+            RotateFlip(outData, fileMode, *width, *height, m_iRotationFlip, outForRot,
+              &nxout, &nyout);
+            outData = outForRot;
+          } else {
+            nxout = *width;
+            nyout = *height;
+          }
+          wallNow = wallTime();
+          procWall += wallNow - wallStart;
+          wallStart = wallNow;
+
+          // open file if needed
+          if (!slice || m_bFilePerImage) {
+            if (m_bFilePerImage)
+              sprintf(m_strTemp, "%s\\%s_%03d.mrc", m_strSaveDir, m_strRootName, slice +1);
+            else
+              sprintf(m_strTemp, "%s\\%s.mrc", m_strSaveDir, m_strRootName);
+            fp = fopen(m_strTemp, "wb");
+            if (!fp) {
+              j = errno;
+              i = (int)strlen(m_strTemp);
+              m_strTemp[i] = '\n';
+              m_strTemp[i+1] = 0x00;
+              ErrorToResult(m_strTemp);
+              sprintf(m_strTemp, "Failed to open above file: %s\n", strerror(j));
+              ErrorToResult(m_strTemp);
+              m_iErrorFromSave = FILE_OPEN_ERROR;
+              break;
+            }
+
+            // Set up header for one slice
+            mrc_head_new(&hdata, nxout, nyout, 1, fileMode);
+            mrc_head_label(&hdata, "SerialEMCCD: Dose fractionation image");
+            fileSlice = 0;
+            tmin = 1000000;
+            tmax = -tmin;
+            meanSum = 0.;
+
+          }
+
+          // Initialize for getting mean of this slice, and seek to slice
+          tmean = 0.; 
+          i = mrc_big_seek(fp, hdata.headerSize, nxout * 2, nyout * fileSlice, SEEK_SET);
+          if (i) {
+            sprintf(m_strTemp, "Error %d seeking for slice %d: %s\n", i, slice, 
+              strerror(errno));
+            ErrorToResult(m_strTemp);
+            m_iErrorFromSave = SEEK_ERROR;
+            break;
+          }
+
+          // Loop on the lines in inverse order
+          for (i = nyout - 1; i >= 0; i--) {
+
+            // Get pointer to start of line, write
+            if (byteSize == 1) {
+              bData = ((unsigned char *)outData) + i * nxout;
+              sData = (short *)bData;
+            } else
+              sData = &outData[i * nxout];
+            usData = (unsigned short *)sData;
+
+            if (b3dFwrite(usData, (byteSize == 1 ? 1 : 2) * nxout, 1, fp) != 1) {
+              sprintf(m_strTemp, "Failed to write data in line %d of slice %d: %s\n", i, 
+                slice, strerror(errno));
+              ErrorToResult(m_strTemp);
+              m_iErrorFromSave = WRITE_DATA_ERROR;
+              break;
+            }
+
+            // Get min/max/sum and add to mean
+            tsum = 0;
+            if (fileMode == MRC_MODE_USHORT) {
+              for (j = 0; j < nxout; j++) {
+                val = usData[j];
+                tmin = B3DMIN(tmin, val);
+                tmax = B3DMAX(tmax, val);
+                tsum += val;
+              }
+            } else if (fileMode == MRC_MODE_SHORT) {
+              for (j = 0; j < nxout; j++) {
+                val = sData[j];
+                tmin = B3DMIN(tmin, val);
+                tmax = B3DMAX(tmax, val);
+                tsum += val;
+              }
+            } else {
+              for (j = 0; j < nxout; j++) {
+                val = bData[j];
+                tmin = B3DMIN(tmin, val);
+                tmax = B3DMAX(tmax, val);
+                tsum += val;
+              }
+ 
+            }
+            tmean += tsum;
+          }
+          if (m_iErrorFromSave)
+            continue;
+
+          // Completely update and write the header regardless of whether one file/slice
+          fileSlice++;
+          hdata.nz = hdata.mz = fileSlice;
+          hdata.amin = (float)tmin;
+          hdata.amax = (float)tmax;
+          meanSum += tmean / (float)(nxout * nyout);
+          hdata.amean = meanSum / hdata.nz;
+          mrc_set_scale(&hdata, m_dPixelSize, m_dPixelSize, m_dPixelSize);
+          if (mrc_head_write(fp, &hdata)) {
+            ErrorToResult("Failed to write header\n");
+            m_iErrorFromSave = HEADER_ERROR;
+            break;
+          }
+
+          // Finally, increment successful save count and close file if needed
+          m_iFramesSaved++;
+          if (m_bFilePerImage || slice == numSlices - 1) {
+            fclose(fp);
+            fp = NULL;
+          }
+          wallNow = wallTime();
+          saveWall += wallNow - wallStart;
+          wallStart = wallNow;
         }
-      } 
-
-
-    } else if (divideBy2) {
-
-      // Divide by 2
-      outData = (short *)array;
-      if (DM::ImageIsDataTypeUnsignedInteger(image.get())) {
-        if (byteSize == 2) {
-
-          // unsigned short to short
-          DebugToResult("Dividing unsigned shorts by 2\n");
-          usData = (unsigned short *)imageLp->get();
-          for (i = 0; i < *width * *height; i++)
-            outData[i] = (short)(usData[i] / 2);
-        } else if (m_fFloatScaling == 1.) {
-
-          // unsigned long to short
-          DebugToResult("Dividing unsigned integers by 2\n");
-          uiData = (unsigned int *)imageLp->get();
-          for (i = 0; i < *width * *height; i++)
-            outData[i] = (short)(uiData[i] / 2);
-        } else {
-
-          // unsigned long to short with scaling
-          DebugToResult("Dividing unsigned integers by 2 with scaling\n");
-          uiData = (unsigned int *)imageLp->get();
-          for (i = 0; i < *width * *height; i++)
-            outData[i] = (short)(uiData[i] * m_fFloatScaling / 2. + 0.5);
+        if (m_iErrorFromSave)
+          continue;
+        if (fp) {
+          fclose(fp);
+          fp = NULL;
         }
-      } else if (isInteger) {
-        if (byteSize == 2) {
-
-          // signed short to short
-          DebugToResult("Dividing signed shorts by 2\n");
-          sData = (short *)imageLp->get();
-          for (i = 0; i < *width * *height; i++)
-            outData[i] = sData[i] / 2;
-        } else {
-
-          // signed long to short
-          DebugToResult("Dividing signed integers by 2\n");
-          iData = (int *)imageLp->get();
-          for (i = 0; i < *width * *height; i++)
-            outData[i] = (short)(iData[i] / 2);
-        }
+        sprintf(m_strTemp, "Processing time %.3f   saving time %.3f sec\n", procWall,
+          saveWall);
+        DebugToResult(m_strTemp);
       } else {
 
-        // Float to short
-        DebugToResult("Dividing floats by 2 with scaling\n");
-        flIn = (float *)imageLp->get();
-        for (i = 0; i < *width * *height; i++)
-          outData[i] = (short)(flIn[i] * m_fFloatScaling / 2. + 0.5);
+        // Regular old image
+        numDim = DM::ImageGetNumDimensions(image.get());
+        if (numDim != 2) {
+          sprintf(m_strTemp, "image with ID %d has %d dimensions!\n", ID, numDim);
+          DebugToResult(m_strTemp);
+        }
+        imageData = imageLp->get();
+        ProcessImage(imageData, array, dataSize, *width, *height, divideBy2, transpose, 
+          byteSize, isInteger, isUnsignedInt);
       }
 
+    }
+    catch (exception exc) {
+      ErrorToResult("Caught an exception from a call to a DM:: function\n");
+      SET_ERROR(DM_CALL_EXCEPTION);
+    }
+  }
+  delete imageLp;
+  if (fp) {
+    fclose(fp);
+    fp = NULL;
+  }
+  delete [] rotBuf;
+
+  // Delete image(s) before return if they can be found
+  if (delImage) {
+    if (DM::GetImageFromID(image, imageID))
+      DM::DeleteImage(image.get());
+    else 
+      DebugToResult("Cannot find image for deleting it\n");
+    if (saveFrames && DM::GetImageFromID(image, stackID))
+      DM::DeleteImage(image.get());
+    else if (saveFrames)
+      DebugToResult("Cannot find stack for deleting it\n");
+
+  }
+  *arrSize = *width * *height;
+
+	return errorRet;
+}
+
+void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize, 
+											            long width, long height, long divideBy2, 
+                                  long transpose, int byteSize, bool isInteger,
+                                  bool isUnsignedInt)
+{
+  int i, j;
+  unsigned int *uiData;
+  int *iData;
+  unsigned short *usData, *usData2;
+  short *outData;
+  short *sData;
+  unsigned char *bData;
+  float *flIn, *flOut, flTmp;
+
+  // Do a simple copy if sizes match and not dividing by 2 and not transposing
+  // or if bytes are passed in
+  if ((dataSize == byteSize && !divideBy2 && m_fFloatScaling == 1.) || byteSize == 1) {
+    if (!(transpose & 1)) {
+      DebugToResult("Copying data\n");
+      memcpy(array, imageData, width * height * byteSize);
     } else {
 
-      // No division by 2: Convert long integers to unsigned shorts
-      usData = (unsigned short *)array;
-      if (DM::ImageIsDataTypeUnsignedInteger(image.get())) {
-        if (m_fFloatScaling == 1.) {
+      // Otherwise transpose floats around Y axis
+      DebugToResult("Copying float data with transposition around Y\n");
+      for (j = 0; j < height; j++) {
+        flIn = (float *)imageData + j * width;
+        flOut = (float *)array + (j + 1) * width - 1;
+        for (i = 0; i < width; i++)
+          *flOut-- = *flIn++;
+      }
+    }
 
-          // If these are long integers and they are unsigned, just transfer
-          DebugToResult("Converting unsigned integers to unsigned shorts\n");
-          uiData = (unsigned int *)imageLp->get();
-          for (i = 0; i < *width * *height; i++)
-            usData[i] = (unsigned short)uiData[i];
-        } else {
-
-          // Or scale them
-          DebugToResult("Converting unsigned integers to unsigned shorts with scaling\n");
-          uiData = (unsigned int *)imageLp->get();
-          for (i = 0; i < *width * *height; i++)
-            usData[i] = (unsigned short)(uiData[i] * m_fFloatScaling + 0.5);
-        }
-      } else if (isInteger) {
-
-        // Otherwise need to truncate at zero to copy signed to unsigned
-        DebugToResult("Converting signed integers to unsigned shorts with "
-          "truncation\n");
-        iData = (int *)imageLp->get();
-        for (i = 0; i < *width * *height; i++) {
-          if (iData[i] >= 0)
-            usData[i] = (unsigned short)iData[i];
-          else
-            usData[i] = 0;
-        }
-      } else {
-
-        //Float to unsigned with truncation
-        DebugToResult("Converting floats to unsigned shorts with truncation and "
-            "scaling\n");
-        flIn = (float *)imageLp->get();
-        for (i = 0; i < *width * *height; i++) {
-          if (flIn[i] >= 0)
-            usData[i] = (unsigned short)(flIn[i] * m_fFloatScaling + 0.5);
-          else
-            usData[i] = 0;
+    // Do further transpositions in place for float data
+    if (transpose & 2) {
+      DebugToResult("Transposing float data around X in place\n");
+      for (j = 0; j < height / 2; j++) {
+        flIn = (float *)array + j * width;
+        flOut = (float *)array + (height - j - 1) * width;
+        for (i = 0; i < width; i++) {
+          flTmp = *flIn;
+          *flIn++ = *flOut;
+          *flOut++ = flTmp;
         }
       }
     }
-    if (delImage)
-      DM::DeleteImage(image.get());
-	}
-	catch (exception exc) {
-		ErrorToResult("Caught an exception from a call to a DM:: function\n");
-		return DM_CALL_EXCEPTION;
-	}
-  delete imageLp;
-	*arrSize = *width * *height;
-	return 0;
+    if ((transpose & 256) && width == height) {
+      DebugToResult("Transposing float data around diagonal in place\n");
+      for (j = 0; j < height; j++) {
+        flIn = (float *)array + j * width + j;
+        flOut = flIn;
+        for (i = j; i < width; i++) {
+          flTmp = *flIn;
+          *flIn++ = *flOut;
+          *flOut = flTmp;
+          flOut += width;
+        }
+      }
+    } 
+
+
+  } else if (divideBy2) {
+
+    // Divide by 2
+    outData = (short *)array;
+    if (isUnsignedInt) {
+      if (byteSize == 1) {
+
+        // unsigned byte to short with scaling  THIS WON'T HAPPEN WITH CURRENT LOGIC
+        DebugToResult("Dividing unsigned bytes by 2 with scaling\n");
+        bData = (unsigned char *)imageData;
+        for (i = 0; i < width * height; i++)
+          outData[i] = (short)((float)bData[i] * m_fFloatScaling / 2.f + 0.5f);
+      } else if (byteSize == 2 && m_fFloatScaling == 1.) {
+
+        // unsigned short to short
+        DebugToResult("Dividing unsigned shorts by 2\n");
+        usData = (unsigned short *)imageData;
+        for (i = 0; i < width * height; i++)
+          outData[i] = (short)(usData[i] / 2);
+      } else if (byteSize == 2) {
+
+        // unsigned short to short with scaling
+        DebugToResult("Dividing unsigned shorts by 2 with scaling\n");
+        usData = (unsigned short *)imageData;
+        for (i = 0; i < width * height; i++)
+          outData[i] = (short)((float)usData[i] * m_fFloatScaling / 2.f + 0.5f);
+      } else if (m_fFloatScaling == 1.) {
+
+        // unsigned long to short
+        DebugToResult("Dividing unsigned integers by 2\n");
+        uiData = (unsigned int *)imageData;
+        for (i = 0; i < width * height; i++)
+          outData[i] = (short)(uiData[i] / 2);
+      } else {
+
+        // unsigned long to short with scaling
+        DebugToResult("Dividing unsigned integers by 2 with scaling\n");
+        uiData = (unsigned int *)imageData;
+        for (i = 0; i < width * height; i++)
+          outData[i] = (short)((float)uiData[i] * m_fFloatScaling / 2.f + 0.5f);
+      }
+    } else if (isInteger) {
+      if (byteSize == 2) {
+
+        // signed short to short
+        DebugToResult("Dividing signed shorts by 2\n");
+        sData = (short *)imageData;
+        for (i = 0; i < width * height; i++)
+          outData[i] = sData[i] / 2;
+      } else {
+
+        // signed long to short
+        DebugToResult("Dividing signed integers by 2\n");
+        iData = (int *)imageData;
+        for (i = 0; i < width * height; i++)
+          outData[i] = (short)(iData[i] / 2);
+      }
+    } else {
+
+      // Float to short
+      DebugToResult("Dividing floats by 2 with scaling\n");
+      flIn = (float *)imageData;
+      for (i = 0; i < width * height; i++)
+        outData[i] = (short)(flIn[i] * m_fFloatScaling / 2.f + 0.5f);
+    }
+
+  } else {
+
+    // No division by 2: Convert long integers to unsigned shorts except for 
+    // dose frac frames
+    usData = (unsigned short *)array;
+    if (isUnsignedInt) {
+      if (byteSize == 1) {
+
+        // unsigned byte to ushort with scaling  THIS WON'T HAPPEN WITH CURRENT LOGIC
+        DebugToResult("Converting unsigned bytes to unsigned shorts with scaling\n");
+        bData = (unsigned char *)imageData;
+        for (i = 0; i < width * height; i++)
+          usData[i] = (unsigned short)((float)bData[i] * m_fFloatScaling + 0.5f);
+      } else if (byteSize == 2) {
+       
+        DebugToResult("Scaling unsigned shorts\n");
+        usData2 = (unsigned short *)imageData;
+        for (i = 0; i < width * height; i++)
+          usData[i] = (unsigned short)((float)usData2[i] * m_fFloatScaling + 0.5f);
+ 
+        // Unsigned short to ushort with scaling
+
+      } else if (m_fFloatScaling == 1.) {
+
+        // If these are long integers and they are unsigned, just transfer
+        DebugToResult("Converting unsigned integers to unsigned shorts\n");
+        uiData = (unsigned int *)imageData;
+        for (i = 0; i < width * height; i++)
+          usData[i] = (unsigned short)uiData[i];
+      } else {
+
+        // Or scale them
+        DebugToResult("Converting unsigned integers to unsigned shorts with scaling\n");
+        uiData = (unsigned int *)imageData;
+        for (i = 0; i < width * height; i++)
+          usData[i] = (unsigned short)((float)uiData[i] * m_fFloatScaling + 0.5f);
+      }
+    } else if (isInteger) {
+
+      // Otherwise need to truncate at zero to copy signed to unsigned
+      DebugToResult("Converting signed integers to unsigned shorts with "
+        "truncation\n");
+      iData = (int *)imageData;
+      for (i = 0; i < width * height; i++) {
+        if (iData[i] >= 0)
+          usData[i] = (unsigned short)iData[i];
+        else
+          usData[i] = 0;
+      }
+    } else {
+
+      //Float to unsigned with truncation
+      DebugToResult("Converting floats to unsigned shorts with truncation and "
+        "scaling\n");
+      flIn = (float *)imageData;
+      for (i = 0; i < width * height; i++) {
+        if (flIn[i] >= 0)
+          usData[i] = (unsigned short)(flIn[i] * m_fFloatScaling + 0.5f);
+        else
+          usData[i] = 0;
+      }
+    }
+  }
 }
+
+// Perform any combination of rotation and Y flipping for a short array: 
+// operation = 0-3 for rotation by 90 * operation, plus 4 for flipping around Y axis 
+// before rotation or 8 for flipping around Y after.  THIS IS COPY OF ProcRotateFlip
+// with the type and invertCon arguments removed and invert contrast code also
+void TemplatePlugIn::RotateFlip(short int *array, int mode, int nx, int ny, int operation, 
+                                short int *brray, int *nxout, int *nyout)
+{
+  int xalong[4] = {1, 0, -1, 0};
+  int yalong[4] = {0, -1, 0, 1};
+  int xinter[4] = {0, 1, 0, -1};
+  int yinter[4] = {1, 0, -1, 0};
+  int xstart, ystart, dinter, dalong, ix, iy, strip, numStrips;
+  int rotation = operation % 4;
+  short int *bline, *blineStart, *alineStart;
+  short int *aline1, *aline2, *aline3, *aline4, *aline5, *aline6, *aline7, *aline8;
+  short int *bline1, *bline2, *bline3, *bline4, *bline5, *bline6, *bline7, *bline8;
+
+  unsigned char *bubln, *bublnStart, *aublnStart;
+  unsigned char *aubln1, *aubln2, *aubln3, *aubln4, *aubln5, *aubln6, *aubln7, *aubln8;
+  unsigned char *bubln1, *bubln2, *bubln3, *bubln4, *bubln5, *bubln6, *bubln7, *bubln8;
+  unsigned char *ubarray = (unsigned char *)array;
+  unsigned char *ubbrray = (unsigned char *)brray;
+
+  // Flip X coordinates for a flip; transpose X and Y for odd rotations
+  int flip = (operation / 4) ? -1 : 1;
+  *nxout = nx;
+  *nyout = ny;
+  if (rotation % 2) {
+    *nxout = ny;
+    *nyout = nx;
+    
+    // For flipping before rotation, exchange the 1 and 3 rotations
+    if (flip < 0 && (operation & 4) != 0)
+      rotation = 4 - rotation;
+  }
+
+  // It is important to realize that these coordinates all start at upper left of image
+  xstart = 0;
+  ystart = 0;
+  if (rotation > 1)
+    xstart = *nxout - 1;
+  if (rotation == 1 || rotation == 2)
+    ystart = *nyout - 1;
+  if (flip < 0)
+    xstart = *nxout - 1 - xstart;
+
+  // From X and Y increments along and between lines, get index increments
+  dalong = flip * xalong[rotation] + *nxout * yalong[rotation];
+  dinter = flip * xinter[rotation] + *nxout * yinter[rotation];
+
+  // Do the copy
+  numStrips = ny / 8;
+  if (mode != MRC_MODE_BYTE) {
+    blineStart = brray + xstart + *nxout * ystart;
+    alineStart = array;
+    for (strip = 0, iy = 0; strip < numStrips; strip++, iy += 8) {
+      aline1 = alineStart;
+      aline2 = aline1 + nx;
+      aline3 = aline2 + nx;
+      aline4 = aline3 + nx;
+      aline5 = aline4 + nx;
+      aline6 = aline5 + nx;
+      aline7 = aline6 + nx;
+      aline8 = aline7 + nx;
+      bline1 = blineStart;
+      bline2 = bline1 + dinter;
+      bline3 = bline2 + dinter;
+      bline4 = bline3 + dinter;
+      bline5 = bline4 + dinter;
+      bline6 = bline5 + dinter;
+      bline7 = bline6 + dinter;
+      bline8 = bline7 + dinter;
+      blineStart = bline8 + dinter;
+      for (ix = 0; ix < nx; ix++) {
+        *bline1 = *aline1++;
+        bline1 += dalong;
+        *bline2 = *aline2++;
+        bline2 += dalong;
+        *bline3 = *aline3++;
+        bline3 += dalong;
+        *bline4 = *aline4++;
+        bline4 += dalong;
+        *bline5 = *aline5++;
+        bline5 += dalong;
+        *bline6 = *aline6++;
+        bline6 += dalong;
+        *bline7 = *aline7++;
+        bline7 += dalong;
+        *bline8 = *aline8++;
+        bline8 += dalong;
+      }
+      alineStart = aline8;
+    }
+    for (; iy < ny; iy++) {
+      bline = blineStart;
+      for (ix = 0; ix < nx; ix++) {
+        *bline = *alineStart++;
+        bline += dalong;
+      }
+      blineStart += dinter;
+    }
+
+  } else {
+    bublnStart = ubbrray + xstart + *nxout * ystart;
+    aublnStart = ubarray;
+    for (strip = 0, iy = 0; strip < numStrips; strip++, iy += 8) {
+      aubln1 = aublnStart;
+      aubln2 = aubln1 + nx;
+      aubln3 = aubln2 + nx;
+      aubln4 = aubln3 + nx;
+      aubln5 = aubln4 + nx;
+      aubln6 = aubln5 + nx;
+      aubln7 = aubln6 + nx;
+      aubln8 = aubln7 + nx;
+      bubln1 = bublnStart;
+      bubln2 = bubln1 + dinter;
+      bubln3 = bubln2 + dinter;
+      bubln4 = bubln3 + dinter;
+      bubln5 = bubln4 + dinter;
+      bubln6 = bubln5 + dinter;
+      bubln7 = bubln6 + dinter;
+      bubln8 = bubln7 + dinter;
+      bublnStart = bubln8 + dinter;
+      for (ix = 0; ix < nx; ix++) {
+        *bubln1 = *aubln1++;
+        bubln1 += dalong;
+        *bubln2 = *aubln2++;
+        bubln2 += dalong;
+        *bubln3 = *aubln3++;
+        bubln3 += dalong;
+        *bubln4 = *aubln4++;
+        bubln4 += dalong;
+        *bubln5 = *aubln5++;
+        bubln5 += dalong;
+        *bubln6 = *aubln6++;
+        bubln6 += dalong;
+        *bubln7 = *aubln7++;
+        bubln7 += dalong;
+        *bubln8 = *aubln8++;
+        bubln8 += dalong;
+      }
+      aublnStart = aubln8;
+    }
+    for (; iy < ny; iy++) {
+      bubln = bublnStart;
+      for (ix = 0; ix < nx; ix++) {
+        *bubln = *aublnStart++;
+        bubln += dalong;
+      }
+      bublnStart += dinter;
+    }
+  }
+}
+
 
 // Add commands for selecting a camera to the command string
 void TemplatePlugIn::AddCameraSelection(int camera)
@@ -777,6 +1279,7 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
   m_fFloatScaling = (float)(mode > 0 ? scaling : 1.);
 }
 
+// Set the parameters for the next K2 acquisition
 void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwareProc, 
                                      BOOL doseFrac, double frameTime, BOOL alignFrames, 
                                      BOOL saveFrames, char *filter)
@@ -794,8 +1297,83 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
     m_strFilterName[MAX_FILTER_NAME - 1] = 0x00;
   }
   m_bSaveFrames = saveFrames;
+  sprintf(m_strTemp, "SetK2Parameters called with save %d\n", m_bSaveFrames ? 1 : 0);
+  DebugToResult(m_strTemp);
 
 }
+
+// Setup properties for saving frames in files
+void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage, 
+                                    double pixelSize, char *dirName, char *rootName, 
+                                    long *error)
+{
+  struct _stat statbuf;
+  int newDir = 1;
+  FILE *fp;
+  m_iRotationFlip = rotationFlip;
+  m_bFilePerImage = filePerImage;
+  m_dPixelSize = pixelSize;
+
+  // Check whether the directory is changing then copy the strings
+  if (m_strSaveDir)
+    newDir = strcmp(m_strSaveDir, dirName);
+  if (newDir) {
+    B3DFREE(m_strSaveDir);
+    m_strSaveDir = strdup(dirName);
+  }
+  B3DFREE(m_strRootName);
+  m_strRootName = strdup(rootName);
+  if (!m_strRootName || !m_strSaveDir) {
+    *error = ROTBUF_MEMORY_ERROR;
+    return;
+  }
+
+  // For one file per image, create the directory, which must not exist
+  *error = 0;
+  if (filePerImage) {
+    if (_mkdir(m_strSaveDir)) {
+      if (errno == EEXIST)
+        *error = DIR_ALREADY_EXISTS;
+      else
+        *error = DIR_CREATE_ERROR;
+    }
+  } else {
+
+    // Otherwise, make sure directory exists and is a directory
+    if (_stat(m_strSaveDir, &statbuf)) {
+      *error = DIR_NOT_EXIST;
+      return;
+    }
+    if (!(statbuf.st_mode & _S_IFDIR)) {
+      *error = SAVEDIR_IS_FILE;
+      return;
+    }
+
+    // Check whether the file exists
+    sprintf(m_strTemp, "%s\\%s.mrc", m_strSaveDir, m_strRootName);
+    if (!_stat(m_strTemp, &statbuf)) {
+      *error = FILE_ALREADY_EXISTS;
+      return;
+    }
+
+    // For a new directory, check writability by opening file
+    if (newDir) {
+      fp = fopen(m_strTemp, "wb");
+      if (!fp)
+        *error = DIR_NOT_WRITABLE;
+      else
+        fclose(fp);
+    }
+  }
+}
+
+// Get results of last frame saving operation
+void TemplatePlugIn::GetFileSaveResult(long *numSaved, long *error)
+{
+  *numSaved = m_iFramesSaved;
+  *error = m_iErrorFromSave;
+}
+
 
 // Return number of cameras or -1 for error
 int TemplatePlugIn::GetNumberOfCameras()
@@ -1064,7 +1642,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
     "Exit(idfirst)\n";
 
     again = AcquireAndTransferImage((void *)array, dataSize, arrSize, width, height,
-      divideBy2, 0, m_bGMS2 ? 1 : 0);
+      divideBy2, 0, m_bGMS2 ? DEL_IMAGE : NO_DEL_IM, NO_SAVE);
     if (again != DM_CALL_EXCEPTION)
       m_iDSAcquired[channels[0]] = CHAN_RETURNED;
     return again;
@@ -1105,8 +1683,8 @@ int TemplatePlugIn::ReturnDSChannel(short array[], long *arrSize, long *width,
       "Exit(idzero)\n", channel);
     m_strCommand += m_strTemp;
   }
-  int retval = AcquireAndTransferImage((void *)array, 2, arrSize,
-    width, height, divideBy2, 0, (!m_bContinuousDS && m_bGMS2) ? 1 : 0);
+  int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height, 
+    divideBy2, 0, (!m_bContinuousDS && m_bGMS2) ? DEL_IMAGE : NO_DEL_IM, NO_SAVE);
   if (retval != DM_CALL_EXCEPTION && !m_bContinuousDS)
     m_iDSAcquired[channel] = CHAN_RETURNED;
   return retval;
@@ -1208,6 +1786,19 @@ void PlugInWrapper::SetK2Parameters(long readMode, double scaling, long hardware
   gTemplatePlugIn.SetK2Parameters(readMode, scaling, hardwareProc, doseFrac, frameTime, 
     alignFrames, saveFrames, filter);
 }
+void PlugInWrapper::SetupFileSaving(long rotationFlip, BOOL filePerImage, 
+                                    double pixelSize, char *dirName, char *rootName, 
+                                    long *error)
+{
+  gTemplatePlugIn.SetupFileSaving(rotationFlip, filePerImage, pixelSize, dirName, 
+    rootName, error);
+}
+
+void PlugInWrapper::GetFileSaveResult(long *numSaved, long *error)
+{
+  gTemplatePlugIn.GetFileSaveResult(numSaved, error);
+}
+
 
 int PlugInWrapper::GetNumberOfCameras()
 {

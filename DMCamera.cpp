@@ -162,6 +162,23 @@ STDMETHODIMP CDMCamera::SetK2Parameters(long readMode, double scaling, long hard
 	return S_OK;
 }
 
+STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage, 
+                                        double pixelSize, long nameSize, long names[],
+                                        long *error)
+{
+  char *cnames = (char *)names;
+  int rootind = (int)strlen(cnames) + 1;
+  gPlugInWrapper.SetupFileSaving(rotationFlip, filePerImage, pixelSize, cnames,
+    &cnames[rootind], error);
+  return S_OK;
+}
+
+STDMETHODIMP CDMCamera::GetFileSaveResult(long *numSaved, long *error)
+{
+  gPlugInWrapper.GetFileSaveResult(numSaved, error);
+  return S_OK;
+}
+
 STDMETHODIMP CDMCamera::GetNumberOfCameras(long *numCameras)
 {
 	*numCameras = gPlugInWrapper.GetNumberOfCameras();

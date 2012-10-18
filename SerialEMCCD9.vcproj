@@ -4,6 +4,7 @@
 	Version="9.00"
 	Name="SerialEMCCD"
 	ProjectGUID="{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}"
+	RootNamespace="SerialEMCCD"
 	Keyword="AtlProj"
 	TargetFrameworkVersion="131072"
 	>
@@ -789,12 +790,12 @@
 				Name="VCLinkerTool"
 				IgnoreImportLibrary="true"
 				AdditionalOptions="/force:unresolved"
-				AdditionalDependencies="DMPlugInBasic.lib Foundation.lib Ws2_32.lib"
+				AdditionalDependencies="DMPlugInBasic.lib Foundation.lib Ws2_32.lib libiimod.lib libcfshr.lib"
 				OutputFile=".\$(OutDir)/SEMCCD-GMS2-64.dll"
 				LinkIncremental="1"
 				SuppressStartupBanner="true"
-				AdditionalLibraryDirectories="&quot;$(GMS2_SDK)\lib\x64&quot;"
-				IgnoreDefaultLibraryNames=""
+				AdditionalLibraryDirectories=".\Shared;&quot;$(GMS2_SDK)\lib\x64&quot;"
+				IgnoreDefaultLibraryNames="LIBCMT"
 				ModuleDefinitionFile=".\SerialEMCCD.def"
 				ProgramDatabaseFile=".\ReleaseMinDependency/SerialEMCCD.pdb"
 				SubSystem="2"
@@ -1247,6 +1248,18 @@
 			Filter="cpp;c;cxx;rc;def;r;odl;idl;hpj;bat"
 			>
 			<File
+				RelativePath=".\Shared\b3dutil.c"
+				>
+				<FileConfiguration
+					Name="GMS2-64bit|x64"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+					/>
+				</FileConfiguration>
+			</File>
+			<File
 				RelativePath="DMCamera.cpp"
 				>
 				<FileConfiguration
@@ -1371,6 +1384,42 @@
 						AdditionalIncludeDirectories=""
 						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
 						BasicRuntimeChecks="3"
+					/>
+				</FileConfiguration>
+			</File>
+			<File
+				RelativePath=".\Shared\mrcfiles.c"
+				>
+				<FileConfiguration
+					Name="GMS2-64bit|x64"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+					/>
+				</FileConfiguration>
+			</File>
+			<File
+				RelativePath=".\Shared\mrcsec.c"
+				>
+				<FileConfiguration
+					Name="GMS2-64bit|x64"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+					/>
+				</FileConfiguration>
+			</File>
+			<File
+				RelativePath=".\Shared\parallelwrite.c"
+				>
+				<FileConfiguration
+					Name="GMS2-64bit|x64"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
 					/>
 				</FileConfiguration>
 			</File>
