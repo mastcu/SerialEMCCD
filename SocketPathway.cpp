@@ -550,13 +550,13 @@ static int ProcessCommand(int numBytes)
       break;
 
     case GS_SetK2Parameters:
-      ind = (int)strlen((char *)sLongArray) + 1;
       gPlugInWrapper.SetK2Parameters(sLongArgs[1], sDoubleArgs[0], sLongArgs[2], 
         sBoolArgs[0], sDoubleArgs[1], sBoolArgs[1], sBoolArgs[2], (char *)sLongArray);
       SendArgsBack(0);
       break;
 
     case GS_SetupFileSaving:
+      ind = (int)strlen((char *)sLongArray) + 1;
       gPlugInWrapper.SetupFileSaving(sLongArgs[1], sBoolArgs[0], sDoubleArgs[0], 
         (char *)sLongArray, (char *)sLongArray + ind, &sLongArgs[1]);
       SendArgsBack(0);

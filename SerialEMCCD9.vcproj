@@ -790,7 +790,7 @@
 				Name="VCLinkerTool"
 				IgnoreImportLibrary="true"
 				AdditionalOptions="/force:unresolved"
-				AdditionalDependencies="DMPlugInBasic.lib Foundation.lib Ws2_32.lib libiimod.lib libcfshr.lib"
+				AdditionalDependencies="DMPlugInBasic.lib Foundation.lib Ws2_32.lib"
 				OutputFile=".\$(OutDir)/SEMCCD-GMS2-64.dll"
 				LinkIncremental="1"
 				SuppressStartupBanner="true"
@@ -1384,6 +1384,18 @@
 						AdditionalIncludeDirectories=""
 						PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_MBCS;_USRDLL;$(NoInherit)"
 						BasicRuntimeChecks="3"
+					/>
+				</FileConfiguration>
+			</File>
+			<File
+				RelativePath=".\Shared\islice.c"
+				>
+				<FileConfiguration
+					Name="GMS2-64bit|x64"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
 					/>
 				</FileConfiguration>
 			</File>

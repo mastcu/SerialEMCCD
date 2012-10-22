@@ -26,7 +26,7 @@ using namespace std ;
 #define MAX_FILTER_NAME   64
 #define MAX_CAMERAS  10
 #define MAX_DS_CHANNELS 8
-#define ID_MULTIPLIER 100000
+#define ID_MULTIPLIER 10000000
 enum {CHAN_UNUSED = 0, CHAN_ACQUIRED, CHAN_RETURNED};
 enum {NO_SAVE = 0, SAVE_FRAMES};
 enum {NO_DEL_IM = 0, DEL_IMAGE};
@@ -524,7 +524,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     saveFrames = SAVE_FRAMES;
   	sprintf(m_strTemp, "KeepImage(stack)\n"
       "number stackID = GetImageID(stack)\n"
-      "Result(retval + \"  \" + stackID + \"\\n\")\n"
+      //"Result(retval + \"  \" + stackID + \"\\n\")\n"
 	  	"retval = retval + %d * stackID\n", ID_MULTIPLIER);
   	m_strCommand += m_strTemp;
   } else if (m_bSaveFrames) {
@@ -626,8 +626,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   // Get the image ID(s)
   ID = imageID = (long)(retval + 0.01);
   if (saveFrames) {
-    stackID = B3DNINT(retval / ID_MULTIPLIER);
-    imageID = B3DNINT(retval - stackID * ID_MULTIPLIER);
+    stackID = (int)((retval + 0.1) / ID_MULTIPLIER);
+    imageID = B3DNINT(retval - (double)stackID * ID_MULTIPLIER);
     if (stackID) {
       numLoop = 2;
       ID = stackID;
@@ -764,7 +764,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 
           // Initialize for getting mean of this slice, and seek to slice
           tmean = 0.; 
-          i = mrc_big_seek(fp, hdata.headerSize, nxout * 2, nyout * fileSlice, SEEK_SET);
+          i = mrc_big_seek(fp, hdata.headerSize, nxout * (byteSize == 1 ? 1 : 2), 
+            nyout * fileSlice, SEEK_SET);
           if (i) {
             sprintf(m_strTemp, "Error %d seeking for slice %d: %s\n", i, slice, 
               strerror(errno));
@@ -773,24 +774,26 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             break;
           }
 
-          // Loop on the lines in inverse order
-          for (i = nyout - 1; i >= 0; i--) {
+          if ((i = (int)b3dFwrite(outData, (byteSize == 1 ? 1 : 2) * nxout, nyout, fp)) !=
+            nyout) {
+              sprintf(m_strTemp, "Failed to write data past line %d of slice %d: %s\n", i, 
+                slice, strerror(errno));
+              ErrorToResult(m_strTemp);
+              m_iErrorFromSave = WRITE_DATA_ERROR;
+              break;
+          }
 
-            // Get pointer to start of line, write
+
+          // Loop on the lines to compute mean accurately
+          for (i = 0; i < nyout; i++) {
+
+            // Get pointer to start of line
             if (byteSize == 1) {
               bData = ((unsigned char *)outData) + i * nxout;
               sData = (short *)bData;
             } else
               sData = &outData[i * nxout];
             usData = (unsigned short *)sData;
-
-            if (b3dFwrite(usData, (byteSize == 1 ? 1 : 2) * nxout, 1, fp) != 1) {
-              sprintf(m_strTemp, "Failed to write data in line %d of slice %d: %s\n", i, 
-                slice, strerror(errno));
-              ErrorToResult(m_strTemp);
-              m_iErrorFromSave = WRITE_DATA_ERROR;
-              break;
-            }
 
             // Get min/max/sum and add to mean
             tsum = 0;
@@ -1100,8 +1103,8 @@ void TemplatePlugIn::RotateFlip(short int *array, int mode, int nx, int ny, int 
   int yalong[4] = {0, -1, 0, 1};
   int xinter[4] = {0, 1, 0, -1};
   int yinter[4] = {1, 0, -1, 0};
-  int xstart, ystart, dinter, dalong, ix, iy, strip, numStrips;
-  int rotation = operation % 4;
+  int mapping[8] = {6, 5, 4, 7, 2, 1, 0, 3};
+  int xstart, ystart, dinter, dalong, ix, iy, strip, numStrips, rotation;
   short int *bline, *blineStart, *alineStart;
   short int *aline1, *aline2, *aline3, *aline4, *aline5, *aline6, *aline7, *aline8;
   short int *bline1, *bline2, *bline3, *bline4, *bline5, *bline6, *bline7, *bline8;
@@ -1111,6 +1114,11 @@ void TemplatePlugIn::RotateFlip(short int *array, int mode, int nx, int ny, int 
   unsigned char *bubln1, *bubln2, *bubln3, *bubln4, *bubln5, *bubln6, *bubln7, *bubln8;
   unsigned char *ubarray = (unsigned char *)array;
   unsigned char *ubbrray = (unsigned char *)brray;
+
+  // Map the operation to produce a final flipping around X axis for output
+  if (operation < 8)
+    operation = mapping[operation];
+  rotation = operation % 4;
 
   // Flip X coordinates for a flip; transpose X and Y for odd rotations
   int flip = (operation / 4) ? -1 : 1;
@@ -1340,30 +1348,28 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   } else {
 
     // Otherwise, make sure directory exists and is a directory
-    if (_stat(m_strSaveDir, &statbuf)) {
+    if (_stat(m_strSaveDir, &statbuf))
       *error = DIR_NOT_EXIST;
-      return;
-    }
-    if (!(statbuf.st_mode & _S_IFDIR)) {
+    if (! *error && !(statbuf.st_mode & _S_IFDIR))
       *error = SAVEDIR_IS_FILE;
-      return;
-    }
 
     // Check whether the file exists
     sprintf(m_strTemp, "%s\\%s.mrc", m_strSaveDir, m_strRootName);
-    if (!_stat(m_strTemp, &statbuf)) {
+    if (! *error && !_stat(m_strTemp, &statbuf))
       *error = FILE_ALREADY_EXISTS;
-      return;
-    }
 
     // For a new directory, check writability by opening file
-    if (newDir) {
+    if (! *error && newDir) {
       fp = fopen(m_strTemp, "wb");
       if (!fp)
         *error = DIR_NOT_WRITABLE;
       else
         fclose(fp);
     }
+  }
+  if (*error) {
+    sprintf(m_strTemp, "SetupFileSaving error is %d\n", *error);
+    DebugToResult(m_strTemp);
   }
 }
 
