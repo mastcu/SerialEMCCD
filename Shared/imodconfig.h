@@ -13,6 +13,7 @@
 #define strdup _strdup
 #endif
 #define B3D_LITTLE_ENDIAN
+#define WIN32_BIGFILE
 #define SWAP_IEEE_FLOATS
 #define NO_IMOD_FORK
 #define CLIPBOARD_TIMER_HACK 100
