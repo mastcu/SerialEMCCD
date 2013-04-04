@@ -550,6 +550,7 @@ int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width,
 									long *height, long binning)
 {
   // It seems that the gain reference is not flipped when images are
+  int retval, tmp;
   long transpose = 0;
 	if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
     m_strCommand.resize(0);
@@ -568,8 +569,14 @@ int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width,
 		"number retval = GetImageID(img)\n"
 		"Exit(retval)", binning);
 	m_strCommand += m_strTemp;
-	return AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0, transpose, 
+	retval = AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0, transpose, 
     DEL_IMAGE, NO_SAVE);
+  if (transpose & 256) {
+    tmp = *width;
+    *width = *height;
+    *height = tmp;
+  }
+  return retval;
 }
 
 #define SET_ERROR(a) if (doingStack) \
@@ -914,51 +921,64 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
   short *sData;
   unsigned char *bData;
   float *flIn, *flOut, flTmp;
+  int operations[4] = {1, 5, 7, 3};
 
   // Do a simple copy if sizes match and not dividing by 2 and not transposing
   // or if bytes are passed in
   if ((dataSize == byteSize && !divideBy2 && m_fFloatScaling == 1.) || byteSize == 1) {
-    if (!(transpose & 1)) {
-      DebugToResult("Copying data\n");
-      memcpy(array, imageData, width * height * byteSize);
+
+    // If a transpose changes the size, need to call the fancy routine
+    if ((transpose & 256) && width != height) {
+
+      // This routine builds in a final flip around X "for output" so the operations
+      // are derived to specify such flipped output to give the desired one
+      RotateFlip((short *)imageData, MRC_MODE_FLOAT, width, height, 
+        operations[transpose & 3], (short *)array, &i, &j);
     } else {
 
-      // Otherwise transpose floats around Y axis
-      DebugToResult("Copying float data with transposition around Y\n");
-      for (j = 0; j < height; j++) {
-        flIn = (float *)imageData + j * width;
-        flOut = (float *)array + (j + 1) * width - 1;
-        for (i = 0; i < width; i++)
-          *flOut-- = *flIn++;
-      }
-    }
+      // Just copy data to array to start or end with if no transpose around Y
+      if (!(transpose & 1)) {
+        DebugToResult("Copying data\n");
+        memcpy(array, imageData, width * height * byteSize);
+      } else {
 
-    // Do further transpositions in place for float data
-    if (transpose & 2) {
-      DebugToResult("Transposing float data around X in place\n");
-      for (j = 0; j < height / 2; j++) {
-        flIn = (float *)array + j * width;
-        flOut = (float *)array + (height - j - 1) * width;
-        for (i = 0; i < width; i++) {
-          flTmp = *flIn;
-          *flIn++ = *flOut;
-          *flOut++ = flTmp;
+        // Otherwise transpose floats around Y axis
+        DebugToResult("Copying float data with transposition around Y\n");
+        for (j = 0; j < height; j++) {
+          flIn = (float *)imageData + j * width;
+          flOut = (float *)array + (j + 1) * width - 1;
+          for (i = 0; i < width; i++)
+            *flOut-- = *flIn++;
         }
       }
+
+      // Do further transpositions in place for float data
+      if (transpose & 2) {
+        DebugToResult("Transposing float data around X in place\n");
+        for (j = 0; j < height / 2; j++) {
+          flIn = (float *)array + j * width;
+          flOut = (float *)array + (height - j - 1) * width;
+          for (i = 0; i < width; i++) {
+            flTmp = *flIn;
+            *flIn++ = *flOut;
+            *flOut++ = flTmp;
+          }
+        }
+      }
+      if (transpose & 256) {
+        DebugToResult("Transposing float data around diagonal in place\n");
+        for (j = 0; j < height; j++) {
+          flIn = (float *)array + j * width + j;
+          flOut = flIn;
+          for (i = j; i < width; i++) {
+            flTmp = *flIn;
+            *flIn++ = *flOut;
+            *flOut = flTmp;
+            flOut += width;
+          }
+        }
+      } 
     }
-    if ((transpose & 256) && width == height) {
-      DebugToResult("Transposing float data around diagonal in place\n");
-      for (j = 0; j < height; j++) {
-        flIn = (float *)array + j * width + j;
-        flOut = flIn;
-        for (i = j; i < width; i++) {
-          flTmp = *flIn;
-          *flIn++ = *flOut;
-          *flOut = flTmp;
-          flOut += width;
-        }
-      }
-    } 
 
 
   } else if (divideBy2) {
@@ -1041,12 +1061,12 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
         for (i = 0; i < width * height; i++)
           usData[i] = (unsigned short)((float)bData[i] * m_fFloatScaling + 0.5f);
       } else if (byteSize == 2) {
-       
+
         DebugToResult("Scaling unsigned shorts\n");
         usData2 = (unsigned short *)imageData;
         for (i = 0; i < width * height; i++)
           usData[i] = (unsigned short)((float)usData2[i] * m_fFloatScaling + 0.5f);
- 
+
         // Unsigned short to ushort with scaling
 
       } else if (m_fFloatScaling == 1.) {
@@ -1115,6 +1135,12 @@ void TemplatePlugIn::RotateFlip(short int *array, int mode, int nx, int ny, int 
   unsigned char *ubarray = (unsigned char *)array;
   unsigned char *ubbrray = (unsigned char *)brray;
 
+  float *bfln, *bflnStart, *aflnStart;
+  float *afln1, *afln2, *afln3, *afln4, *afln5, *afln6, *afln7, *afln8;
+  float *bfln1, *bfln2, *bfln3, *bfln4, *bfln5, *bfln6, *bfln7, *bfln8;
+  float *farray = (float *)array;
+  float *fbrray = (float *)brray;
+
   // Map the operation to produce a final flipping around X axis for output
   if (operation < 8)
     operation = mapping[operation];
@@ -1149,7 +1175,61 @@ void TemplatePlugIn::RotateFlip(short int *array, int mode, int nx, int ny, int 
 
   // Do the copy
   numStrips = ny / 8;
-  if (mode != MRC_MODE_BYTE) {
+  if (mode == MRC_MODE_FLOAT) {
+
+    // FLOATS
+    bflnStart = fbrray + xstart + *nxout * ystart;
+    aflnStart = farray;
+    for (strip = 0, iy = 0; strip < numStrips; strip++, iy += 8) {
+      afln1 = aflnStart;
+      afln2 = afln1 + nx;
+      afln3 = afln2 + nx;
+      afln4 = afln3 + nx;
+      afln5 = afln4 + nx;
+      afln6 = afln5 + nx;
+      afln7 = afln6 + nx;
+      afln8 = afln7 + nx;
+      bfln1 = bflnStart;
+      bfln2 = bfln1 + dinter;
+      bfln3 = bfln2 + dinter;
+      bfln4 = bfln3 + dinter;
+      bfln5 = bfln4 + dinter;
+      bfln6 = bfln5 + dinter;
+      bfln7 = bfln6 + dinter;
+      bfln8 = bfln7 + dinter;
+      bflnStart = bfln8 + dinter;
+      for (ix = 0; ix < nx; ix++) {
+        *bfln1 = *afln1++;
+        bfln1 += dalong;
+        *bfln2 = *afln2++;
+        bfln2 += dalong;
+        *bfln3 = *afln3++;
+        bfln3 += dalong;
+        *bfln4 = *afln4++;
+        bfln4 += dalong;
+        *bfln5 = *afln5++;
+        bfln5 += dalong;
+        *bfln6 = *afln6++;
+        bfln6 += dalong;
+        *bfln7 = *afln7++;
+        bfln7 += dalong;
+        *bfln8 = *afln8++;
+        bfln8 += dalong;
+      }
+      aflnStart = afln8;
+    }
+    for (; iy < ny; iy++) {
+      bfln = bflnStart;
+      for (ix = 0; ix < nx; ix++) {
+        *bfln = *aflnStart++;
+        bfln += dalong;
+      }
+      bflnStart += dinter;
+    }
+
+  } else if (mode != MRC_MODE_BYTE) {
+
+    // INTEGERS
     blineStart = brray + xstart + *nxout * ystart;
     alineStart = array;
     for (strip = 0, iy = 0; strip < numStrips; strip++, iy += 8) {
@@ -1200,6 +1280,8 @@ void TemplatePlugIn::RotateFlip(short int *array, int mode, int nx, int ny, int 
     }
 
   } else {
+
+    // BYTES
     bublnStart = ubbrray + xstart + *nxout * ystart;
     aublnStart = ubarray;
     for (strip = 0, iy = 0; strip < numStrips; strip++, iy += 8) {
@@ -1305,7 +1387,7 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
     m_strFilterName[MAX_FILTER_NAME - 1] = 0x00;
   }
   m_bSaveFrames = saveFrames;
-  sprintf(m_strTemp, "SetK2Parameters called with save %d\n", m_bSaveFrames ? 1 : 0);
+  sprintf(m_strTemp, "SetK2Parameters called with save %s\n", m_bSaveFrames ? "Y":"N");
   DebugToResult(m_strTemp);
 
 }
@@ -1335,6 +1417,9 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     *error = ROTBUF_MEMORY_ERROR;
     return;
   }
+  sprintf(m_strTemp, "SetupFileSaving called with rf %d fpi %s pix %f dir %s root %s\n", 
+    rotationFlip, filePerImage ? "Y":"N", pixelSize, m_strSaveDir, m_strRootName);
+  DebugToResult(m_strTemp);
 
   // For one file per image, create the directory, which must not exist
   *error = 0;
