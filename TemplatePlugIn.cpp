@@ -27,9 +27,13 @@ using namespace std ;
 #define MAX_CAMERAS  10
 #define MAX_DS_CHANNELS 8
 #define ID_MULTIPLIER 10000000
+#define SUPERRES_FRAME_SCALE 16
 enum {CHAN_UNUSED = 0, CHAN_ACQUIRED, CHAN_RETURNED};
 enum {NO_SAVE = 0, SAVE_FRAMES};
 enum {NO_DEL_IM = 0, DEL_IMAGE};
+static int sReadModes[3] = {K2_LINEAR_READ_MODE, K2_COUNTING_READ_MODE, 
+K2_SUPERRES_READ_MODE};
+
 
 class TemplatePlugIn : 	public Gatan::PlugIn::PlugInMain
 {
@@ -353,7 +357,6 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 							long right, long shutter, double settling, long shutterDelay,
               long divideBy2, long corrections)
 {
-  int readModes[3] = {K2_LINEAR_READ_MODE, K2_COUNTING_READ_MODE, K2_SUPERRES_READ_MODE};
   int saveFrames = NO_SAVE;
 
   //sprintf(m_strTemp, "Entering GetImage with divideBy2 %d\n", divideBy2);
@@ -448,7 +451,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       "K2_SetHardwareProcessing(camera, %d)\n"
       "Number wait_time_s\n"
       "CM_PrepareCameraForAcquire(manager, camera, acqParams, NULL, wait_time_s)\n"
-      "Sleep(wait_time_s)\n", readModes[m_iReadMode], m_iReadMode ? m_iHardwareProc : 0);
+      "Sleep(wait_time_s)\n", sReadModes[m_iReadMode], m_iReadMode ? m_iHardwareProc : 0);
     m_strCommand += m_strTemp;
   }
 
@@ -593,10 +596,10 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 											long *width, long *height, long divideBy2, long transpose, 
                       long delImage, long saveFrames)
 {
-	long ID, imageID, stackID;
+	long ID, imageID, stackID, frameDivide = divideBy2;
 	DM::Image image;
 	long outLimit = *arrSize;
-  int byteSize, i, j, numDim, loop, numLoop = 1;
+  int byteSize, i, j, numDim, loop, outByteSize, numLoop = 1;
   unsigned short *usData;
   unsigned char *bData;
   GatanPlugIn::ImageDataLocker *imageLp = NULL;
@@ -604,12 +607,12 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   void *imageData;
   short *outData, *outForRot, *rotBuf = NULL;
   short *sData;
-  bool isInteger, isUnsignedInt, doingStack;
+  bool isInteger, isUnsignedInt, doingStack, isFloat;
   double retval, procWall, saveWall, wallStart, wallNow;
   FILE *fp = NULL;
   MrcHeader hdata;
   int fileSlice, tmin, tmax, tsum, val, numSlices, fileMode, nxout, nyout;
-  float tmean, meanSum;
+  float tmean, meanSum, scaling = 1.;
   int errorRet = 0;
 
 	// Set these values to zero in case of error returns
@@ -665,8 +668,9 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       byteSize = DM::ImageGetDataElementByteSize(image.get());
       isInteger = DM::ImageIsDataTypeInteger(image.get());
       isUnsignedInt = DM::ImageIsDataTypeUnsignedInteger(image.get());
+      isFloat = DM::ImageIsDataTypeFloat(image.get());
       if (byteSize != dataSize && !((dataSize == 2 && byteSize == 4 && 
-        (isInteger || DM::ImageIsDataTypeFloat(image.get()))) ||
+        (isInteger || isFloat)) ||
         (dataSize == 2 && byteSize == 1 && isUnsignedInt && doingStack))) {
           sprintf(m_strTemp, "Image data are not of the expected type (bs %d  ds %d  int"
              " %d  uint %d)\n", byteSize, dataSize, isInteger ? 1:0, isUnsignedInt?1:0);
@@ -691,17 +695,25 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           continue;
         }
         numSlices = DM::ImageGetDimensionSize(image.get(), 2);
-        if (byteSize == 1)
+
+        // Float super-res image is from software processing and needs special scaling
+        // into bytes, set divide negative as flag for this
+        if (sReadModes[m_iReadMode] == K2_SUPERRES_READ_MODE && isFloat)
+          frameDivide = -1;
+        outByteSize = 2;
+        if (byteSize == 1 || frameDivide < 0) {
           fileMode = MRC_MODE_BYTE;
-        else if ((divideBy2 && byteSize != 2) || (dataSize == byteSize && !isUnsignedInt))
+          outByteSize = 1;
+        } else if ((divideBy2 && byteSize != 2) || 
+          (dataSize == byteSize && !isUnsignedInt))
           fileMode = MRC_MODE_SHORT;
         else
           fileMode = MRC_MODE_USHORT;
 
-        // Allocate buffer for rotation/flip
+        // Allocate buffer for rotation/flip if processing needs to be done too
         if (byteSize > 2 && m_iRotationFlip) {
           try {
-            if (byteSize == 1)
+            if (outByteSize == 1)
               rotBuf = (short *)(new unsigned char [*width * *height]);
             else
               rotBuf = new short [*width * *height];
@@ -720,14 +732,23 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           imageData = fData.get_data();
           outData = (short *)imageData;
           outForRot = (short *)array;
+
+          // Process a float image (from software normalized frames)
+          // It goes from the DM array into the passed array
           if (byteSize > 2) {
-            ProcessImage(imageData, array, dataSize, *width, *height, divideBy2, transpose, 
-              byteSize, isInteger, isUnsignedInt);
+            ProcessImage(imageData, array, dataSize, *width, *height, frameDivide,
+              transpose, byteSize, isInteger, isUnsignedInt);
             outData = (short *)array;
-            outForRot = rotBuf; 
+            outForRot = rotBuf;
+            scaling = m_fFloatScaling;
+            if (frameDivide > 0)
+              scaling /= 2.;
+            else if (frameDivide < 0)
+              scaling = SUPERRES_FRAME_SCALE;
           }
 
-          // Rotate and flip if desired and change the array pointer
+          // Rotate and flip if desired and change the array pointer to save to use the 
+          // passed array or the rotation array
           if (m_iRotationFlip) {
             RotateFlip(outData, fileMode, *width, *height, m_iRotationFlip, outForRot,
               &nxout, &nyout);
@@ -761,7 +782,9 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 
             // Set up header for one slice
             mrc_head_new(&hdata, nxout, nyout, 1, fileMode);
-            mrc_head_label(&hdata, "SerialEMCCD: Dose fractionation image");
+            sprintf(m_strTemp, "SerialEMCCD: Dose fractionation image, scaled by %.2f", 
+              scaling);
+            mrc_head_label(&hdata, m_strTemp);
             fileSlice = 0;
             tmin = 1000000;
             tmax = -tmin;
@@ -771,7 +794,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 
           // Initialize for getting mean of this slice, and seek to slice
           tmean = 0.; 
-          i = mrc_big_seek(fp, hdata.headerSize, nxout * (byteSize == 1 ? 1 : 2), 
+          i = mrc_big_seek(fp, hdata.headerSize, nxout * outByteSize, 
             nyout * fileSlice, SEEK_SET);
           if (i) {
             sprintf(m_strTemp, "Error %d seeking for slice %d: %s\n", i, slice, 
@@ -781,8 +804,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             break;
           }
 
-          if ((i = (int)b3dFwrite(outData, (byteSize == 1 ? 1 : 2) * nxout, nyout, fp)) !=
-            nyout) {
+          if ((i = (int)b3dFwrite(outData, outByteSize * nxout, nyout, fp)) != nyout) {
               sprintf(m_strTemp, "Failed to write data past line %d of slice %d: %s\n", i, 
                 slice, strerror(errno));
               ErrorToResult(m_strTemp);
@@ -795,7 +817,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           for (i = 0; i < nyout; i++) {
 
             // Get pointer to start of line
-            if (byteSize == 1) {
+            if (outByteSize == 1) {
               bData = ((unsigned char *)outData) + i * nxout;
               sData = (short *)bData;
             } else
@@ -981,7 +1003,17 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
     }
 
 
-  } else if (divideBy2) {
+  } else if (divideBy2 < 0) {
+
+    // Scale super-res normalized floats into byte image with scaling by 16 because the
+    // hardware limits the raw frames to 15 counts
+      DebugToResult("Scaling super-res floats into bytes\n");
+      flIn = (float *)imageData;
+      bData = (unsigned char *)array;
+      for (i = 0; i < width * height; i++)
+        bData[i] = (unsigned char)(flIn[i] * SUPERRES_FRAME_SCALE + 0.5f);
+
+  } else if (divideBy2 > 0) {
 
     // Divide by 2
     outData = (short *)array;
