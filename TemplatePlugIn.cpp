@@ -1393,12 +1393,18 @@ int TemplatePlugIn::SelectCamera(long camera)
 	return 0;
 }
 
+// Set the read mode and the scaling factor
 void TemplatePlugIn::SetReadMode(long mode, double scaling)
 {
   if (mode > 2)
     mode = 2;
+
+  //  Constrain the scaling to a maximum of 1 in linear mode; old SEM always sends 
+  // counting mode scaling, newer SEM sends 1 for Summit linear or 0.25 for Base mode
+  if (mode <= 0 && scaling > 1.)
+    scaling = 1.;
   m_iReadMode = mode;
-  m_fFloatScaling = (float)(mode > 0 ? scaling : 1.);
+  m_fFloatScaling = (float)scaling;
 }
 
 // Set the parameters for the next K2 acquisition
@@ -1406,10 +1412,7 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
                                      BOOL doseFrac, double frameTime, BOOL alignFrames, 
                                      BOOL saveFrames, char *filter)
 {
-  if (mode > 2)
-    mode = 2;
-  m_iReadMode = mode;
-  m_fFloatScaling = (float)(mode > 0 ? scaling : 1.);
+  SetReadMode(mode, scaling);
   m_iHardwareProc = hardwareProc;
   m_bDoseFrac = doseFrac;
   m_dFrameTime = frameTime;
