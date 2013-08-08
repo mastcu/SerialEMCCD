@@ -1668,6 +1668,9 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
                                   long channels[], long divideBy2)
 {
   int chan, j, again, dataSize = 2;
+  // 7/25/13: Set based on fact that 20 second exposures were not safe even with 800
+  // msec extra shot delay.  This is extra-generous, 1.04 should do it.
+  float delayErrorFactor = 1.05f;
   double fullExpTime = *height * (*width * pixelTime + m_dFlyback + 
     (lineSync ? m_dSyncMargin : 0.)) / 1000.;
 
@@ -1756,7 +1759,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
 
   // Acquisition and return commands
   if (!continuous) {
-    j = (int)((fullExpTime + m_iExtraDSdelay) * 0.06 + 0.5);
+    j = (int)((fullExpTime + m_iExtraDSdelay) * delayErrorFactor * 0.06 + 0.5);
     if (m_iExtraDSdelay > 0) {
       m_strCommand += "DSStartAcquisition(paramID, 0, 0)\n";
       sprintf(m_strTemp, "Delay(%d)\n", j);
