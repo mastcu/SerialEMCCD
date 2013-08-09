@@ -607,7 +607,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   void *imageData;
   short *outData, *outForRot, *rotBuf = NULL;
   short *sData;
-  bool isInteger, isUnsignedInt, doingStack, isFloat;
+  bool isInteger, isUnsignedInt, doingStack, isFloat, signedBytes;
   double retval, procWall, saveWall, wallStart, wallNow;
   FILE *fp = NULL;
   MrcHeader hdata;
@@ -669,9 +669,10 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       isInteger = DM::ImageIsDataTypeInteger(image.get());
       isUnsignedInt = DM::ImageIsDataTypeUnsignedInteger(image.get());
       isFloat = DM::ImageIsDataTypeFloat(image.get());
+      signedBytes = byteSize == 1 && !isUnsignedInt;
       if (byteSize != dataSize && !((dataSize == 2 && byteSize == 4 && 
         (isInteger || isFloat)) ||
-        (dataSize == 2 && byteSize == 1 && isUnsignedInt && doingStack))) {
+        (dataSize == 2 && byteSize == 1 && doingStack))) {
           sprintf(m_strTemp, "Image data are not of the expected type (bs %d  ds %d  int"
              " %d  uint %d)\n", byteSize, dataSize, isInteger ? 1:0, isUnsignedInt?1:0);
           ErrorToResult(m_strTemp);
@@ -735,16 +736,18 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 
           // Process a float image (from software normalized frames)
           // It goes from the DM array into the passed array
-          if (byteSize > 2) {
+          if (byteSize > 2 || signedBytes) {
             ProcessImage(imageData, array, dataSize, *width, *height, frameDivide,
               transpose, byteSize, isInteger, isUnsignedInt);
             outData = (short *)array;
             outForRot = rotBuf;
-            scaling = m_fFloatScaling;
-            if (frameDivide > 0)
-              scaling /= 2.;
-            else if (frameDivide < 0)
-              scaling = SUPERRES_FRAME_SCALE;
+            if (byteSize > 2) {
+              scaling = m_fFloatScaling;
+              if (frameDivide > 0)
+                scaling /= 2.;
+              else if (frameDivide < 0)
+                scaling = SUPERRES_FRAME_SCALE;
+            }
           }
 
           // Rotate and flip if desired and change the array pointer to save to use the 
@@ -942,15 +945,27 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
   short *outData;
   short *sData;
   unsigned char *bData;
+  char *sbData;
+  char sbVal;
   float *flIn, *flOut, flTmp;
   int operations[4] = {1, 5, 7, 3};
 
   // Do a simple copy if sizes match and not dividing by 2 and not transposing
   // or if bytes are passed in
   if ((dataSize == byteSize && !divideBy2 && m_fFloatScaling == 1.) || byteSize == 1) {
+    
+    // If they are signed bytes, need to copy with truncation
+    if (byteSize == 1 && !isUnsignedInt) {
+      sbData = (char *)imageData;
+      bData = (unsigned char *)array;
+      DebugToResult("Converting signed bytes with truncation at 0\n");
+      for (i = 0; i < width * height; i++) {
+        sbVal = *sbData++;
+        *bData++ = (unsigned char)(sbVal < 0 ? 0 : sbVal);
+      }
 
     // If a transpose changes the size, need to call the fancy routine
-    if ((transpose & 256) && width != height) {
+    } else if ((transpose & 256) && width != height) {
 
       // This routine builds in a final flip around X "for output" so the operations
       // are derived to specify such flipped output to give the desired one
