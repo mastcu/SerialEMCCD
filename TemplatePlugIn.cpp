@@ -1077,13 +1077,20 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
         sData = (short *)imageData;
         for (i = 0; i < width * height; i++)
           outData[i] = sData[i] / 2;
-      } else {
+      } else if (m_fFloatScaling == 1.) {
 
         // signed long to short
         DebugToResult("Dividing signed integers by 2\n");
         iData = (int *)imageData;
         for (i = 0; i < width * height; i++)
           outData[i] = (short)(iData[i] / 2);
+      } else {
+
+        // signed long to short with
+        DebugToResult("Dividing signed integers by 2 with scaling\n");
+        iData = (int *)imageData;
+        for (i = 0; i < width * height; i++)
+          outData[i] = (short)((float)iData[i] * m_fFloatScaling / 2.f + 0.5f);
       }
     } else {
 
@@ -1099,6 +1106,7 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
     // No division by 2: Convert long integers to unsigned shorts except for 
     // dose frac frames
     usData = (unsigned short *)array;
+    sData = (short *)array;
     if (isUnsignedInt) {
       if (byteSize == 1) {
 
@@ -1133,15 +1141,26 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
       }
     } else if (isInteger) {
 
-      // Otherwise need to truncate at zero to copy signed to unsigned
-      DebugToResult("Converting signed integers to unsigned shorts with "
-        "truncation\n");
-      iData = (int *)imageData;
-      for (i = 0; i < width * height; i++) {
-        if (iData[i] >= 0)
-          usData[i] = (unsigned short)iData[i];
-        else
-          usData[i] = 0;
+      if (m_fFloatScaling == 1.) {
+
+        // Otherwise need to truncate at zero to copy signed to unsigned
+        DebugToResult("Converting signed integers to unsigned shorts with "
+          "truncation\n");
+        iData = (int *)imageData;
+        for (i = 0; i < width * height; i++) {
+          if (iData[i] >= 0)
+            usData[i] = (unsigned short)iData[i];
+          else
+            usData[i] = 0;
+        }
+      } else {
+
+        // Scaling, convert to signed since counting mode shouldn't need big range
+        DebugToResult("Converting signed integers to signed shorts with scaling\n");
+        iData = (int *)imageData;
+        for (i = 0; i < width * height; i++)
+          sData[i] = (short)((float)iData[i] * m_fFloatScaling + 0.5f);
+
       }
     } else {
 
