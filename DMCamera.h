@@ -70,6 +70,7 @@ public:
   STDMETHOD(ReturnDSChannel)(/*[out, size_is(*arrSize)]*/short array[], /*[in, out]*/long *arrSize, /*[in, out]*/long *width, /*[out]*/long *height, /*[in]*/long channel, /*[in]*/long divideBy2);
   STDMETHOD(StopDSAcquisition)();
   STDMETHOD(SetupFileSaving)(/*[in]*/long rotationFlip, /*[in]*/BOOL filePerImage, /*[in]*/double pixelSize, /*[in]*/long nameSize, /*[in, size_is(nameSize)]*/long names[], /*[out]*/long *error);
+  STDMETHOD(SetupFileSaving2)(/*[in]*/long rotationFlip, /*[in]*/BOOL filePerImage, /*[in]*/double pixelSize, /*[in]*/long flags, /*[in]*/double dummy1, /*[in]*/double dummy2, /*[in]*/double dummy3, /*[in]*/double dummy4, /*[in]*/long nameSize, /*[in, size_is(nameSize)]*/long names[], /*[out]*/long *error);
   STDMETHOD(GetFileSaveResult)(/*[out]*/long *numSaved, /*[out]*/long *error);
 };
 

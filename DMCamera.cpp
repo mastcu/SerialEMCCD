@@ -166,10 +166,31 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
                                         double pixelSize, long nameSize, long names[],
                                         long *error)
 {
+  SetupFileSaving2(rotationFlip, filePerImage, pixelSize, 0, 0., 0., 0., 0., nameSize,
+    names, error);
+  return S_OK;
+}
+
+STDMETHODIMP CDMCamera::SetupFileSaving2(long rotationFlip, BOOL filePerImage, 
+                                        double pixelSize, long flags, double dummy1,
+                                        double dummy2, double dummy3, double dummy4,
+                                        long nameSize, long names[], long *error)
+{
   char *cnames = (char *)names;
+  char *command = NULL;
+  char *refName = NULL;
   int rootind = (int)strlen(cnames) + 1;
-  gPlugInWrapper.SetupFileSaving(rotationFlip, filePerImage, pixelSize, cnames,
-    &cnames[rootind], error);
+  int nextInd = rootind;
+  if (flags & K2_COPY_GAIN_REF) {
+    nextInd += (int)strlen(&cnames[nextInd]) + 1;
+    refName = &cnames[nextInd];
+  }
+  if (flags & K2_RUN_COMMAND) {
+    nextInd += (int)strlen(&cnames[nextInd]) + 1;
+    command = &cnames[nextInd];
+  }
+  gPlugInWrapper.SetupFileSaving(rotationFlip, filePerImage, pixelSize, flags, dummy1,
+    dummy2, dummy3, dummy4, cnames, &cnames[rootind], refName, command, error);
   return S_OK;
 }
 

@@ -29,6 +29,7 @@ static SOCKET sHClient = INVALID_SOCKET;
 static int sChunkSize = 16777216;     // Tests indicated this size was optimal
 // This is exactly 4K x 2K x 2, failures occurred above twice this size
 static int sSuperChunkSize = 33554432;  
+static FILE *sFPdebug = NULL;
 
 // Declarations needed on both sides
 #define ARGS_BUFFER_SIZE 1024
@@ -41,7 +42,8 @@ enum {GS_ExecuteScript = 1, GS_SetDebugMode, GS_SetDMVersion, GS_SetCurrentCamer
       GS_InsertCamera, GS_GetDMVersion, GS_GetDMCapabilities,
       GS_SetShutterNormallyClosed, GS_SetNoDMSettling, GS_GetDSProperties,
       GS_AcquireDSImage, GS_ReturnDSChannel, GS_StopDSAcquisition, GS_CheckReferenceTime,
-      GS_SetK2Parameters, GS_ChunkHandshake, GS_SetupFileSaving, GS_GetFileSaveResult};
+      GS_SetK2Parameters, GS_ChunkHandshake, GS_SetupFileSaving, GS_GetFileSaveResult,
+      GS_SetupFileSaving2};
 
 static int sNumLongSend;
 static int sNumBoolSend;
@@ -99,6 +101,7 @@ static ArgDescriptor sFuncTable[] = {
   {GS_SetK2Parameters,      3, 3, 2,   0, 0, 0,   TRUE},
   {GS_SetupFileSaving,      2, 1, 1,   1, 0, 0,   TRUE},
   {GS_GetFileSaveResult,    0, 0, 0,   2, 0, 0,   FALSE},
+  {GS_SetupFileSaving2,     3, 1, 5,   1, 0, 0,   TRUE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -135,6 +138,10 @@ int StartSocket(int &wsaError)
     return 1;
   }
   sInitialized = true;
+
+  // Uncomment to start a log file; use the line below to put in logged statements
+  //sFPdebug = fopen("C:\\cygwin\\home\\mast\\socketDebug.txt", "w");
+  //if (sFPdebug){ fprintf(sFPdebug, "Calling select\n"); fflush(sFPdebug);}
   sHSocketThread = CreateThread(NULL, 0, SocketProc, NULL, CREATE_SUSPENDED, &threadID);
   if (!sHSocketThread) {
     Cleanup();
@@ -261,7 +268,6 @@ static DWORD WINAPI SocketProc(LPVOID pParam)
         gPlugInWrapper.ErrorToResult(sMessageBuf, "SerialEMSocket: ");
       }
         //gPlugInWrapper.DebugToResult("returning\n");
-
       return sStartupError;
     }
 
@@ -274,6 +280,7 @@ static DWORD WINAPI SocketProc(LPVOID pParam)
       (sHClient != INVALID_SOCKET && FD_ISSET(sHClient, &readFds)) ? 1:0);
     if (gPlugInWrapper.GetDebugVal() > 1)
       gPlugInWrapper.DebugToResult(sMessageBuf);
+
     // There is something to do.  Check the client first (Does ISSET Work?)
     if (sHClient != INVALID_SOCKET && FD_ISSET(sHClient, &readFds)) {
       numBytes = recv(sHClient, sArgsBuffer, ARGS_BUFFER_SIZE, 0);
@@ -442,8 +449,10 @@ static int ListenForHandshake(int superChunk)
 // Process a received message
 static int ProcessCommand(int numBytes)
 {
-  int funcCode, ind, needed, version;
+  int funcCode, ind, needed, version, rootInd, nextInd;
   short *imArray;
+  char *command = NULL;
+  char *refName = NULL;
   struct __stat64 statbuf;
 
   // Get the function code as the second element of the buffer
@@ -564,8 +573,27 @@ static int ProcessCommand(int numBytes)
 
     case GS_SetupFileSaving:
       ind = (int)strlen((char *)sLongArray) + 1;
+      gPlugInWrapper.SetupFileSaving(sLongArgs[1], sBoolArgs[0], sDoubleArgs[0], 0,
+        0., 0., 0., 0., (char *)sLongArray, (char *)sLongArray + ind, NULL, NULL, 
+        &sLongArgs[1]);
+      SendArgsBack(0);
+      break;
+
+    case GS_SetupFileSaving2:
+      rootInd = (int)strlen((char *)sLongArray) + 1;
+      nextInd = rootInd;
+      if (sLongArgs[2] & K2_COPY_GAIN_REF) {
+        nextInd += (int)strlen((char *)sLongArray + nextInd) + 1;
+        refName = (char *)sLongArray + nextInd;
+      }
+      if (sLongArgs[2] & K2_RUN_COMMAND) {
+        nextInd += (int)strlen((char *)sLongArray + nextInd) + 1;
+        command = (char *)sLongArray + nextInd;
+      }
       gPlugInWrapper.SetupFileSaving(sLongArgs[1], sBoolArgs[0], sDoubleArgs[0], 
-        (char *)sLongArray, (char *)sLongArray + ind, &sLongArgs[1]);
+        sLongArgs[2], sDoubleArgs[1], sDoubleArgs[2], sDoubleArgs[3], sDoubleArgs[4], 
+        (char *)sLongArray, (char *)sLongArray + rootInd, refName, command,
+        &sLongArgs[1]);
       SendArgsBack(0);
       break;
 

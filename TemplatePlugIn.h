@@ -15,6 +15,10 @@ FILE_ALREADY_EXISTS};
 #define K2_COUNTING_READ_MODE 2
 #define K2_SUPERRES_READ_MODE 3
 
+#define K2_SAVE_RAW_PACKED       1
+#define K2_COPY_GAIN_REF   (1 << 1)
+#define K2_RUN_COMMAND     (1 << 2)
+
 #define OLD_OPEN_SHUTTER_BROKEN    360
 #define OLD_SELECT_SHUTTER_BROKEN    360
 #define OLD_SETTLING_BROKEN   360
@@ -40,8 +44,9 @@ public:
 	void SetReadMode(long mode, double scaling);
   void SetK2Parameters(long readMode, double scaling, long hardwareProc, BOOL doseFrac, 
     double frameTime, BOOL alignFrames, BOOL saveFrames, char *filter);
-  void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize,
-    char *dirName, char *rootName, long *error);
+  void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, long flags,
+    double dummy1, double dummy2, double dummy3, double dummy4, char *dirName, 
+    char *rootName, char *refName, char *command, long *error);
   void GetFileSaveResult(long *numSaved, long *error);
 	int GetImage(short *array, long *arrSize, long *width, 
 		long *height, long processing, double exposure,

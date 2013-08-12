@@ -48,9 +48,11 @@ public:
 	void SetReadMode(long mode, double scaling);
   void SetK2Parameters(long readMode, double scaling, long hardwareProc, BOOL doseFrac, 
     double frameTime, BOOL alignFrames, BOOL saveFrames, char *filter);
-  void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, 
-    char *dirName, char *rootName, long *error);
+  void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, long flags,
+    double dummy1, double dummy2, double dummy3, double dummy4, char *dirName, 
+    char *rootName, char *refName, char *command, long *error);
   void GetFileSaveResult(long *numSaved, long *error);
+  int CopyK2ReferenceIfNeeded();
 	double ExecuteClientScript(char *strScript, BOOL selectCamera);
 	int AcquireAndTransferImage(void *array, int dataSize, long *arrSize, long *width,
 		long *height, long divideBy2, long transpose, long delImage, long saveFrames);
@@ -60,6 +62,7 @@ public:
                                   bool isUnsignedInt);
   void RotateFlip(short int *array, int mode, int nx, int ny, int operation, 
                     short int *brray, int *nxout, int *nyout);
+  int CopyStringIfChanged(char *newStr, char **memberStr, int &changed, long *error);
 	void AddCameraSelection(int camera = -1);
 	int GetGainReference(float *array, long *arrSize, long *width, 
 							long *height, long binning);
@@ -123,6 +126,11 @@ private:
   int m_iErrorFromSave;
   double m_dPixelSize;
   int m_iRotationFlip;
+  int m_iSaveFlags;
+  char *m_strPostSaveCom;
+  char *m_strGainRefToCopy;
+  char *m_strLastRefName;
+  char *m_strLastRefDir;
 };
 
 // Declarations of global functions called from here
@@ -165,6 +173,11 @@ TemplatePlugIn::TemplatePlugIn()
   m_bSaveFrames = false;
   m_strRootName = NULL;
   m_strSaveDir = NULL;
+  m_strPostSaveCom = NULL;
+  m_strGainRefToCopy = NULL;
+  m_strLastRefName = NULL;
+  m_strLastRefDir = NULL;
+  m_iSaveFlags = 0;
   m_bFilePerImage = true;
   m_iRotationFlip = 7;
   m_dPixelSize = 5.;
@@ -601,17 +614,18 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 	long outLimit = *arrSize;
   int byteSize, i, j, numDim, loop, outByteSize, numLoop = 1;
   unsigned short *usData;
-  unsigned char *bData;
+  unsigned char *bData, *packed;
+  unsigned char lowbyte;
   GatanPlugIn::ImageDataLocker *imageLp = NULL;
   ImageData::image_data_t fData;
   void *imageData;
   short *outData, *outForRot, *rotBuf = NULL;
   short *sData;
-  bool isInteger, isUnsignedInt, doingStack, isFloat, signedBytes;
+  bool isInteger, isUnsignedInt, doingStack, isFloat, signedBytes, save4bit, needProc;
   double retval, procWall, saveWall, wallStart, wallNow;
   FILE *fp = NULL;
   MrcHeader hdata;
-  int fileSlice, tmin, tmax, tsum, val, numSlices, fileMode, nxout, nyout;
+  int fileSlice, tmin, tmax, tsum, val, numSlices, fileMode, nxout, nyout, nxFile;
   float tmean, meanSum, scaling = 1.;
   int errorRet = 0;
 
@@ -698,9 +712,14 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         numSlices = DM::ImageGetDimensionSize(image.get(), 2);
 
         // Float super-res image is from software processing and needs special scaling
-        // into bytes, set divide negative as flag for this
+        // into bytes, set divide -1 as flag for this
         if (sReadModes[m_iReadMode] == K2_SUPERRES_READ_MODE && isFloat)
           frameDivide = -1;
+
+        // But if they are counting mode images in integer, they may be packed to bytes
+        if (sReadModes[m_iReadMode] == K2_COUNTING_READ_MODE && isInteger && byteSize == 2
+          && (m_iSaveFlags & K2_SAVE_RAW_PACKED))
+          frameDivide = -2;
         outByteSize = 2;
         if (byteSize == 1 || frameDivide < 0) {
           fileMode = MRC_MODE_BYTE;
@@ -710,9 +729,12 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           fileMode = MRC_MODE_SHORT;
         else
           fileMode = MRC_MODE_USHORT;
+        save4bit = sReadModes[m_iReadMode] == K2_SUPERRES_READ_MODE && byteSize == 1 &&
+            (m_iSaveFlags & K2_SAVE_RAW_PACKED);
+        needProc = byteSize > 2 || signedBytes || frameDivide < 0;
 
         // Allocate buffer for rotation/flip if processing needs to be done too
-        if (byteSize > 2 && m_iRotationFlip) {
+        if (needProc && m_iRotationFlip) {
           try {
             if (outByteSize == 1)
               rotBuf = (short *)(new unsigned char [*width * *height]);
@@ -726,6 +748,11 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           }
         }
 
+        if (((sReadModes[m_iReadMode] == K2_SUPERRES_READ_MODE && byteSize == 1) ||
+          (sReadModes[m_iReadMode] == K2_COUNTING_READ_MODE && byteSize == 2)) &&
+          (m_iSaveFlags & K2_COPY_GAIN_REF) && m_strGainRefToCopy)
+          CopyK2ReferenceIfNeeded();
+
         procWall = saveWall = 0.;
         wallStart = wallTime();
         for (int slice = 0; slice < numSlices; slice++) {
@@ -736,7 +763,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 
           // Process a float image (from software normalized frames)
           // It goes from the DM array into the passed array
-          if (byteSize > 2 || signedBytes) {
+          if (needProc) {
             ProcessImage(imageData, array, dataSize, *width, *height, frameDivide,
               transpose, byteSize, isInteger, isUnsignedInt);
             outData = (short *)array;
@@ -745,7 +772,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
               scaling = m_fFloatScaling;
               if (frameDivide > 0)
                 scaling /= 2.;
-              else if (frameDivide < 0)
+              else if (frameDivide == -1)
                 scaling = SUPERRES_FRAME_SCALE;
             }
           }
@@ -763,6 +790,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           wallNow = wallTime();
           procWall += wallNow - wallStart;
           wallStart = wallNow;
+          nxFile = save4bit ? nxout / 2 : nxout;
 
           // open file if needed
           if (!slice || m_bFilePerImage) {
@@ -784,39 +812,20 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             }
 
             // Set up header for one slice
-            mrc_head_new(&hdata, nxout, nyout, 1, fileMode);
+            mrc_head_new(&hdata, nxFile, nyout, 1, fileMode);
             sprintf(m_strTemp, "SerialEMCCD: Dose fractionation image, scaled by %.2f", 
               scaling);
+            if (save4bit)
+              sprintf(m_strTemp, "SerialEMCCD: Dose fractionation image, 4 bits packed"); 
             mrc_head_label(&hdata, m_strTemp);
             fileSlice = 0;
             tmin = 1000000;
             tmax = -tmin;
             meanSum = 0.;
-
           }
-
-          // Initialize for getting mean of this slice, and seek to slice
-          tmean = 0.; 
-          i = mrc_big_seek(fp, hdata.headerSize, nxout * outByteSize, 
-            nyout * fileSlice, SEEK_SET);
-          if (i) {
-            sprintf(m_strTemp, "Error %d seeking for slice %d: %s\n", i, slice, 
-              strerror(errno));
-            ErrorToResult(m_strTemp);
-            m_iErrorFromSave = SEEK_ERROR;
-            break;
-          }
-
-          if ((i = (int)b3dFwrite(outData, outByteSize * nxout, nyout, fp)) != nyout) {
-              sprintf(m_strTemp, "Failed to write data past line %d of slice %d: %s\n", i, 
-                slice, strerror(errno));
-              ErrorToResult(m_strTemp);
-              m_iErrorFromSave = WRITE_DATA_ERROR;
-              break;
-          }
-
 
           // Loop on the lines to compute mean accurately
+          tmean = 0.; 
           for (i = 0; i < nyout; i++) {
 
             // Get pointer to start of line
@@ -854,6 +863,38 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             }
             tmean += tsum;
           }
+
+          // Pack 4-bit data into bytes; move into array if not there yet
+          if (save4bit) {
+            bData = (unsigned char *)outData;
+            packed = (unsigned char *)array;
+            outData = (short *)array;
+            for (i = 0; i < nxFile * nyout; i++) {
+              lowbyte = *bData++ & 15;
+              *packed++ = lowbyte | ((*bData++ & 15) << 4);
+            }
+          }
+
+          // Seek to slice then write it
+          i = mrc_big_seek(fp, hdata.headerSize, nxFile * outByteSize, 
+            nyout * fileSlice, SEEK_SET);
+          if (i) {
+            sprintf(m_strTemp, "Error %d seeking for slice %d: %s\n", i, slice, 
+              strerror(errno));
+            ErrorToResult(m_strTemp);
+            m_iErrorFromSave = SEEK_ERROR;
+            break;
+          }
+
+          if ((i = (int)b3dFwrite(outData, outByteSize * nxFile, nyout, fp)) != nyout) {
+              sprintf(m_strTemp, "Failed to write data past line %d of slice %d: %s\n", i, 
+                slice, strerror(errno));
+              ErrorToResult(m_strTemp);
+              m_iErrorFromSave = WRITE_DATA_ERROR;
+              break;
+          }
+
+
           if (m_iErrorFromSave)
             continue;
 
@@ -944,6 +985,7 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
   unsigned short *usData, *usData2;
   short *outData;
   short *sData;
+  short sVal;
   unsigned char *bData;
   char *sbData;
   char sbVal;
@@ -952,7 +994,8 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
 
   // Do a simple copy if sizes match and not dividing by 2 and not transposing
   // or if bytes are passed in
-  if ((dataSize == byteSize && !divideBy2 && m_fFloatScaling == 1.) || byteSize == 1) {
+  if ((dataSize == byteSize && !divideBy2 && m_fFloatScaling == 1.) || byteSize == 1 ||
+    divideBy2 == -2) {
     
     // If they are signed bytes, need to copy with truncation
     if (byteSize == 1 && !isUnsignedInt) {
@@ -962,6 +1005,24 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
       for (i = 0; i < width * height; i++) {
         sbVal = *sbData++;
         *bData++ = (unsigned char)(sbVal < 0 ? 0 : sbVal);
+      }
+
+    // Packing unsigned or signed integers from raw counting image to bytes
+    } else if (divideBy2 == -2 && isUnsignedInt) {
+      usData = (unsigned short *)imageData;
+      bData = (unsigned char *)array;
+      DebugToResult("Truncating unsigned shorts into bytes\n");
+      for (i = 0; i < width * height; i++)
+        *bData++ = (unsigned char)*usData++;
+
+    } else if (divideBy2 == -2 && !isUnsignedInt) {
+      sData = (short *)imageData;
+      bData = (unsigned char *)array;
+      DebugToResult("Truncating signed shorts into bytes\n");
+      for (i = 0; i < width * height; i++) {
+        sVal = *sData++;
+        B3DCLAMP(sVal, 0, 255);
+        *bData++ = (unsigned char)sVal;
       }
 
     // If a transpose changes the size, need to call the fancy routine
@@ -1142,7 +1203,6 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
     } else if (isInteger) {
 
       if (m_fFloatScaling == 1.) {
-
         // Otherwise need to truncate at zero to copy signed to unsigned
         DebugToResult("Converting signed integers to unsigned shorts with "
           "truncation\n");
@@ -1399,6 +1459,96 @@ void TemplatePlugIn::RotateFlip(short int *array, int mode, int nx, int ny, int 
   }
 }
 
+// Copy a gain reference file to the directory if there is not a newer one
+int TemplatePlugIn::CopyK2ReferenceIfNeeded()
+{
+  WIN32_FIND_DATA findRefData, findCopyData;
+  HANDLE hFindRef, hFindCopy;
+  string saveDir = m_strSaveDir;
+  string rootName = m_strRootName;
+  char *prefix[2] = {"Count", "Super"};
+  int ind, retVal = 0;
+  bool needCopy = true, namesOK = false;
+  int prefInd = sReadModes[m_iReadMode] == K2_SUPERRES_READ_MODE ? 1 : 0;
+
+  // For single image files, find the date-time root and split up the name
+  if (m_bFilePerImage) {
+    ind = (int)saveDir.find_last_of("\\");
+    if (ind < 2 || ind >= saveDir.length() - 1)
+      return 1;
+    rootName = saveDir.data() + ind + 1;
+    saveDir.erase(ind, string::npos);
+  }
+
+
+  // Get the reference file first
+  hFindRef = FindFirstFile(m_strGainRefToCopy, &findRefData);
+  if (hFindRef == INVALID_HANDLE_VALUE) {
+    sprintf(m_strTemp, "Cannot find K2 gain reference file: %s\n", 
+      m_strGainRefToCopy);
+    ErrorToResult(m_strTemp);
+    return 1;
+  } 
+  FindClose(hFindRef);
+
+  // If there is an existing copy and the mode and the directory match, find the copy
+  // Otherwise look for all matching files in directory
+  if (m_strLastRefName && strstr(m_strLastRefName, prefix[prefInd]) && 
+    !strcmp(m_strLastRefDir, saveDir.data())) {
+      sprintf(m_strTemp, "Finding %s\n", m_strLastRefName);
+    hFindCopy = FindFirstFile(m_strLastRefName, &findCopyData);
+    namesOK = true;
+  } else {
+    sprintf(m_strTemp, "%s\\%sRef_*.dm4", saveDir.data(), prefix[prefInd]);
+    hFindCopy = FindFirstFile(m_strTemp, &findCopyData);
+    sprintf(m_strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefix[prefInd]);
+  }
+      DebugToResult(m_strTemp);
+
+  // Test that file or all candidate files in the directory and stop if find one
+  // is newer than the ref
+  if (hFindCopy != INVALID_HANDLE_VALUE) {
+    while (needCopy) {
+      sprintf(m_strTemp, "Comparing times for %s\n", findCopyData.cFileName);
+      DebugToResult(m_strTemp);
+      needCopy = CompareFileTime(&findRefData.ftLastWriteTime,
+        &findCopyData.ftLastWriteTime) > 0;
+      if (!needCopy || !FindNextFile(hFindCopy, &findCopyData))
+        break;
+    }
+    FindClose(hFindCopy);
+  }
+  if (!needCopy && namesOK)
+    return 0;
+
+  // Fix up the directory and reference name if they are changed, whether it is an old
+  // reference or a new copy
+  B3DFREE(m_strLastRefDir);
+  B3DFREE(m_strLastRefName);
+  m_strLastRefDir = strdup(saveDir.data());
+  if (!needCopy) {
+    sprintf(m_strTemp, "%s\\%s", saveDir.data(), findCopyData.cFileName);
+    m_strLastRefName = strdup(m_strTemp);
+    return 0;
+  }
+  sprintf(m_strTemp, "%s\\%sRef_%s.dm4", saveDir.data(), prefix[prefInd],
+    rootName.data());
+  m_strLastRefName = strdup(m_strTemp);
+
+  // Copy the reference
+  DebugToResult("Making new copy of gain reference\n");
+  if (!CopyFile(m_strGainRefToCopy, m_strTemp, false)) {
+    sprintf(m_strTemp, "An error occurred copying %s to %s\n", m_strGainRefToCopy,
+      m_strTemp);
+    ErrorToResult(m_strTemp);
+    B3DFREE(m_strLastRefName);
+    return 1;
+  }
+
+  return 0;
+}
+
+
 
 // Add commands for selecting a camera to the command string
 void TemplatePlugIn::AddCameraSelection(int camera)
@@ -1463,29 +1613,33 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
 
 // Setup properties for saving frames in files
 void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage, 
-                                    double pixelSize, char *dirName, char *rootName, 
-                                    long *error)
+                                     double pixelSize, long flags, double dummy1, 
+                                     double dummy2, double dummy3, double dummy4, 
+                                     char *dirName, char *rootName, char *refName,
+                                     char *command, long *error)
 {
   struct _stat statbuf;
-  int newDir = 1;
   FILE *fp;
+  int newDir, dummy;
   m_iRotationFlip = rotationFlip;
   m_bFilePerImage = filePerImage;
   m_dPixelSize = pixelSize;
+  m_iSaveFlags = flags;
 
-  // Check whether the directory is changing then copy the strings
-  if (m_strSaveDir)
-    newDir = strcmp(m_strSaveDir, dirName);
-  if (newDir) {
-    B3DFREE(m_strSaveDir);
-    m_strSaveDir = strdup(dirName);
-  }
-  B3DFREE(m_strRootName);
-  m_strRootName = strdup(rootName);
-  if (!m_strRootName || !m_strSaveDir) {
-    *error = ROTBUF_MEMORY_ERROR;
+  // Copy all the strings if they are changed
+  if (CopyStringIfChanged(dirName, &m_strSaveDir, newDir, error))
     return;
+  if (CopyStringIfChanged(rootName, &m_strRootName, dummy, error))
+    return;
+  if (refName && (flags & K2_COPY_GAIN_REF)) {
+    if (CopyStringIfChanged(refName, &m_strGainRefToCopy, dummy, error))
+      return;
   }
+  if (command && (flags & K2_RUN_COMMAND)) {
+    if (CopyStringIfChanged(command, &m_strPostSaveCom, dummy, error))
+      return;
+  }
+
   sprintf(m_strTemp, "SetupFileSaving called with rf %d fpi %s pix %f dir %s root %s\n", 
     rotationFlip, filePerImage ? "Y":"N", pixelSize, m_strSaveDir, m_strRootName);
   DebugToResult(m_strTemp);
@@ -1527,13 +1681,30 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   }
 }
 
+// Duplicate a string into the given member variable if it has changed
+int TemplatePlugIn::CopyStringIfChanged(char *newStr, char **memberStr, int &changed,
+                                        long *error)
+{
+  changed = 1;
+  if (*memberStr)
+    changed = strcmp(*memberStr, newStr);
+  if (changed) {
+    B3DFREE(*memberStr);
+    *memberStr = strdup(newStr);
+    if (!*memberStr) {
+      *error = ROTBUF_MEMORY_ERROR;
+      return 1;
+    }
+  }
+  return 0;
+}
+
 // Get results of last frame saving operation
 void TemplatePlugIn::GetFileSaveResult(long *numSaved, long *error)
 {
   *numSaved = m_iFramesSaved;
   *error = m_iErrorFromSave;
 }
-
 
 // Return number of cameras or -1 for error
 int TemplatePlugIn::GetNumberOfCameras()
@@ -1950,11 +2121,13 @@ void PlugInWrapper::SetK2Parameters(long readMode, double scaling, long hardware
     alignFrames, saveFrames, filter);
 }
 void PlugInWrapper::SetupFileSaving(long rotationFlip, BOOL filePerImage, 
-                                    double pixelSize, char *dirName, char *rootName, 
-                                    long *error)
+                                    double pixelSize, long flags, double dummy1, 
+                                    double dummy2, double dummy3, double dummy4, 
+                                    char *dirName, char *rootName, char *refName, 
+                                    char *command, long *error)
 {
-  gTemplatePlugIn.SetupFileSaving(rotationFlip, filePerImage, pixelSize, dirName, 
-    rootName, error);
+  gTemplatePlugIn.SetupFileSaving(rotationFlip, filePerImage, pixelSize, flags, dummy1,
+    dummy2, dummy3, dummy4, dirName, rootName, refName, command, error);
 }
 
 void PlugInWrapper::GetFileSaveResult(long *numSaved, long *error)
