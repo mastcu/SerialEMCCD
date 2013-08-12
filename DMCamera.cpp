@@ -171,6 +171,11 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   return S_OK;
 }
 
+// To call this, nameSize should be the number of longs passed in names, which should
+// contain concatenated null-terminated strings.  The directory name is the first string,
+// the root name for files is the second string.  If K2_COPY_GAIN_REF is set in flags,
+// the full name of the gani reference is the next string.  If K2_RUN_COMMAND is set in 
+// flags, a command to run is the next string (not yet supported).
 STDMETHODIMP CDMCamera::SetupFileSaving2(long rotationFlip, BOOL filePerImage, 
                                         double pixelSize, long flags, double dummy1,
                                         double dummy2, double dummy3, double dummy4,

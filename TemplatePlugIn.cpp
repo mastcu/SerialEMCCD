@@ -1474,7 +1474,7 @@ int TemplatePlugIn::CopyK2ReferenceIfNeeded()
   // For single image files, find the date-time root and split up the name
   if (m_bFilePerImage) {
     ind = (int)saveDir.find_last_of("\\");
-    if (ind < 2 || ind >= saveDir.length() - 1)
+    if (ind < 2 || ind >= (int)saveDir.length() - 1)
       return 1;
     rootName = saveDir.data() + ind + 1;
     saveDir.erase(ind, string::npos);
