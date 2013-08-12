@@ -236,6 +236,7 @@ void TemplatePlugIn::Run()
 ///
 void TemplatePlugIn::Cleanup()
 {
+  ShutdownSocket();
 }
 
 ///
@@ -249,7 +250,6 @@ void TemplatePlugIn::Cleanup()
 ///
 void TemplatePlugIn::End()
 {
-  ShutdownSocket();
 	TerminateModuleUninitializeCOM();
 }
 

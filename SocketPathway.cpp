@@ -165,15 +165,24 @@ int StartSocket(int &wsaError)
 // Call from plugin to shut down the socket connect and clean up everything
 void ShutdownSocket(void)
 {
-  // This is all theoretically correct but doesn't work
+  // This is all theoretically correct but doesn't work (not sure what that meant)
+  // Currently the problem is if there is an update script running when the close
+  // occurs, the wait will time out and the thread will still be active, locked in the
+  // script call
   DWORD code;
   if (!sInitialized)
     return;
   sCloseForExit = true;
-  WaitForSingleObject(sHSocketThread, 2 * SELECT_TIMEOUT);
+  WaitForSingleObject(sHSocketThread, 3 * SELECT_TIMEOUT);
   GetExitCodeThread(sHSocketThread, &code);
-  if (code == STILL_ACTIVE)
+  if (code == STILL_ACTIVE) {
+    CloseClient();
+    closesocket(sHListener);
+
+    // Suspending the thread puts it into loop at 100% CPU that eventually dies,
+    // Terminating is cleaner
     TerminateThread(sHSocketThread, 1);
+  }
   CloseHandle(sHSocketThread);
   Cleanup();
 }
@@ -245,9 +254,7 @@ static DWORD WINAPI SocketProc(LPVOID pParam)
       //gPlugInWrapper.DebugToResult("Closing socket\n");
       CloseClient();
       closesocket(hListener);
-      //if (sCloseForExit)
-        //Cleanup();
-      if (err < 0) {
+      if (err < 0 && !sCloseForExit) {
         sLastWSAerror = WSAGetLastError();
         sStartupError = 7;
         sprintf(sMessageBuf, "WSA Error %d on select command\n");
