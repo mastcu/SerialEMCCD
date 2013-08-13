@@ -626,7 +626,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   FILE *fp = NULL;
   MrcHeader hdata;
   int fileSlice, tmin, tmax, tsum, val, numSlices, fileMode, nxout, nyout, nxFile;
-  float tmean, meanSum, scaling = 1.;
+  float tmean, meanSum, scaleSave = m_fFloatScaling, scaling = 1.;
   int errorRet = 0;
 
 	// Set these values to zero in case of error returns
@@ -716,15 +716,19 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         if (sReadModes[m_iReadMode] == K2_SUPERRES_READ_MODE && isFloat)
           frameDivide = -1;
 
-        // But if they are counting mode images in integer, they may be packed to bytes
-        if (sReadModes[m_iReadMode] == K2_COUNTING_READ_MODE && isInteger && byteSize == 2
-          && (m_iSaveFlags & K2_SAVE_RAW_PACKED))
-          frameDivide = -2;
+        // But if they are counting mode images in integer, they need to not be scaled
+        // or divided by 2 if placed into shorts, and they may be packed to bytes
+        if (sReadModes[m_iReadMode] == K2_COUNTING_READ_MODE && isInteger) {
+          m_fFloatScaling = 1.;
+          frameDivide = 0;
+          if(m_iSaveFlags & K2_SAVE_RAW_PACKED)
+            frameDivide = -2;
+        }
         outByteSize = 2;
         if (byteSize == 1 || frameDivide < 0) {
           fileMode = MRC_MODE_BYTE;
           outByteSize = 1;
-        } else if ((divideBy2 && byteSize != 2) || 
+        } else if ((frameDivide > 0 && byteSize != 2) || 
           (dataSize == byteSize && !isUnsignedInt))
           fileMode = MRC_MODE_SHORT;
         else
@@ -749,7 +753,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         }
 
         if (((sReadModes[m_iReadMode] == K2_SUPERRES_READ_MODE && byteSize == 1) ||
-          (sReadModes[m_iReadMode] == K2_COUNTING_READ_MODE && byteSize == 2)) &&
+          (sReadModes[m_iReadMode] == K2_COUNTING_READ_MODE && !isFloat)) &&
           (m_iSaveFlags & K2_COPY_GAIN_REF) && m_strGainRefToCopy)
           CopyK2ReferenceIfNeeded();
 
@@ -922,6 +926,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           saveWall += wallNow - wallStart;
           wallStart = wallNow;
         }
+        m_fFloatScaling = scaleSave;
         if (m_iErrorFromSave)
           continue;
         if (fp) {
@@ -974,6 +979,21 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 	return errorRet;
 }
 
+/*
+* ProcessImage copies data from DM to given array with conversion, truncation, scaling
+* and division by 2 as needed.  There are way too many cases handled here, thanks to the
+* K2 camera.  Here is list of the kind of data that it produces in various cases from
+* actual camera (values in parentheses are from the simulator)
+*                Linear              Counting           Super-res
+* Unproc single  us int              us int             us short (int)
+* Unproc df sum  us int              us int             us int
+* Unproc frames  us short            us short           byte
+* DS single      sign int            sign int           sign short (int)
+* DS df sum      sign int            sign int           sign int
+* DS frames      sign int (short)    sign int (short)   sign byte
+* GN single/sum  float               float              float
+* GN frames      float               float              float
+*/
 void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize, 
 											            long width, long height, long divideBy2, 
                                   long transpose, int byteSize, bool isInteger,
@@ -1007,15 +1027,15 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
         *bData++ = (unsigned char)(sbVal < 0 ? 0 : sbVal);
       }
 
-    // Packing unsigned or signed integers from raw counting image to bytes
-    } else if (divideBy2 == -2 && isUnsignedInt) {
+    // Packing unsigned or signed shorts from raw counting image to bytes
+    } else if (byteSize == 2 && divideBy2 == -2 && isUnsignedInt) {
       usData = (unsigned short *)imageData;
       bData = (unsigned char *)array;
       DebugToResult("Truncating unsigned shorts into bytes\n");
       for (i = 0; i < width * height; i++)
         *bData++ = (unsigned char)*usData++;
 
-    } else if (divideBy2 == -2 && !isUnsignedInt) {
+    } else if (byteSize == 2 && divideBy2 == -2 && !isUnsignedInt) {
       sData = (short *)imageData;
       bData = (unsigned char *)array;
       DebugToResult("Truncating signed shorts into bytes\n");
@@ -1023,6 +1043,17 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
         sVal = *sData++;
         B3DCLAMP(sVal, 0, 255);
         *bData++ = (unsigned char)sVal;
+      }
+
+    // Packing signed ints from dark-subtracted counting image to bytes
+    } else if (byteSize == 4 && divideBy2 == -2 && isInteger) {
+      iData = (int *)imageData;
+      bData = (unsigned char *)array;
+      DebugToResult("Truncating signed integers into bytes\n");
+      for (i = 0; i < width * height; i++) {
+        j = *iData++;
+        B3DCLAMP(j, 0, 255);
+        *bData++ = (unsigned char)j;
       }
 
     // If a transpose changes the size, need to call the fancy routine
@@ -1131,13 +1162,20 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
           outData[i] = (short)((float)uiData[i] * m_fFloatScaling / 2.f + 0.5f);
       }
     } else if (isInteger) {
-      if (byteSize == 2) {
+      if (byteSize == 2 && m_fFloatScaling == 1.) {
 
         // signed short to short
         DebugToResult("Dividing signed shorts by 2\n");
         sData = (short *)imageData;
         for (i = 0; i < width * height; i++)
           outData[i] = sData[i] / 2;
+      } else if (byteSize == 2) {
+
+        // signed short to short with scaling
+        DebugToResult("Dividing signed shorts by 2 with scaling\n");
+        sData = (short *)imageData;
+        for (i = 0; i < width * height; i++)
+          outData[i] = (short)((float)sData[i] * m_fFloatScaling / 2.f + 0.5f);
       } else if (m_fFloatScaling == 1.) {
 
         // signed long to short
@@ -1147,7 +1185,7 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
           outData[i] = (short)(iData[i] / 2);
       } else {
 
-        // signed long to short with
+        // signed long to short with scaling
         DebugToResult("Dividing signed integers by 2 with scaling\n");
         iData = (int *)imageData;
         for (i = 0; i < width * height; i++)
@@ -1164,10 +1202,8 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
 
   } else {
 
-    // No division by 2: Convert long integers to unsigned shorts except for 
-    // dose frac frames
+    // No division by 2: Convert long integers to unsigned shorts
     usData = (unsigned short *)array;
-    sData = (short *)array;
     if (isUnsignedInt) {
       if (byteSize == 1) {
 
@@ -1202,8 +1238,21 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
       }
     } else if (isInteger) {
 
-      if (m_fFloatScaling == 1.) {
-        // Otherwise need to truncate at zero to copy signed to unsigned
+      if (byteSize == 2) {
+
+        // Scaling signed shorts: convert to unsigned and truncate at 0
+        DebugToResult("Converting signed shorts to unsigned shorts with scaling "
+          "and truncation\n");
+        sData = (short *)imageData;
+        for (i = 0; i < width * height; i++) {
+          if (sData[i] >= 0)
+            usData[i] = (unsigned short)((float)sData[i] * m_fFloatScaling + 0.5f);
+          else
+            usData[i] = 0;
+        }
+      } else if (m_fFloatScaling == 1.) {
+
+        // Otherwise there are ints: need to truncate at zero to copy signed to unsigned
         DebugToResult("Converting signed integers to unsigned shorts with "
           "truncation\n");
         iData = (int *)imageData;
@@ -1215,12 +1264,16 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
         }
       } else {
 
-        // Scaling, convert to signed since counting mode shouldn't need big range
-        DebugToResult("Converting signed integers to signed shorts with scaling\n");
+        // Scaling, convert to usigned and truncate at 0
+        DebugToResult("Converting signed integers to unsigned shorts with scaling "
+          "and truncation\n");
         iData = (int *)imageData;
-        for (i = 0; i < width * height; i++)
-          sData[i] = (short)((float)iData[i] * m_fFloatScaling + 0.5f);
-
+        for (i = 0; i < width * height; i++) {
+          if (iData[i] >= 0)
+            usData[i] = (unsigned short)((float)iData[i] * m_fFloatScaling + 0.5f);
+          else
+            usData[i] = 0;
+        }
       }
     } else {
 
@@ -1495,24 +1548,33 @@ int TemplatePlugIn::CopyK2ReferenceIfNeeded()
   // Otherwise look for all matching files in directory
   if (m_strLastRefName && strstr(m_strLastRefName, prefix[prefInd]) && 
     !strcmp(m_strLastRefDir, saveDir.data())) {
-      sprintf(m_strTemp, "Finding %s\n", m_strLastRefName);
+    //sprintf(m_strTemp, "Finding %s\n", m_strLastRefName);
     hFindCopy = FindFirstFile(m_strLastRefName, &findCopyData);
     namesOK = true;
   } else {
     sprintf(m_strTemp, "%s\\%sRef_*.dm4", saveDir.data(), prefix[prefInd]);
     hFindCopy = FindFirstFile(m_strTemp, &findCopyData);
-    sprintf(m_strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefix[prefInd]);
+    //sprintf(m_strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefix[prefInd]);
   }
-      DebugToResult(m_strTemp);
+  // DebugToResult(m_strTemp);
 
   // Test that file or all candidate files in the directory and stop if find one
-  // is newer than the ref
+  // is sufficiently newer then the ref
   if (hFindCopy != INVALID_HANDLE_VALUE) {
     while (needCopy) {
-      sprintf(m_strTemp, "Comparing times for %s\n", findCopyData.cFileName);
-      DebugToResult(m_strTemp);
-      needCopy = CompareFileTime(&findRefData.ftLastWriteTime,
-        &findCopyData.ftLastWriteTime) > 0;
+
+      // The DM reference access and creation times match and the last write time is a bit
+      // later.  Copies on a samba drive are given the original creation and write times,
+      // but can lose precision but can come out earlier when comparing last write time,
+      // although they are given current access times.  Copies on the SSD RAID are given 
+      // the original write time but a current creation and access time
+      double refSec = 429.4967296 * findRefData.ftCreationTime.dwHighDateTime + 
+        1.e-7 * findRefData.ftCreationTime.dwLowDateTime;
+      double copySec = 429.4967296 * findCopyData.ftCreationTime.dwHighDateTime + 
+        1.e-7 * findCopyData.ftCreationTime.dwLowDateTime;
+      //sprintf(m_strTemp, "refSec  %f  copySec %f\n", refSec, copySec);
+      //DebugToResult(m_strTemp);
+      needCopy = refSec > copySec + 10.;
       if (!needCopy || !FindNextFile(hFindCopy, &findCopyData))
         break;
     }
