@@ -186,7 +186,8 @@ void ShutdownSocket(void)
     CloseClient();
     closesocket(sHListener);
 
-    // Suspending the thread puts it into loop at 100% CPU that eventually dies,
+    // Suspending the thread puts it into loop at 100% CPU that eventually dies, as does
+    // doing nothing at all.  
     // Terminating is cleaner
     TerminateThread(sHSocketThread, 1);
   }

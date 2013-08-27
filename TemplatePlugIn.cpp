@@ -2026,11 +2026,16 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
 
   // Acquisition and return commands
   if (!continuous) {
-    j = (int)((fullExpTime + m_iExtraDSdelay) * delayErrorFactor * 0.06 + 0.5);
+    //j = (int)((fullExpTime + m_iExtraDSdelay) * delayErrorFactor * 0.06 + 0.5);
     if (m_iExtraDSdelay > 0) {
-      m_strCommand += "DSStartAcquisition(paramID, 0, 0)\n";
-      sprintf(m_strTemp, "Delay(%d)\n", j);
-      m_strCommand += m_strTemp;
+
+      // With this loop, it doesn't seem to need any delay at the end
+      m_strCommand += "DSStartAcquisition(paramID, 0, 0)\n"
+        "while (DSIsViewActive()) {\n"
+        "  Delay(2)\n"
+        "}\n";
+      //sprintf(m_strTemp, "Delay(%d)\n", j);
+      //m_strCommand += m_strTemp;
     } else {
       m_strCommand += "DSStartAcquisition(paramID, 0, 1)\n";
     }
