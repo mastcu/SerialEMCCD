@@ -2274,3 +2274,32 @@ int PlugInWrapper::GetDebugVal()
 {
   return gTemplatePlugIn.m_iDebugVal;
 }
+
+#ifdef NOT64BIT
+void mrc_set_scale(MrcHeader *h,
+                   double x, double y, double z)
+{
+}
+int mrc_head_new(MrcHeader *hdata,
+                 int x, int y, int z, int mode)
+{
+  return 0;
+}
+int mrc_head_label(MrcHeader *hdata, const char *label)
+{
+  return 0;
+}
+int mrc_head_write(FILE *fout, MrcHeader *hdata)
+{
+  return 0;
+}
+size_t b3dFwrite(void *buf, size_t size, size_t count, FILE *fp)
+{
+  return 0;
+}
+double wallTime(void)
+{
+  return 0.;
+}
+
+#endif
