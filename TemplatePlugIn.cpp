@@ -955,7 +955,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             hdata.nz = hdata.mz = fileSlice;
             hdata.amin = (float)tmin;
             hdata.amax = (float)tmax;
-            meanSum += tmean / B3DMAX(1., (float)(nxout * nyout));
+            meanSum += tmean / B3DMAX(1.f, (float)(nxout * nyout));
             hdata.amean = meanSum / hdata.nz;
             mrc_set_scale(&hdata, m_dPixelSize, m_dPixelSize, m_dPixelSize);
             if (mrc_head_write(fp, &hdata)) {
