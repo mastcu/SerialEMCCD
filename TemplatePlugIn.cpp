@@ -20,6 +20,7 @@ using namespace std ;
 #include <sys/stat.h>
 #include <direct.h>
 #include "Shared\mrcfiles.h"
+#include "Shared\iimage.h"
 #include "Shared\b3dutil.h"
 
 #define MAX_TEMP_STRING   1000
@@ -127,6 +128,9 @@ private:
   double m_dPixelSize;
   int m_iRotationFlip;
   int m_iSaveFlags;
+  BOOL m_bWriteTiff;
+  int m_iTiffCompression;
+  int m_iTiffQuality;
   char *m_strPostSaveCom;
   char *m_strGainRefToCopy;
   char *m_strLastRefName;
@@ -179,6 +183,9 @@ TemplatePlugIn::TemplatePlugIn()
   m_strLastRefDir = NULL;
   m_iSaveFlags = 0;
   m_bFilePerImage = true;
+  m_bWriteTiff = false;
+  m_iTiffCompression = 5;  // 5 is LZW, 8 is ZIP
+  m_iTiffQuality = -1;
   m_iRotationFlip = 7;
   m_dPixelSize = 5.;
   const char *temp = getenv("SERIALEMCCD_ROOTNAME");
@@ -625,6 +632,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   double retval, procWall, saveWall, wallStart, wallNow;
   FILE *fp = NULL;
   MrcHeader hdata;
+  ImodImageFile *iifile = NULL;
   int fileSlice, tmin, tmax, tsum, val, numSlices, fileMode, nxout, nyout, nxFile;
   float tmean, meanSum, scaleSave = m_fFloatScaling, scaling = 1.;
   int errorRet = 0;
@@ -757,6 +765,19 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           (m_iSaveFlags & K2_COPY_GAIN_REF) && m_strGainRefToCopy)
           CopyK2ReferenceIfNeeded();
 
+        // Set up Tiff output file structure
+        if (m_bWriteTiff) {
+          iifile = iiNew();
+          iifile->nz = m_bFilePerImage ? 1 : numSlices;
+          iifile->format = IIFORMAT_LUMINANCE;
+          iifile->file = IIFILE_TIFF;
+          iifile->type = IITYPE_UBYTE;
+          if (fileMode == MRC_MODE_SHORT)
+            iifile->type = IITYPE_SHORT;
+          if (fileMode == MRC_MODE_USHORT)
+            iifile->type = IITYPE_USHORT;
+        }
+
         procWall = saveWall = 0.;
         wallStart = wallTime();
         for (int slice = 0; slice < numSlices; slice++) {
@@ -799,11 +820,20 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           // open file if needed
           if (!slice || m_bFilePerImage) {
             if (m_bFilePerImage)
-              sprintf(m_strTemp, "%s\\%s_%03d.mrc", m_strSaveDir, m_strRootName, slice +1);
+              sprintf(m_strTemp, "%s\\%s_%03d.%s", m_strSaveDir, m_strRootName, slice +1,
+              m_bWriteTiff ? "tif" : "mrc");
             else
-              sprintf(m_strTemp, "%s\\%s.mrc", m_strSaveDir, m_strRootName);
-            fp = fopen(m_strTemp, "wb");
-            if (!fp) {
+              sprintf(m_strTemp, "%s\\%s.%s", m_strSaveDir, m_strRootName, 
+              m_bWriteTiff ? "tif" : "mrc");
+            if (m_bWriteTiff) {
+              iifile->nx = nxFile;
+              iifile->ny = nyout;
+              iifile->filename = _strdup(m_strTemp);
+              i = tiffOpenNew(iifile);
+            } else {
+              fp = fopen(m_strTemp, "wb");
+            }
+            if ((m_bWriteTiff && i) || (!m_bWriteTiff && !fp)) {
               j = errno;
               i = (int)strlen(m_strTemp);
               m_strTemp[i] = '\n';
@@ -816,12 +846,15 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             }
 
             // Set up header for one slice
-            mrc_head_new(&hdata, nxFile, nyout, 1, fileMode);
-            sprintf(m_strTemp, "SerialEMCCD: Dose fractionation image, scaled by %.2f", 
-              scaling);
-            if (save4bit)
-              sprintf(m_strTemp, "SerialEMCCD: Dose fractionation image, 4 bits packed"); 
-            mrc_head_label(&hdata, m_strTemp);
+            if (!m_bWriteTiff) {
+              mrc_head_new(&hdata, nxFile, nyout, 1, fileMode);
+              sprintf(m_strTemp, "SerialEMCCD: Dose fractionation image, scaled by %.2f", 
+                scaling);
+              if (save4bit)
+                sprintf(m_strTemp, "SerialEMCCD: Dose fractionation image, 4 bits packed"
+                ); 
+              mrc_head_label(&hdata, m_strTemp);
+            }
             fileSlice = 0;
             tmin = 1000000;
             tmax = -tmin;
@@ -879,60 +912,86 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             }
           }
 
-          // Seek to slice then write it
-          i = mrc_big_seek(fp, hdata.headerSize, nxFile * outByteSize, 
-            nyout * fileSlice, SEEK_SET);
-          if (i) {
-            sprintf(m_strTemp, "Error %d seeking for slice %d: %s\n", i, slice, 
-              strerror(errno));
-            ErrorToResult(m_strTemp);
-            m_iErrorFromSave = SEEK_ERROR;
-            break;
-          }
+          if (m_bWriteTiff) {
+            iifile->amin = (float)tmin;
+            iifile->amax = (float)tmax;
+            iifile->amean = tmean / (float)(nxout * nyout);
+            i = tiffWriteSection(iifile, outData, m_iTiffCompression, 0, 
+              B3DNINT(2.54e8 / m_dPixelSize), m_iTiffQuality);
+            if (i) {
+              m_iErrorFromSave = WRITE_DATA_ERROR;
+              sprintf(m_strTemp, "Error (%d) writing section %d to TIFF file\n", i, 
+                slice);
+              ErrorToResult(m_strTemp);
+              break;
+            }
+          } else {
 
-          if ((i = (int)b3dFwrite(outData, outByteSize * nxFile, nyout, fp)) != nyout) {
+            // Seek to slice then write it
+            i = mrc_big_seek(fp, hdata.headerSize, nxFile * outByteSize, 
+              nyout * fileSlice, SEEK_SET);
+            if (i) {
+              sprintf(m_strTemp, "Error %d seeking for slice %d: %s\n", i, slice, 
+                strerror(errno));
+              ErrorToResult(m_strTemp);
+              m_iErrorFromSave = SEEK_ERROR;
+              break;
+            }
+
+            if ((i = (int)b3dFwrite(outData, outByteSize * nxFile, nyout, fp)) != nyout) {
               sprintf(m_strTemp, "Failed to write data past line %d of slice %d: %s\n", i, 
                 slice, strerror(errno));
               ErrorToResult(m_strTemp);
               m_iErrorFromSave = WRITE_DATA_ERROR;
               break;
-          }
+            }
 
+            // This can't have any effect; all errors broke the loop above
+            if (m_iErrorFromSave)
+              continue;
 
-          if (m_iErrorFromSave)
-            continue;
-
-          // Completely update and write the header regardless of whether one file/slice
-          fileSlice++;
-          hdata.nz = hdata.mz = fileSlice;
-          hdata.amin = (float)tmin;
-          hdata.amax = (float)tmax;
-          meanSum += tmean / (float)(nxout * nyout);
-          hdata.amean = meanSum / hdata.nz;
-          mrc_set_scale(&hdata, m_dPixelSize, m_dPixelSize, m_dPixelSize);
-          if (mrc_head_write(fp, &hdata)) {
-            ErrorToResult("Failed to write header\n");
-            m_iErrorFromSave = HEADER_ERROR;
-            break;
+            // Completely update and write the header regardless of whether one file/slice
+            fileSlice++;
+            hdata.nz = hdata.mz = fileSlice;
+            hdata.amin = (float)tmin;
+            hdata.amax = (float)tmax;
+            meanSum += tmean / (float)(nxout * nyout);
+            hdata.amean = meanSum / hdata.nz;
+            mrc_set_scale(&hdata, m_dPixelSize, m_dPixelSize, m_dPixelSize);
+            if (mrc_head_write(fp, &hdata)) {
+              ErrorToResult("Failed to write header\n");
+              m_iErrorFromSave = HEADER_ERROR;
+              break;
+            }
           }
 
           // Finally, increment successful save count and close file if needed
           m_iFramesSaved++;
           if (m_bFilePerImage || slice == numSlices - 1) {
-            fclose(fp);
-            fp = NULL;
+            if (m_bWriteTiff) {
+              iiClose(iifile);
+              free(iifile->filename);
+              iifile->filename = NULL;
+            } else {
+              fclose(fp);
+              fp = NULL;
+            }
           }
           wallNow = wallTime();
           saveWall += wallNow - wallStart;
           wallStart = wallNow;
         }
         m_fFloatScaling = scaleSave;
+
+        // Clean up files now regardless
+        if (iifile)
+          iiDelete(iifile);
+        iifile = NULL;
+        if (fp)
+          fclose(fp);
+        fp = NULL;
         if (m_iErrorFromSave)
           continue;
-        if (fp) {
-          fclose(fp);
-          fp = NULL;
-        }
         sprintf(m_strTemp, "Processing time %.3f   saving time %.3f sec\n", procWall,
           saveWall);
         DebugToResult(m_strTemp);
@@ -956,6 +1015,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
     }
   }
   delete imageLp;
+
+  // This SHOULD be unneeded
   if (fp) {
     fclose(fp);
     fp = NULL;
@@ -1687,6 +1748,8 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   m_bFilePerImage = filePerImage;
   m_dPixelSize = pixelSize;
   m_iSaveFlags = flags;
+  m_bWriteTiff = flags & (K2_SAVE_LZW_TIFF | K2_SAVE_ZIP_TIFF);
+  m_iTiffCompression = (flags & K2_SAVE_ZIP_TIFF) ? 8 : 5;
 
   // Copy all the strings if they are changed
   if (CopyStringIfChanged(dirName, &m_strSaveDir, newDir, error))
@@ -1702,8 +1765,9 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
       return;
   }
 
-  sprintf(m_strTemp, "SetupFileSaving called with rf %d fpi %s pix %f dir %s root %s\n", 
-    rotationFlip, filePerImage ? "Y":"N", pixelSize, m_strSaveDir, m_strRootName);
+  sprintf(m_strTemp, "SetupFileSaving called with rf %d %s fpi %s pix %f dir %s root %s\n" 
+    , rotationFlip, m_bWriteTiff ? "TIFF" : "MRC", filePerImage ? "Y":"N", pixelSize, 
+    m_strSaveDir, m_strRootName);
   DebugToResult(m_strTemp);
 
   // For one file per image, create the directory, which must not exist
@@ -2275,7 +2339,7 @@ int PlugInWrapper::GetDebugVal()
   return gTemplatePlugIn.m_iDebugVal;
 }
 
-#ifdef NOT64BIT
+#ifndef _WIN64
 void mrc_set_scale(MrcHeader *h,
                    double x, double y, double z)
 {

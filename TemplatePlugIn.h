@@ -18,6 +18,8 @@ FILE_ALREADY_EXISTS};
 #define K2_SAVE_RAW_PACKED       1
 #define K2_COPY_GAIN_REF   (1 << 1)
 #define K2_RUN_COMMAND     (1 << 2)
+#define K2_SAVE_LZW_TIFF   (1 << 3)
+#define K2_SAVE_ZIP_TIFF   (1 << 4)
 
 #define OLD_OPEN_SHUTTER_BROKEN    360
 #define OLD_SELECT_SHUTTER_BROKEN    360
