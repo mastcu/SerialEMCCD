@@ -955,7 +955,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             hdata.nz = hdata.mz = fileSlice;
             hdata.amin = (float)tmin;
             hdata.amax = (float)tmax;
-            meanSum += tmean / (float)(nxout * nyout);
+            meanSum += tmean / B3DMAX(1., (float)(nxout * nyout));
             hdata.amean = meanSum / hdata.nz;
             mrc_set_scale(&hdata, m_dPixelSize, m_dPixelSize, m_dPixelSize);
             if (mrc_head_write(fp, &hdata)) {
@@ -983,13 +983,6 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         }
         m_fFloatScaling = scaleSave;
 
-        // Clean up files now regardless
-        if (iifile)
-          iiDelete(iifile);
-        iifile = NULL;
-        if (fp)
-          fclose(fp);
-        fp = NULL;
         if (m_iErrorFromSave)
           continue;
         sprintf(m_strTemp, "Processing time %.3f   saving time %.3f sec\n", procWall,
@@ -1016,11 +1009,13 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   }
   delete imageLp;
 
-  // This SHOULD be unneeded
-  if (fp) {
+  // Clean up files now in case an exception got us to here
+  if (iifile)
+    iiDelete(iifile);
+  iifile = NULL;
+  if (fp)
     fclose(fp);
-    fp = NULL;
-  }
+  fp = NULL;
   delete [] rotBuf;
 
   // Delete image(s) before return if they can be found
@@ -2339,31 +2334,24 @@ int PlugInWrapper::GetDebugVal()
   return gTemplatePlugIn.m_iDebugVal;
 }
 
+// Dummy functions for 32-bit.  Ultimately we would like code needed library functions
+// to be in a different module
 #ifndef _WIN64
-void mrc_set_scale(MrcHeader *h,
-                   double x, double y, double z)
-{
+void mrc_set_scale(MrcHeader *h, double x, double y, double z){}
+int mrc_head_new(MrcHeader *hdata, int x, int y, int z, int mode){ return 0;}
+int mrc_head_label(MrcHeader *hdata, const char *label) {  return 0;}
+int mrc_head_write(FILE *fout, MrcHeader *hdata) { return 0;}
+int mrc_big_seek(FILE *fp, int base, int size1, int size2, int flag) { return 0;}
+size_t b3dFwrite(void *buf, size_t size, size_t count, FILE *fp) { return 0;}
+double wallTime(void) { return 0.;}
+ImodImageFile *iiNew(void) {
+  ImodImageFile *dummy = NULL;
+  return dummy;
 }
-int mrc_head_new(MrcHeader *hdata,
-                 int x, int y, int z, int mode)
-{
-  return 0;
-}
-int mrc_head_label(MrcHeader *hdata, const char *label)
-{
-  return 0;
-}
-int mrc_head_write(FILE *fout, MrcHeader *hdata)
-{
-  return 0;
-}
-size_t b3dFwrite(void *buf, size_t size, size_t count, FILE *fp)
-{
-  return 0;
-}
-double wallTime(void)
-{
-  return 0.;
-}
+void iiClose(ImodImageFile *inFile) {}
+void iiDelete(ImodImageFile *inFile) {}
+int tiffOpenNew(ImodImageFile *inFile) {return 0;}
+int tiffWriteSection(ImodImageFile *inFile, void *buf, int compression, 
+                     int inverted, int resolution, int quality) {return 0;}
 
 #endif

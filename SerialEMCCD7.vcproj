@@ -178,7 +178,6 @@ regsvr32 /s SerialEMCCDps.dll
 				Optimization="2"
 				InlineFunctionExpansion="1"
 				AdditionalIncludeDirectories="..\DMSDK\Win32\VisualStudio.NET\include\;..\DMSDK\Win32\"
-				PreprocessorDefinitions="NOT64BIT"
 				StringPooling="TRUE"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="TRUE"
@@ -255,16 +254,6 @@ regsvr32 /s SerialEMCCDps.dll
 			Name="Source Files"
 			Filter="cpp;c;cxx;rc;def;r;odl;idl;hpj;bat">
 			<File
-				RelativePath=".\Shared\b3dutil.c">
-				<FileConfiguration
-					Name="Release MinDependency|Win32"
-					ExcludedFromBuild="TRUE">
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="0"/>
-				</FileConfiguration>
-			</File>
-			<File
 				RelativePath="DMCamera.cpp">
 				<FileConfiguration
 					Name="Debug|Win32">
@@ -290,46 +279,6 @@ regsvr32 /s SerialEMCCDps.dll
 						Optimization="2"
 						AdditionalIncludeDirectories=""
 						PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NoInherit)"/>
-				</FileConfiguration>
-			</File>
-			<File
-				RelativePath=".\Shared\islice.c">
-				<FileConfiguration
-					Name="Release MinDependency|Win32"
-					ExcludedFromBuild="TRUE">
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="0"/>
-				</FileConfiguration>
-			</File>
-			<File
-				RelativePath=".\Shared\mrcfiles.c">
-				<FileConfiguration
-					Name="Release MinDependency|Win32"
-					ExcludedFromBuild="TRUE">
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="0"/>
-				</FileConfiguration>
-			</File>
-			<File
-				RelativePath=".\Shared\mrcsec.c">
-				<FileConfiguration
-					Name="Release MinDependency|Win32"
-					ExcludedFromBuild="TRUE">
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="0"/>
-				</FileConfiguration>
-			</File>
-			<File
-				RelativePath=".\Shared\parallelwrite.c">
-				<FileConfiguration
-					Name="Release MinDependency|Win32"
-					ExcludedFromBuild="TRUE">
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="0"/>
 				</FileConfiguration>
 			</File>
 			<File
@@ -479,7 +428,7 @@ regsvr32 /s SerialEMCCDps.dll
 						Name="VCCLCompilerTool"
 						Optimization="2"
 						AdditionalIncludeDirectories=""
-						PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;NOT64BIT;_ATL_STATIC_REGISTRY;$(NOINHERIT)"/>
+						PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NOINHERIT)"/>
 				</FileConfiguration>
 			</File>
 		</Filter>
