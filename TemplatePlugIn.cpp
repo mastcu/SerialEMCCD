@@ -1760,8 +1760,9 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
       return;
   }
 
-  sprintf(m_strTemp, "SetupFileSaving called with rf %d %s fpi %s pix %f dir %s root %s\n" 
-    , rotationFlip, m_bWriteTiff ? "TIFF" : "MRC", filePerImage ? "Y":"N", pixelSize, 
+  sprintf(m_strTemp, "SetupFileSaving called with rf %d %s fpi %s pix %f copy %s dir %s "
+    "root %s\n", rotationFlip, m_bWriteTiff ? "TIFF" : "MRC", filePerImage ? "Y":"N", 
+    pixelSize, (flags & K2_COPY_GAIN_REF) ? m_strGainRefToCopy : "NO",
     m_strSaveDir, m_strRootName);
   DebugToResult(m_strTemp);
 
