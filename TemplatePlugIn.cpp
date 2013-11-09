@@ -1791,10 +1791,12 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     // For a new directory, check writability by opening file
     if (! *error && newDir) {
       fp = fopen(m_strTemp, "wb");
-      if (!fp)
+      if (!fp) {
         *error = DIR_NOT_WRITABLE;
-      else
+      } else {
         fclose(fp);
+        DeleteFile((LPCTSTR)m_strTemp);
+      }
     }
   }
   if (*error) {
