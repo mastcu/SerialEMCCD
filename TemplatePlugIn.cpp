@@ -11,7 +11,9 @@
 using namespace Gatan;
 
 #include "TemplatePlugIn.h"
+#ifdef _WIN64
 #include "K2DoseFractionation.h"
+#endif
 #include <string>
 using namespace std ;
 
