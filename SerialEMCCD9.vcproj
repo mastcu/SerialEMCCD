@@ -1376,6 +1376,18 @@
 				</FileConfiguration>
 			</File>
 			<File
+				RelativePath=".\K2DoseFractionation.cpp"
+				>
+				<FileConfiguration
+					Name="GMS2-64bit|x64"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						PreprocessorDefinitions="WIN32;NDEBUG;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NoInherit)"
+					/>
+				</FileConfiguration>
+			</File>
+			<File
 				RelativePath="SerialEMCCD.cpp"
 				>
 				<FileConfiguration
@@ -2046,6 +2058,10 @@
 			>
 			<File
 				RelativePath="DMCamera.h"
+				>
+			</File>
+			<File
+				RelativePath=".\K2DoseFractionation.h"
 				>
 			</File>
 			<File

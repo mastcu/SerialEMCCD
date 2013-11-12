@@ -11,6 +11,7 @@
 using namespace Gatan;
 
 #include "TemplatePlugIn.h"
+#include "K2DoseFractionation.h"
 #include <string>
 using namespace std ;
 
@@ -36,17 +37,17 @@ static int sReadModes[3] = {K2_LINEAR_READ_MODE, K2_COUNTING_READ_MODE,
 K2_SUPERRES_READ_MODE};
 
 
-class TemplatePlugIn : 	public Gatan::PlugIn::PlugInMain
+class TemplatePlugIn :  public Gatan::PlugIn::PlugInMain
 {
 public:
-	void SetNoDMSettling(long camera);
-	int SetShutterNormallyClosed(long camera, long shutter);
-	long GetDMVersion();
-	int InsertCamera(long camera, BOOL state);
-	int IsCameraInserted(long camera);
-	int GetNumberOfCameras();
-	int SelectCamera(long camera);
-	void SetReadMode(long mode, double scaling);
+  void SetNoDMSettling(long camera);
+  int SetShutterNormallyClosed(long camera, long shutter);
+  long GetDMVersion();
+  int InsertCamera(long camera, BOOL state);
+  int IsCameraInserted(long camera);
+  int GetNumberOfCameras();
+  int SelectCamera(long camera);
+  void SetReadMode(long mode, double scaling);
   void SetK2Parameters(long readMode, double scaling, long hardwareProc, BOOL doseFrac, 
     double frameTime, BOOL alignFrames, BOOL saveFrames, char *filter);
   void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, long flags,
@@ -54,25 +55,25 @@ public:
     char *rootName, char *refName, char *command, long *error);
   void GetFileSaveResult(long *numSaved, long *error);
   int CopyK2ReferenceIfNeeded();
-	double ExecuteClientScript(char *strScript, BOOL selectCamera);
-	int AcquireAndTransferImage(void *array, int dataSize, long *arrSize, long *width,
-		long *height, long divideBy2, long transpose, long delImage, long saveFrames);
+  double ExecuteClientScript(char *strScript, BOOL selectCamera);
+  int AcquireAndTransferImage(void *array, int dataSize, long *arrSize, long *width,
+    long *height, long divideBy2, long transpose, long delImage, long saveFrames);
   void  ProcessImage(void *imageData, void *array, int dataSize, 
-											            long width, long height, long divideBy2, 
+                                  long width, long height, long divideBy2, 
                                   long transpose, int byteSize, bool isInteger,
                                   bool isUnsignedInt);
   void RotateFlip(short int *array, int mode, int nx, int ny, int operation, 
                     short int *brray, int *nxout, int *nyout);
   int CopyStringIfChanged(char *newStr, char **memberStr, int &changed, long *error);
-	void AddCameraSelection(int camera = -1);
-	int GetGainReference(float *array, long *arrSize, long *width, 
-							long *height, long binning);
-	int GetImage(short *array, long *arrSize, long *width, long *height, long processing,
+  void AddCameraSelection(int camera = -1);
+  int GetGainReference(float *array, long *arrSize, long *width, 
+              long *height, long binning);
+  int GetImage(short *array, long *arrSize, long *width, long *height, long processing,
     double exposure, long binning, long top, long left, long bottom, long right, 
     long shutter, double settling, long shutterDelay, long divideBy2, long corrections);
-	void QueueScript(char *strScript);
-	void SetCurrentCamera(int inVal) {m_iCurrentCamera = inVal;};
-	void SetDMVersion(int inVal) {m_iDMVersion = inVal;};
+  void QueueScript(char *strScript);
+  void SetCurrentCamera(int inVal) {m_iCurrentCamera = inVal;};
+  void SetDMVersion(int inVal) {m_iDMVersion = inVal;};
   int GetDSProperties(long timeout, double addedFlyback, double margin, double *flyback, 
     double *lineFreq, double *rotOffset, long *doFlip);
   int AcquireDSImage(short array[], long *arrSize, long *width, 
@@ -81,27 +82,27 @@ public:
   int ReturnDSChannel(short array[], long *arrSize, long *width, 
     long *height, long channel, long divideBy2);
   int StopDSAcquisition();
-	void SetDebugMode(BOOL inVal) {m_bDebug = inVal;};
-	double ExecuteScript(char *strScript);
-	void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
-	void ErrorToResult(const char *strMessage, const char *strPrefix = NULL);
-	virtual void Start();
-	virtual void Run();
-	virtual void Cleanup();
-	virtual void End();
-	TemplatePlugIn();
+  void SetDebugMode(BOOL inVal) {m_bDebug = inVal;};
+  double ExecuteScript(char *strScript);
+  void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
+  void ErrorToResult(const char *strMessage, const char *strPrefix = NULL);
+  virtual void Start();
+  virtual void Run();
+  virtual void Cleanup();
+  virtual void End();
+  TemplatePlugIn();
 
   int m_iDebugVal;
-	
+  
 private:
-	BOOL m_bDebug;
+  BOOL m_bDebug;
   BOOL m_bGMS2;
-	int m_iDMVersion;
-	int m_iCurrentCamera;
+  int m_iDMVersion;
+  int m_iCurrentCamera;
   int m_iDMSettlingOK[MAX_CAMERAS];
-	string m_strQueue;
-	string m_strCommand;
-	char m_strTemp[MAX_TEMP_STRING];
+  string m_strQueue;
+  string m_strCommand;
+  char m_strTemp[MAX_TEMP_STRING];
   int m_iDSAcquired[MAX_DS_CHANNELS];
   BOOL m_bContinuousDS;
   int m_iDSparamID;
@@ -131,6 +132,16 @@ private:
   BOOL m_bWriteTiff;
   int m_iTiffCompression;
   int m_iTiffQuality;
+  BOOL m_bAsyncSave;
+  double m_dK2Exposure;
+  double m_dK2Settling;
+  int m_iK2Binning;
+  int m_iK2Shutter;
+  int m_iK2Processing;
+  int m_iK2Left;
+  int m_iK2Right;
+  int m_iK2Top;
+  int m_iK2Bottom;
   char *m_strPostSaveCom;
   char *m_strGainRefToCopy;
   char *m_strLastRefName;
@@ -186,6 +197,7 @@ TemplatePlugIn::TemplatePlugIn()
   m_bWriteTiff = false;
   m_iTiffCompression = 5;  // 5 is LZW, 8 is ZIP
   m_iTiffQuality = -1;
+  m_bAsyncSave = true;
   m_iRotationFlip = 7;
   m_dPixelSize = 5.;
   const char *temp = getenv("SERIALEMCCD_ROOTNAME");
@@ -222,21 +234,21 @@ void TemplatePlugIn::Run()
   int socketRet, wsaError;
   char buff[80];
 #ifndef GMS2
-	DM::Window results = DM::GetResultsWindow( true );
+  DM::Window results = DM::GetResultsWindow( true );
 #endif
-	//PlugIn::gResultOut << "Hello, world" << std::endl;
-	if (WasCOMInitialized())
-		DebugToResult("SerialEMCCD: COM was initialized through DllMain\n");
-		//PlugIn::gResultOut << "COM was initialized through DllMain" << std::endl;
-	else {
-		m_bDebug = true;
-		DebugToResult("DllMain was never called when SerialEMCCD was loaded - trouble!\n");
-		//PlugIn::gResultOut << "DllMain was never called - trouble!" << std::endl;
-	}
-	if (GetDMVersion() < 0) {
-		m_bDebug = true;
-		DebugToResult("SerialEMCCD: Error getting Digital Micrograph version\n");
-	}
+  //PlugIn::gResultOut << "Hello, world" << std::endl;
+  if (WasCOMInitialized())
+    DebugToResult("SerialEMCCD: COM was initialized through DllMain\n");
+    //PlugIn::gResultOut << "COM was initialized through DllMain" << std::endl;
+  else {
+    m_bDebug = true;
+    DebugToResult("DllMain was never called when SerialEMCCD was loaded - trouble!\n");
+    //PlugIn::gResultOut << "DllMain was never called - trouble!" << std::endl;
+  }
+  if (GetDMVersion() < 0) {
+    m_bDebug = true;
+    DebugToResult("SerialEMCCD: Error getting Digital Micrograph version\n");
+  }
   DebugToResult("Going to start socket\n");
   socketRet = StartSocket(wsaError);
   if (socketRet) {
@@ -270,23 +282,23 @@ void TemplatePlugIn::Cleanup()
 ///
 void TemplatePlugIn::End()
 {
-	TerminateModuleUninitializeCOM();
+  TerminateModuleUninitializeCOM();
 }
 
 
 void TemplatePlugIn::DebugToResult(const char *strMessage, const char *strPrefix)
 {
-	if (!m_bDebug) return;
-	double time = (::GetTickCount() % (DWORD)3600000) / 1000.;
-	char timestr[20];
-	sprintf(timestr, "%.3f ", time);
-	DM::OpenResultsWindow();
-	DM::Result(timestr);
-	if (strPrefix)
-		DM::Result(strPrefix);
-	else
-		DM::Result("DMCamera Debug :\n");
-	DM::Result(strMessage );
+  if (!m_bDebug) return;
+  double time = (::GetTickCount() % (DWORD)3600000) / 1000.;
+  char timestr[20];
+  sprintf(timestr, "%.3f ", time);
+  DM::OpenResultsWindow();
+  DM::Result(timestr);
+  if (strPrefix)
+    DM::Result(strPrefix);
+  else
+    DM::Result("DMCamera Debug :\n");
+  DM::Result(strMessage );
 }
 
 // Outputs messages to the results window upon error; just the message itself if in 
@@ -296,11 +308,11 @@ void TemplatePlugIn::ErrorToResult(const char *strMessage, const char *strPrefix
   if (m_bDebug) {
     DebugToResult(strMessage);
   } else {
-  	DM::OpenResultsWindow();
-	  if (strPrefix)
-		  DM::Result(strPrefix);
+    DM::OpenResultsWindow();
+    if (strPrefix)
+      DM::Result(strPrefix);
     else
-		  DM::Result("\nAn error occurred acquiring an image for SerialEM:\n");
+      DM::Result("\nAn error occurred acquiring an image for SerialEM:\n");
     DM::Result(strMessage);
   }
 }
@@ -310,23 +322,23 @@ void TemplatePlugIn::ErrorToResult(const char *strMessage, const char *strPrefix
  */
 double TemplatePlugIn::ExecuteScript(char *strScript)
 {
-	double retval;
-	char last, retstr[128];
-	DebugToResult(strScript, "DMCamera executing script :\n\n");
-	if (m_bDebug) {
+  double retval;
+  char last, retstr[128];
+  DebugToResult(strScript, "DMCamera executing script :\n\n");
+  if (m_bDebug) {
 
     // 11/15/06: switch to this from using strlen which falied with DMSDK 3.8.2
     for (int i = 0; strScript[i]; i++)
       last = strScript[i];
-		if (last != '\n' && last != '\r')
-			DM::Result("\n");
-  	DM::Result("\n");
-	}
-	try {
-		retval = DM::ExecuteScriptString(strScript);
-	}
-	catch (exception exc) {
-		DebugToResult("Exception thrown while executing script");
+    if (last != '\n' && last != '\r')
+      DM::Result("\n");
+    DM::Result("\n");
+  }
+  try {
+    retval = DM::ExecuteScriptString(strScript);
+  }
+  catch (exception exc) {
+    DebugToResult("Exception thrown while executing script");
     if (!m_bDebug) {
       DM::OpenResultsWindow();
       DM::Result("\nAn exception occurred executing this script for SerialEM:\n\n\n");
@@ -335,123 +347,143 @@ double TemplatePlugIn::ExecuteScript(char *strScript)
     DM::Result("\n\n\nTo determine the cause, copy the above script with Ctrl-C,\n"
       "  open a script window with Ctrl-K, paste in there with Ctrl-V,\n"
       "  and execute the script with Ctrl-Enter\n");
-		return SCRIPT_ERROR_RETURN;
-	}
-	sprintf(retstr, "Return value = %g\n", retval);
-	DebugToResult(retstr);
-	return retval;
+    return SCRIPT_ERROR_RETURN;
+  }
+  sprintf(retstr, "Return value = %g\n", retval);
+  DebugToResult(retstr);
+  return retval;
 }
 
 // The external call to execute a script, optionally placing commands to select the
 // camera first
 double TemplatePlugIn::ExecuteClientScript(char *strScript, BOOL selectCamera)
 {
-	m_strCommand.resize(0);
-	if (selectCamera)
-		AddCameraSelection();
-	m_strCommand += strScript;
-	char last = m_strCommand[m_strCommand.length() - 1];
-	if (last != '\n' && last != '\r')
-		m_strCommand += "\n";
-	return ExecuteScript((char *)m_strCommand.c_str());
+  m_strCommand.resize(0);
+  if (selectCamera)
+    AddCameraSelection();
+  m_strCommand += strScript;
+  char last = m_strCommand[m_strCommand.length() - 1];
+  if (last != '\n' && last != '\r')
+    m_strCommand += "\n";
+  return ExecuteScript((char *)m_strCommand.c_str());
 }
 
 // Add a command to a script to be executed in the future
 void TemplatePlugIn::QueueScript(char *strScript)
 {
-	m_strQueue += strScript;
-	char last = m_strQueue[m_strQueue.length() - 1];
-	if (last != '\n' && last != '\r')
-		m_strQueue += "\n";
-	DebugToResult("QueueScript called, queue is now:\n");
-	if (m_bDebug)
-		DM::Result((char *)m_strQueue.c_str());
+  m_strQueue += strScript;
+  char last = m_strQueue[m_strQueue.length() - 1];
+  if (last != '\n' && last != '\r')
+    m_strQueue += "\n";
+  DebugToResult("QueueScript called, queue is now:\n");
+  if (m_bDebug)
+    DM::Result((char *)m_strQueue.c_str());
 }
 
 /*
  * Common pathway for obtaining an acquired image or a dark reference
  */
 int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width, 
-							long *height, long processing, double exposure,
-							long binning, long top, long left, long bottom, 
-							long right, long shutter, double settling, long shutterDelay,
+              long *height, long processing, double exposure,
+              long binning, long top, long left, long bottom, 
+              long right, long shutter, double settling, long shutterDelay,
               long divideBy2, long corrections)
 {
   int saveFrames = NO_SAVE;
+  int newProc;
+
+  if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
+    
+    // Convert the processing argument to the new format
+    switch (processing) {
+    case DARK_REFERENCE: 
+    case UNPROCESSED:
+      newProc = NEWCM_UNPROCESSED;
+      break;
+    case DARK_SUBTRACTED:
+      newProc = NEWCM_DARK_SUBTRACTED;
+      break;
+    case GAIN_NORMALIZED:
+      newProc = NEWCM_GAIN_NORMALIZED;
+      break;
+    }
+  }
 
   //sprintf(m_strTemp, "Entering GetImage with divideBy2 %d\n", divideBy2);
   //DebugToResult(m_strTemp);
   // Workaround for Downing camera problem, inexplicable wild values coming through
   if (divideBy2 > 1 || divideBy2 < -1)
     divideBy2 = 0;
-	m_strCommand.resize(0);
-	AddCameraSelection();
+  m_strCommand.resize(0);
+  AddCameraSelection();
 
-	// Add and clear the queue
-	if (!m_strQueue.empty()) {
-		m_strCommand += m_strQueue;
-		m_strQueue.resize(0);
-	}
+  // Add and clear the queue
+  if (!m_strQueue.empty()) {
+    m_strCommand += m_strQueue;
+    m_strQueue.resize(0);
+  }
 
-	// Set up acquisition parameters
-	if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
-		
-		// Convert the processing argument to the new format
-		int newProc;
-		switch (processing) {
-		case DARK_REFERENCE: 
-		case UNPROCESSED:
-			newProc = NEWCM_UNPROCESSED;
-			break;
-		case DARK_SUBTRACTED:
-			newProc = NEWCM_DARK_SUBTRACTED;
-			break;
-		case GAIN_NORMALIZED:
-			newProc = NEWCM_GAIN_NORMALIZED;
-			break;
-		}
-		sprintf(m_strTemp, "Object acqParams = CM_CreateAcquisitionParameters_FullCCD"
-			"(camera, %d, %g, %d, %d)\n"
-			"CM_SetBinnedReadArea(camera, acqParams, %d, %d, %d, %d)\n",
-			newProc, exposure, binning, binning, top, left, bottom, right);
-		m_strCommand += m_strTemp;
+  // Intercept K2 asynchronous saving here
+  if (m_bSaveFrames && m_iReadMode >= 0 && m_bDoseFrac && m_strSaveDir && m_strRootName &&
+    m_bAsyncSave) {
+      sprintf(m_strTemp, "Exit(0)");
+      m_strCommand += m_strTemp;
+      m_iK2Top = top;
+      m_iK2Bottom = bottom;
+      m_iK2Left = left;
+      m_iK2Right = right;
+      m_dK2Exposure = exposure;
+      m_dK2Settling = settling;
+      m_iK2Processing = newProc;
+      m_iK2Shutter = shutter;
+      return AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
+        divideBy2, 0, DEL_IMAGE, SAVE_FRAMES);
+  }
+
+  // Set up acquisition parameters
+  if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
+    sprintf(m_strTemp, "Object acqParams = CM_CreateAcquisitionParameters_FullCCD"
+      "(camera, %d, %g, %d, %d)\n"
+      "CM_SetBinnedReadArea(camera, acqParams, %d, %d, %d, %d)\n",
+      newProc, exposure, binning, binning, top, left, bottom, right);
+    m_strCommand += m_strTemp;
 
     // Specify corrections if incoming value is >= 0
     // As of DM 3.9.3 (3.9?) need to modify only the allowed coorections to avoid an
     // overscan image in simulator, so change 255 to 49
     if (corrections >= 0) {
       sprintf(m_strTemp, "CM_SetCorrections(acqParams, 49, %d)\n", corrections);
-		  m_strCommand += m_strTemp;
+      m_strCommand += m_strTemp;
     }
-		// Turn off defect correction for raw images and dark references
-		//if (newProc == NEWCM_UNPROCESSED)
-		//	m_strCommand += "CM_SetCorrections(acqParams, 1, 0)\n";
-	}
+    // Turn off defect correction for raw images and dark references
+    //if (newProc == NEWCM_UNPROCESSED)
+    //  m_strCommand += "CM_SetCorrections(acqParams, 1, 0)\n";
+  }
 
-	// Old version, set the settling and the alternate shutter through notes
-	if (m_iDMVersion < OLD_SETTLING_BROKEN) {
-		sprintf(m_strTemp, 
-			"SetPersistentNumberNote(\"MSC:Parameters:2:Settling\", %g)\n",	settling);
-		m_strCommand += m_strTemp;
-	}
+  // Old version, set the settling and the alternate shutter through notes
+  if (m_iDMVersion < OLD_SETTLING_BROKEN) {
+    sprintf(m_strTemp, 
+      "SetPersistentNumberNote(\"MSC:Parameters:2:Settling\", %g)\n", settling);
+    m_strCommand += m_strTemp;
+  }
 
   // 5/23/06: drift settling in Record set from DM was being applied, so set settling
   // unconditionally as long as settling is OK (not in Faux camera)
-	if (m_iDMVersion >= NEW_SETTLING_OK && m_iDMSettlingOK[m_iCurrentCamera]) {
-		sprintf(m_strTemp, "CM_SetSettling(acqParams, %g)\n", settling);
-		m_strCommand += m_strTemp;
-	}
-	
-	if (m_iDMVersion < OLD_SELECT_SHUTTER_BROKEN && shutter >= 0) {
-		sprintf(m_strTemp, "SetPersistentNumberNote"
-			"(\"MSC:Parameters:2:Alternate Shutter\", %d)\n", shutter);
-		m_strCommand += m_strTemp;
-	}
+  if (m_iDMVersion >= NEW_SETTLING_OK && m_iDMSettlingOK[m_iCurrentCamera]) {
+    sprintf(m_strTemp, "CM_SetSettling(acqParams, %g)\n", settling);
+    m_strCommand += m_strTemp;
+  }
+  
+  if (m_iDMVersion < OLD_SELECT_SHUTTER_BROKEN && shutter >= 0) {
+    sprintf(m_strTemp, "SetPersistentNumberNote"
+      "(\"MSC:Parameters:2:Alternate Shutter\", %d)\n", shutter);
+    m_strCommand += m_strTemp;
+  }
 
-	if (m_iDMVersion >= NEW_SELECT_SHUTTER_OK && shutter >= 0) {
-		sprintf(m_strTemp, "CM_SetShutterIndex(acqParams, %d)\n", shutter);
-		m_strCommand += m_strTemp;
-	}
+  if (m_iDMVersion >= NEW_SELECT_SHUTTER_OK && shutter >= 0) {
+    sprintf(m_strTemp, "CM_SetShutterIndex(acqParams, %d)\n", shutter);
+    m_strCommand += m_strTemp;
+  }
 
   // Commands for K2 camera
   if (m_iReadMode >= 0) {
@@ -475,124 +507,124 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     m_strCommand += m_strTemp;
   }
 
-	// Open shutter if a delay is set
-	if (shutterDelay) {
-		if (m_iDMVersion < NEW_OPEN_SHUTTER_OK)
-			m_strCommand += "SSCOpenShutter()\n";
+  // Open shutter if a delay is set
+  if (shutterDelay) {
+    if (m_iDMVersion < NEW_OPEN_SHUTTER_OK)
+      m_strCommand += "SSCOpenShutter()\n";
     else {
-			// Specify the other shutter as being closed first; 1 means closed
+      // Specify the other shutter as being closed first; 1 means closed
       sprintf(m_strTemp, "CM_SetCurrentShutterState(camera, %d, 1)\n", 
         shutter > 0 ? 1 : 0);
-  		m_strCommand += m_strTemp;
+      m_strCommand += m_strTemp;
       sprintf(m_strTemp, "CM_SetCurrentShutterState(camera, %d, 0)\n", 
         shutter > 0 ? 0 : 1);
-  		m_strCommand += m_strTemp;
+      m_strCommand += m_strTemp;
     }
-		sprintf(m_strTemp, "Delay(%d)\n", shutterDelay);
-		m_strCommand += m_strTemp;
-		// Probably unneeded
-		/*
-		if (m_iDMVersion < NEW_OPEN_SHUTTER_OK)
-			m_strCommand += "SSCCloseShutter()\n";
-		else
-			m_strCommand += "CM_SetCurrentShutterState(camera, 1, 1)\n";
-		*/
-	}
+    sprintf(m_strTemp, "Delay(%d)\n", shutterDelay);
+    m_strCommand += m_strTemp;
+    // Probably unneeded
+    /*
+    if (m_iDMVersion < NEW_OPEN_SHUTTER_OK)
+      m_strCommand += "SSCCloseShutter()\n";
+    else
+      m_strCommand += "CM_SetCurrentShutterState(camera, 1, 1)\n";
+    */
+  }
 
-	// Get the image acquisition command
-	if (m_iDMVersion < NEW_CAMERA_MANAGER) {
-		switch (processing) {
-		case UNPROCESSED:
-			m_strCommand += "Image img := SSCUnprocessedBinnedAcquire";
-			break;
-		case DARK_SUBTRACTED:
-			m_strCommand += "Image img := SSCDarkSubtractedBinnedAcquire";
-			break;
-		case GAIN_NORMALIZED:
-			m_strCommand += "Image img := SSCGainNormalizedBinnedAcquire";
-			break;
-		case DARK_REFERENCE:
-			m_strCommand += "Image img := SSCGetDarkReference";
-			break;
-		}
+  // Get the image acquisition command
+  if (m_iDMVersion < NEW_CAMERA_MANAGER) {
+    switch (processing) {
+    case UNPROCESSED:
+      m_strCommand += "Image img := SSCUnprocessedBinnedAcquire";
+      break;
+    case DARK_SUBTRACTED:
+      m_strCommand += "Image img := SSCDarkSubtractedBinnedAcquire";
+      break;
+    case GAIN_NORMALIZED:
+      m_strCommand += "Image img := SSCGainNormalizedBinnedAcquire";
+      break;
+    case DARK_REFERENCE:
+      m_strCommand += "Image img := SSCGetDarkReference";
+      break;
+    }
 
-		sprintf(m_strTemp, "(%f, %d, %d, %d, %d, %d)\n", exposure, binning, top, left, 
-			bottom, right);
-		m_strCommand += m_strTemp;
-	} else {
-		if (processing == DARK_REFERENCE)
-			// This command has an inverted sense, 1 means keep shutter closed
-			// Need to use this to get defect correction
-			m_strCommand += "CM_SetShutterExposure(acqParams, 1)\n"
-					"Image img := CM_AcquireImage(camera, acqParams)\n";
-//			"Image img := CM_CreateImageForAcquire(camera, acqParams, \"temp\")\n"
-//						"CM_AcquireDarkReference(camera, acqParams, img, NULL)\n";
+    sprintf(m_strTemp, "(%f, %d, %d, %d, %d, %d)\n", exposure, binning, top, left, 
+      bottom, right);
+    m_strCommand += m_strTemp;
+  } else {
+    if (processing == DARK_REFERENCE)
+      // This command has an inverted sense, 1 means keep shutter closed
+      // Need to use this to get defect correction
+      m_strCommand += "CM_SetShutterExposure(acqParams, 1)\n"
+          "Image img := CM_AcquireImage(camera, acqParams)\n";
+//      "Image img := CM_CreateImageForAcquire(camera, acqParams, \"temp\")\n"
+//            "CM_AcquireDarkReference(camera, acqParams, img, NULL)\n";
     else if (m_iReadMode >= 0 && m_bDoseFrac)
       m_strCommand += "Image stack\n"
       "Image img := k2dfa.DoseFrac_AcquireImage(camera, acqParams, stack)\n";
 
-		else
-			m_strCommand += "Image img := CM_AcquireImage(camera, acqParams)\n";
-	}
-	
-	// Restore drift settling to zero if it was set
-	if (m_iDMVersion < OLD_SETTLING_BROKEN && settling > 0.)
-		m_strCommand += "SetPersistentNumberNote(\"MSC:Parameters:2:Settling\", 0.)\n";
-	
-	// Final calls to retain image and return its ID
-	sprintf(m_strTemp, "KeepImage(img)\n"
-		"number retval = GetImageID(img)\n");
-	m_strCommand += m_strTemp;
+    else
+      m_strCommand += "Image img := CM_AcquireImage(camera, acqParams)\n";
+  }
+  
+  // Restore drift settling to zero if it was set
+  if (m_iDMVersion < OLD_SETTLING_BROKEN && settling > 0.)
+    m_strCommand += "SetPersistentNumberNote(\"MSC:Parameters:2:Settling\", 0.)\n";
+  
+  // Final calls to retain image and return its ID
+  sprintf(m_strTemp, "KeepImage(img)\n"
+    "number retval = GetImageID(img)\n");
+  m_strCommand += m_strTemp;
   if (m_bSaveFrames && m_iReadMode >= 0 && m_bDoseFrac && m_strSaveDir && m_strRootName) {
     saveFrames = SAVE_FRAMES;
-  	sprintf(m_strTemp, "KeepImage(stack)\n"
+    sprintf(m_strTemp, "KeepImage(stack)\n"
       "number stackID = GetImageID(stack)\n"
       //"Result(retval + \"  \" + stackID + \"\\n\")\n"
-	  	"retval = retval + %d * stackID\n", ID_MULTIPLIER);
-  	m_strCommand += m_strTemp;
+      "retval = retval + %d * stackID\n", ID_MULTIPLIER);
+    m_strCommand += m_strTemp;
   } else if (m_bSaveFrames) {
     sprintf(m_strTemp, "Save set but %d %d   %s   %s\n", m_iReadMode, m_bDoseFrac ? 1 : 0,
       m_strSaveDir ? m_strSaveDir : "NO DIR", m_strRootName ? m_strRootName : "NO ROOT");
     DebugToResult(m_strTemp);
   }
   sprintf(m_strTemp, "Exit(retval)");
-	m_strCommand += m_strTemp;
+  m_strCommand += m_strTemp;
 
   //sprintf(m_strTemp, "Calling AcquireAndTransferImage with divideBy2 %d\n", divideBy2);
   //DebugToResult(m_strTemp);
-	int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
-    divideBy2, 0, DEL_IMAGE, saveFrames);	
+  int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
+    divideBy2, 0, DEL_IMAGE, saveFrames); 
 
-	return retval;
+  return retval;
 }
 
 /*
  * Call for returning a gain reference
  */
 int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width, 
-									long *height, long binning)
+                  long *height, long binning)
 {
   // It seems that the gain reference is not flipped when images are
   int retval, tmp;
   long transpose = 0;
-	if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
+  if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
     m_strCommand.resize(0);
-	  AddCameraSelection();
+    AddCameraSelection();
     m_strCommand += "Number transpose = CM_Config_GetDefaultTranspose(camera)\n"
       "Exit(transpose)";
-  	double retval = ExecuteScript((char *)m_strCommand.c_str());
-	  if (retval != SCRIPT_ERROR_RETURN)
+    double retval = ExecuteScript((char *)m_strCommand.c_str());
+    if (retval != SCRIPT_ERROR_RETURN)
       transpose = (int)retval;
   }
 
   m_strCommand.resize(0);
-	AddCameraSelection();
-	sprintf(m_strTemp, "Image img := SSCGetGainReference(%d)\n"
-		"KeepImage(img)\n"
-		"number retval = GetImageID(img)\n"
-		"Exit(retval)", binning);
-	m_strCommand += m_strTemp;
-	retval = AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0, transpose, 
+  AddCameraSelection();
+  sprintf(m_strTemp, "Image img := SSCGetGainReference(%d)\n"
+    "KeepImage(img)\n"
+    "number retval = GetImageID(img)\n"
+    "Exit(retval)", binning);
+  m_strCommand += m_strTemp;
+  retval = AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0, transpose, 
     DEL_IMAGE, NO_SAVE);
   if (transpose & 256) {
     tmp = *width;
@@ -613,12 +645,12 @@ int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width,
  * it, and copy the image into the supplied array with various transformations
  */
 int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arrSize, 
-											long *width, long *height, long divideBy2, long transpose, 
+                      long *width, long *height, long divideBy2, long transpose, 
                       long delImage, long saveFrames)
 {
-	long ID, imageID, stackID, frameDivide = divideBy2;
-	DM::Image image;
-	long outLimit = *arrSize;
+  long ID, imageID, stackID, frameDivide = divideBy2;
+  DM::Image image, sumImage;
+  long outLimit = *arrSize;
   int byteSize, i, j, numDim, loop, outByteSize, numLoop = 1;
   unsigned short *usData;
   unsigned char *bData, *packed;
@@ -629,6 +661,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   short *outData, *outForRot, *rotBuf = NULL;
   short *sData;
   bool isInteger, isUnsignedInt, doingStack, isFloat, signedBytes, save4bit, needProc;
+  bool stackAllReady, doingAsyncSave;
   double retval, procWall, saveWall, wallStart, wallNow;
   FILE *fp = NULL;
   MrcHeader hdata;
@@ -636,28 +669,75 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   int fileSlice, tmin, tmax, tsum, val, numSlices, fileMode, nxout, nyout, nxFile;
   float tmean, meanSum, scaleSave = m_fFloatScaling, scaling = 1.;
   int errorRet = 0;
+#ifdef _WIN64
+  K2_DoseFracAcquisition k2dfa;
+#endif
 
-	// Set these values to zero in case of error returns
-	*width = 0;
-	*height = 0;
-	*arrSize = 0;
+  // Set these values to zero in case of error returns
+  *width = 0;
+  *height = 0;
+  *arrSize = 0;
   m_iFramesSaved = 0;
   m_iErrorFromSave = 0;
+  doingAsyncSave = saveFrames && m_bAsyncSave;
 
-	// Execute the command string as developed
+  // Execute the command string as developed
   if (m_strCommand.length() > 0)
-  	retval = ExecuteScript((char *)m_strCommand.c_str());
+    retval = ExecuteScript((char *)m_strCommand.c_str());
   else
     retval = m_iDSimageID;
   m_dLastReturnTime = GetTickCount();
-	
-	// If error, zero out the return values and return error code
-	if (retval == SCRIPT_ERROR_RETURN)
-		return (int)retval;
+  
+  // If error, zero out the return values and return error code
+  if (retval == SCRIPT_ERROR_RETURN)
+    return (int)retval;
 
   // Get the image ID(s)
   ID = imageID = (long)(retval + 0.01);
-  if (saveFrames) {
+  if (doingAsyncSave) {
+#ifdef _WIN64
+    try {
+
+      // If doing asynchronous save, now have to do the parameter setup and acquisition
+      CM::CameraPtr camera = CM::GetCurrentCamera();
+      CM::CameraManagerPtr manager = CM::GetCameraManager();
+      k2dfa.SetFrameExposure(m_dFrameTime);
+      k2dfa.SetAlignOption(m_bAlignFrames);
+      k2dfa.SetHardwareProcessing(m_iReadMode ? m_iHardwareProc : 0);
+      k2dfa.SetAsyncOption(true);
+      if (m_bAlignFrames) {
+        std::string filter = m_strFilterName;
+        k2dfa.SetFilter(filter);
+      }
+
+      CM::AcquisitionParametersPtr acq_params = CM::CreateAcquisitionParameters(camera,
+        (CM::AcquisitionProcessing)m_iK2Processing, m_dK2Exposure + 0.001, m_iK2Binning, 
+        m_iK2Binning, m_iK2Top, m_iK2Left, m_iK2Bottom, m_iK2Right);
+      CM::SetSettling(acq_params, m_dK2Settling);
+      CM::SetShutterIndex(acq_params, m_iK2Shutter);
+      CM::SetReadMode(acq_params, sReadModes[m_iReadMode]);
+      CM::PrepareCameraForAcquire(manager, camera, acq_params,
+        k2dfa.m_DoseFracAcquisitionObj, retval);
+      if (retval >= 0.001)
+        Sleep((DWORD)(retval * 1000. + 0.5));
+      k2dfa.SetAsyncOption(true);
+      sumImage = k2dfa.AcquireImage(camera, acq_params, image);
+      numLoop = 2;
+      DebugToResult("Returned from asynchronous start of acquire\n");
+    }
+    catch (exception exc) {
+      ErrorToResult("Caught an exception from a call to start dose frac exposure\n");
+      try {
+        k2dfa.Abort();
+        DM::DeleteImage(image.get());
+        DM::DeleteImage(sumImage.get());
+      }
+      catch (exception exc) {
+      }
+      return (int)SCRIPT_ERROR_RETURN;
+    }
+#endif
+  } else if (saveFrames) {
     stackID = (int)((retval + 0.1) / ID_MULTIPLIER);
     imageID = B3DNINT(retval - (double)stackID * ID_MULTIPLIER);
     if (stackID) {
@@ -676,11 +756,17 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
     doingStack = saveFrames && !loop;
     delete imageLp;
     imageLp = NULL;
-    if (loop)
-      ID = imageID;
+
+    // Second time through, substitute the sum image or its ID
+    if (loop) {
+      if (doingAsyncSave) 
+        image = sumImage;
+      else
+        ID = imageID;
+    }
     try {
 
-      if (!DM::GetImageFromID(image, ID)) {
+      if (!doingAsyncSave && !DM::GetImageFromID(image, ID)) {
         sprintf(m_strTemp, "Image not found from ID %d\n", ID);
         ErrorToResult(m_strTemp);
         SET_ERROR(IMAGE_NOT_FOUND);
@@ -717,7 +803,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           m_iErrorFromSave = STACK_NOT_3D;
           continue;
         }
-        numSlices = DM::ImageGetDimensionSize(image.get(), 2);
+        stackAllReady = !m_bAsyncSave;
+        numSlices = m_bAsyncSave ? 0 : DM::ImageGetDimensionSize(image.get(), 2);
 
         // Float super-res image is from software processing and needs special scaling
         // into bytes, set divide -1 as flag for this
@@ -768,7 +855,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         // Set up Tiff output file structure
         if (m_bWriteTiff) {
           iifile = iiNew();
-          iifile->nz = m_bFilePerImage ? 1 : numSlices;
+          iifile->nz = (m_bFilePerImage || m_bAsyncSave) ? 1 : numSlices; // Has no effect
           iifile->format = IIFORMAT_LUMINANCE;
           iifile->file = IIFILE_TIFF;
           iifile->type = IITYPE_UBYTE;
@@ -780,7 +867,26 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 
         procWall = saveWall = 0.;
         wallStart = wallTime();
-        for (int slice = 0; slice < numSlices; slice++) {
+        int slice = 0;
+        do {
+#ifdef _WIN64
+
+          // If doing asynchronous save, wait until a slice is ready to process
+          if (m_bAsyncSave) {
+            while (slice >= numSlices) {
+              stackAllReady = k2dfa.IsDone();
+              numSlices = k2dfa.GetNumFramesProcessed();
+              if (numSlices > slice || stackAllReady)
+                break;
+              Sleep(10);
+            }
+            sprintf(m_strTemp, "numSlices %d  isStackDone %s\n", numSlices,
+              stackAllReady ? "Y":"N");
+            DebugToResult(m_strTemp);
+            if (slice >= numSlices)
+              break;
+          }
+#endif
           imageLp->GetImageData(2, slice, fData);
           imageData = fData.get_data();
           outData = (short *)imageData;
@@ -896,7 +1002,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
                 tmax = B3DMAX(tmax, val);
                 tsum += val;
               }
- 
+
             }
             tmean += tsum;
           }
@@ -916,6 +1022,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             iifile->amin = (float)tmin;
             iifile->amax = (float)tmax;
             iifile->amean = tmean / (float)(nxout * nyout);
+
             i = tiffWriteSection(iifile, outData, m_iTiffCompression, 0, 
               B3DNINT(2.54e8 / m_dPixelSize), m_iTiffQuality);
             if (i) {
@@ -967,7 +1074,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 
           // Finally, increment successful save count and close file if needed
           m_iFramesSaved++;
-          if (m_bFilePerImage || slice == numSlices - 1) {
+          if (m_bFilePerImage || (stackAllReady && slice == numSlices - 1)) {
             if (m_bWriteTiff) {
               iiClose(iifile);
               free(iifile->filename);
@@ -980,7 +1087,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           wallNow = wallTime();
           saveWall += wallNow - wallStart;
           wallStart = wallNow;
-        }
+          slice++;
+        } while (slice < numSlices || !stackAllReady);
         m_fFloatScaling = scaleSave;
 
         if (m_iErrorFromSave)
@@ -1006,7 +1114,20 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       ErrorToResult("Caught an exception from a call to a DM:: function\n");
       SET_ERROR(DM_CALL_EXCEPTION);
     }
-  }
+
+#ifdef _WIN64
+    // Delete image here in asynchronous case
+    if (doingAsyncSave) {
+      try {
+        if (doingStack && !stackAllReady)
+          k2dfa.Abort();
+        DM::DeleteImage(image.get());
+      }
+      catch (exception exc) {
+      }
+    }
+#endif
+  }  // End of loop on stack and sum or single image
   delete imageLp;
 
   // Clean up files now in case an exception got us to here
@@ -1019,7 +1140,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   delete [] rotBuf;
 
   // Delete image(s) before return if they can be found
-  if (delImage) {
+  if (delImage && !doingAsyncSave) {
     if (DM::GetImageFromID(image, imageID))
       DM::DeleteImage(image.get());
     else 
@@ -1032,7 +1153,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   }
   *arrSize = *width * *height;
 
-	return errorRet;
+  return errorRet;
 }
 
 /*
@@ -1051,7 +1172,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 * GN frames      float               float              float
 */
 void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize, 
-											            long width, long height, long divideBy2, 
+                                  long width, long height, long divideBy2, 
                                   long transpose, int byteSize, bool isInteger,
                                   bool isUnsignedInt)
 {
@@ -1671,28 +1792,28 @@ int TemplatePlugIn::CopyK2ReferenceIfNeeded()
 // Add commands for selecting a camera to the command string
 void TemplatePlugIn::AddCameraSelection(int camera)
 {
-	if (camera < 0)
-		camera = m_iCurrentCamera;
-	if (m_iDMVersion >= NEW_CAMERA_MANAGER)
-		sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
-						"Object cameraList = CM_GetCameras(manager)\n"
-						"Object camera = ObjectAt(cameraList, %d)\n"
-						"CM_SelectCamera(manager, camera)\n", camera);
-	else
-		sprintf(m_strTemp, "MSCSelectCamera(%d)\n", camera);
-	m_strCommand += m_strTemp;
+  if (camera < 0)
+    camera = m_iCurrentCamera;
+  if (m_iDMVersion >= NEW_CAMERA_MANAGER)
+    sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
+            "Object cameraList = CM_GetCameras(manager)\n"
+            "Object camera = ObjectAt(cameraList, %d)\n"
+            "CM_SelectCamera(manager, camera)\n", camera);
+  else
+    sprintf(m_strTemp, "MSCSelectCamera(%d)\n", camera);
+  m_strCommand += m_strTemp;
 }
 
 // Make camera be the current camera and execute selection script
 int TemplatePlugIn::SelectCamera(long camera)
 {
-	m_iCurrentCamera = camera;
-	m_strCommand.resize(0);
-	AddCameraSelection();
-	double retval = ExecuteScript((char *)m_strCommand.c_str());
-	if (retval == SCRIPT_ERROR_RETURN)
-		return 1;
-	return 0;
+  m_iCurrentCamera = camera;
+  m_strCommand.resize(0);
+  AddCameraSelection();
+  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  if (retval == SCRIPT_ERROR_RETURN)
+    return 1;
+  return 0;
 }
 
 // Set the read mode and the scaling factor
@@ -1833,82 +1954,82 @@ void TemplatePlugIn::GetFileSaveResult(long *numSaved, long *error)
 // Return number of cameras or -1 for error
 int TemplatePlugIn::GetNumberOfCameras()
 {
-	m_strCommand.resize(0);
-	if (m_iDMVersion < NEW_CAMERA_MANAGER)
-		m_strCommand += "number num = MSCGetCameraCount()\n"
-						"Exit(num)";
-	else
-		m_strCommand += "Object manager = CM_GetCameraManager()\n"
-						"Object cameraList = CM_GetCameras(manager)\n"
-						"number listsize = SizeOfList(cameraList)\n"
-						"Exit(listsize)";
-	double retval = ExecuteScript((char *)m_strCommand.c_str());
-	if (retval == SCRIPT_ERROR_RETURN)
-		return -1;
-	return (int)(retval + 0.1);
+  m_strCommand.resize(0);
+  if (m_iDMVersion < NEW_CAMERA_MANAGER)
+    m_strCommand += "number num = MSCGetCameraCount()\n"
+            "Exit(num)";
+  else
+    m_strCommand += "Object manager = CM_GetCameraManager()\n"
+            "Object cameraList = CM_GetCameras(manager)\n"
+            "number listsize = SizeOfList(cameraList)\n"
+            "Exit(listsize)";
+  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  if (retval == SCRIPT_ERROR_RETURN)
+    return -1;
+  return (int)(retval + 0.1);
 }
 
 // Determine insertion state of given camera: return -1 for error, 0 if out, 1 if in
 int TemplatePlugIn::IsCameraInserted(long camera)
 {
-	m_strCommand.resize(0);
-	if (m_iDMVersion < NEW_CAMERA_MANAGER)
-		sprintf(m_strTemp, "MSCSelectCamera(%d)\n"
-						"number inserted = MSCIsCameraIn()\n"
-						"Exit(inserted)", camera);
-	else
-		sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
-						"Object cameraList = CM_GetCameras(manager)\n"
-						"Object camera = ObjectAt(cameraList, %d)\n"
-						"number inserted = CM_GetCameraInserted(camera)\n"
-						"Exit(inserted)", camera);
-	m_strCommand += m_strTemp;
-	double retval = ExecuteScript((char *)m_strCommand.c_str());
-	if (retval == SCRIPT_ERROR_RETURN)
-		return -1;
-	return (int)(retval + 0.1);
+  m_strCommand.resize(0);
+  if (m_iDMVersion < NEW_CAMERA_MANAGER)
+    sprintf(m_strTemp, "MSCSelectCamera(%d)\n"
+            "number inserted = MSCIsCameraIn()\n"
+            "Exit(inserted)", camera);
+  else
+    sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
+            "Object cameraList = CM_GetCameras(manager)\n"
+            "Object camera = ObjectAt(cameraList, %d)\n"
+            "number inserted = CM_GetCameraInserted(camera)\n"
+            "Exit(inserted)", camera);
+  m_strCommand += m_strTemp;
+  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  if (retval == SCRIPT_ERROR_RETURN)
+    return -1;
+  return (int)(retval + 0.1);
 }
 
 // Set the insertion state of the given camera
 int TemplatePlugIn::InsertCamera(long camera, BOOL state)
 {
-	m_strCommand.resize(0);
-	if (m_iDMVersion < NEW_CAMERA_MANAGER)
-		sprintf(m_strTemp, "MSCSelectCamera(%d)\n"
-						"MSCSetCameraIn(%d)", camera, state ? 1 : 0);
-	else
-		sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
-						"Object cameraList = CM_GetCameras(manager)\n"
-						"Object camera = ObjectAt(cameraList, %d)\n"
-						"CM_SetCameraInserted(camera, %d)\n", camera, state ? 1 : 0);
-	m_strCommand += m_strTemp;
-	double retval = ExecuteScript((char *)m_strCommand.c_str());
-	if (retval == SCRIPT_ERROR_RETURN)
-		return 1;
-	return 0;
+  m_strCommand.resize(0);
+  if (m_iDMVersion < NEW_CAMERA_MANAGER)
+    sprintf(m_strTemp, "MSCSelectCamera(%d)\n"
+            "MSCSetCameraIn(%d)", camera, state ? 1 : 0);
+  else
+    sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
+            "Object cameraList = CM_GetCameras(manager)\n"
+            "Object camera = ObjectAt(cameraList, %d)\n"
+            "CM_SetCameraInserted(camera, %d)\n", camera, state ? 1 : 0);
+  m_strCommand += m_strTemp;
+  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  if (retval == SCRIPT_ERROR_RETURN)
+    return 1;
+  return 0;
 }
 
 // Get version from DM, return it and set internal version number
 long TemplatePlugIn::GetDMVersion()
 {
-	unsigned int code;
-	m_strCommand.resize(0);
-	m_strCommand += "number version\n"
-					"GetApplicationInfo(2, version)\n"
-					"Exit(version)";
-	double retval = ExecuteScript((char *)m_strCommand.c_str());
-	if (retval == SCRIPT_ERROR_RETURN)
-		return -1;
-	code = (unsigned int)(retval + 0.1);
+  unsigned int code;
+  m_strCommand.resize(0);
+  m_strCommand += "number version\n"
+          "GetApplicationInfo(2, version)\n"
+          "Exit(version)";
+  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  if (retval == SCRIPT_ERROR_RETURN)
+    return -1;
+  code = (unsigned int)(retval + 0.1);
   // They don't support the last digit
-//	m_iDMVersion = 1000 * (code >> 24) + 100 * ((code >> 16) & 0xff) + 
-//		10 * ((code >> 8) & 0xff) + (code & 0xff);
+//  m_iDMVersion = 1000 * (code >> 24) + 100 * ((code >> 16) & 0xff) + 
+//    10 * ((code >> 8) & 0xff) + (code & 0xff);
   if ((code >> 24) < 4 && ((code >> 16) & 0xff) < 11)
-  	m_iDMVersion = 100 * (code >> 24) + 10 * ((code >> 16) & 0xff) + 
-	  	((code >> 8) & 0xff);
+    m_iDMVersion = 100 * (code >> 24) + 10 * ((code >> 16) & 0xff) + 
+      ((code >> 8) & 0xff);
   else
-   	m_iDMVersion = 10000 * (code >> 24) + 100 * ((code >> 16) & 0xff) + 
-	  	((code >> 8) & 0xff);
+    m_iDMVersion = 10000 * (code >> 24) + 100 * ((code >> 16) & 0xff) + 
+      ((code >> 8) & 0xff);
 
   sprintf(m_strTemp, "retval = %g, code = %x, version = %d\n", retval, code, m_iDMVersion);
   DebugToResult(m_strTemp);
@@ -1918,19 +2039,19 @@ long TemplatePlugIn::GetDMVersion()
 // Set selected shutter normally closed - also set other shutter normally open
 int TemplatePlugIn::SetShutterNormallyClosed(long camera, long shutter)
 {
-	if (m_iDMVersion < SET_IDLE_STATE_OK)
+  if (m_iDMVersion < SET_IDLE_STATE_OK)
     return 0;
-	m_strCommand.resize(0);
+  m_strCommand.resize(0);
   sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
-						"Object cameraList = CM_GetCameras(manager)\n"
-						"Object camera = ObjectAt(cameraList, %d)\n"
-						"CM_SetIdleShutterState(camera, %d, 1)\n"
+            "Object cameraList = CM_GetCameras(manager)\n"
+            "Object camera = ObjectAt(cameraList, %d)\n"
+            "CM_SetIdleShutterState(camera, %d, 1)\n"
             "CM_SetIdleShutterState(camera, %d, 0)\n", camera, shutter, 1 - shutter);
-	m_strCommand += m_strTemp;
-	double retval = ExecuteScript((char *)m_strCommand.c_str());
-	if (retval == SCRIPT_ERROR_RETURN)
-		return 1;
-	return 0;
+  m_strCommand += m_strTemp;
+  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  if (retval == SCRIPT_ERROR_RETURN)
+    return 1;
+  return 0;
 }
 
 void TemplatePlugIn::SetNoDMSettling(long camera)
@@ -1949,39 +2070,39 @@ int TemplatePlugIn::GetDSProperties(long extraDelay, double addedFlyback, double
   DebugToResult("In GetDSProperties\n");
   m_iExtraDSdelay = extraDelay;
   m_dSyncMargin = margin;
-	m_strCommand.resize(0);
+  m_strCommand.resize(0);
   sprintf(m_strTemp, "Number retval = DSGetFlyBackTime()\n"
     "Exit(retval)\n");
   m_strCommand += m_strTemp;
-	double retval = ExecuteScript((char *)m_strCommand.c_str());
-	if (retval == SCRIPT_ERROR_RETURN)
-		return 1;
+  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  if (retval == SCRIPT_ERROR_RETURN)
+    return 1;
   *flyback = retval;
   m_dFlyback = retval + addedFlyback;
-	m_strCommand.resize(0);
+  m_strCommand.resize(0);
   sprintf(m_strTemp, "Number retval = DSGetLineFrequency()\n"
     "Exit(retval)\n");
   m_strCommand += m_strTemp;
   retval = ExecuteScript((char *)m_strCommand.c_str());
-	if (retval == SCRIPT_ERROR_RETURN)
-		return 1;
+  if (retval == SCRIPT_ERROR_RETURN)
+    return 1;
   *lineFreq = retval;
   m_dLineFreq = retval;
-	m_strCommand.resize(0);
+  m_strCommand.resize(0);
   sprintf(m_strTemp, "Number retval = DSGetRotationOffset()\n"
     "Exit(retval)\n");
   m_strCommand += m_strTemp;
   retval = ExecuteScript((char *)m_strCommand.c_str());
-	if (retval == SCRIPT_ERROR_RETURN)
-		return 1;
+  if (retval == SCRIPT_ERROR_RETURN)
+    return 1;
   *rotOffset = retval;
-	m_strCommand.resize(0);
+  m_strCommand.resize(0);
   sprintf(m_strTemp, "Number retval = DSGetDoFlip()\n"
     "Exit(retval)\n");
   m_strCommand += m_strTemp;
   retval = ExecuteScript((char *)m_strCommand.c_str());
-	if (retval == SCRIPT_ERROR_RETURN)
-		return 1;
+  if (retval == SCRIPT_ERROR_RETURN)
+    return 1;
   *doFlip = retval != 0. ? 1 : 0;
   return 0;
 }
@@ -2026,7 +2147,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
   if (m_bContinuousDS)
     StopDSAcquisition();
 
-	m_strCommand.resize(0);
+  m_strCommand.resize(0);
   m_strCommand += "Number exists, xsize, ysize, oldx, oldy, nbytes, idchan, idfirst\n";
   m_strCommand += "image imdel, imchan\n";
   m_strCommand += "String channame\n";
@@ -2062,9 +2183,9 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
       "nbytes = %d\n"
       "exists = GetNamedImage(imchan, channame)\n"
       "if (exists) {\n"
-    	"  Get2DSize(imchan, oldx, oldy)\n"
-	    "  if (! IsIntegerDataType(imchan, nbytes, 0) || oldx != xsize || oldy != ysize) {\n"
-		  "    exists = 0\n"
+      "  Get2DSize(imchan, oldx, oldy)\n"
+      "  if (! IsIntegerDataType(imchan, nbytes, 0) || oldx != xsize || oldy != ysize) {\n"
+      "    exists = 0\n"
       "    DeleteImage(imchan)\n"
       "  }\n"
       "}\n"
@@ -2115,8 +2236,8 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
     m_strCommand += "DSStartAcquisition(paramID, 1, 0)\n"
       "Exit(paramID + 1000000. * idfirst)\n";
     double retval = ExecuteScript((char *)m_strCommand.c_str());
-	  if (retval == SCRIPT_ERROR_RETURN)
-		  return 1;
+    if (retval == SCRIPT_ERROR_RETURN)
+      return 1;
     m_iDSimageID = (int)(retval / 1000000. + 0.5);
     m_iDSparamID = (int)(retval + 0.5 - 1000000. * m_iDSimageID);
     m_bContinuousDS = true;
@@ -2186,60 +2307,60 @@ PlugInWrapper::PlugInWrapper()
 
 BOOL PlugInWrapper::GetCameraBusy()
 {
-	return false;
+  return false;
 }
 
 double PlugInWrapper::ExecuteScript(char *strScript, BOOL selectCamera)
 {
-	return gTemplatePlugIn.ExecuteClientScript(strScript, selectCamera);
+  return gTemplatePlugIn.ExecuteClientScript(strScript, selectCamera);
 }
 
 void PlugInWrapper::SetDebugMode(int inVal)
 {
-	gTemplatePlugIn.SetDebugMode(inVal != 0);
+  gTemplatePlugIn.SetDebugMode(inVal != 0);
 }
 
 void PlugInWrapper::SetDMVersion(long inVal)
 {
-	gTemplatePlugIn.SetDMVersion((int)inVal);
+  gTemplatePlugIn.SetDMVersion((int)inVal);
 }
 
 void PlugInWrapper::SetCurrentCamera(long inVal)
 {
-	gTemplatePlugIn.SetCurrentCamera((int)inVal);
+  gTemplatePlugIn.SetCurrentCamera((int)inVal);
 }
 
 void PlugInWrapper::QueueScript(char *strScript)
 {
-	gTemplatePlugIn.QueueScript(strScript);
+  gTemplatePlugIn.QueueScript(strScript);
 }
 
 int PlugInWrapper::GetImage(short *array, long *arrSize, long *width, 
-							long *height, long processing, double exposure,
-							long binning, long top, long left, long bottom, 
-							long right, long shutter, double settling, long shutterDelay,
+              long *height, long processing, double exposure,
+              long binning, long top, long left, long bottom, 
+              long right, long shutter, double settling, long shutterDelay,
               long divideBy2, long corrections)
 {
-	return gTemplatePlugIn.GetImage(array, arrSize, width, height, processing, exposure,
-		binning, top, left, bottom, right, shutter, settling, shutterDelay, divideBy2, 
+  return gTemplatePlugIn.GetImage(array, arrSize, width, height, processing, exposure,
+    binning, top, left, bottom, right, shutter, settling, shutterDelay, divideBy2, 
     corrections);
 }
 
 int PlugInWrapper::GetGainReference(float *array, long *arrSize, long *width, 
-									long *height, long binning)
+                  long *height, long binning)
 {
-	return gTemplatePlugIn.GetGainReference(array, arrSize, width, height, binning);
+  return gTemplatePlugIn.GetGainReference(array, arrSize, width, height, binning);
 }
 
 
 int PlugInWrapper::SelectCamera(long camera)
 {
-	return gTemplatePlugIn.SelectCamera(camera);
+  return gTemplatePlugIn.SelectCamera(camera);
 }
 
 void PlugInWrapper::SetReadMode(long mode, double scaling)
 {
-	gTemplatePlugIn.SetReadMode(mode, scaling);
+  gTemplatePlugIn.SetReadMode(mode, scaling);
 }
 
 void PlugInWrapper::SetK2Parameters(long readMode, double scaling, long hardwareProc, 
@@ -2267,22 +2388,22 @@ void PlugInWrapper::GetFileSaveResult(long *numSaved, long *error)
 
 int PlugInWrapper::GetNumberOfCameras()
 {
-	return gTemplatePlugIn.GetNumberOfCameras();
+  return gTemplatePlugIn.GetNumberOfCameras();
 }
 
 int PlugInWrapper::IsCameraInserted(long camera)
 {
-	return gTemplatePlugIn.IsCameraInserted(camera);
+  return gTemplatePlugIn.IsCameraInserted(camera);
 }
 
 int PlugInWrapper::InsertCamera(long camera, BOOL state)
 {
-	return gTemplatePlugIn.InsertCamera(camera, state);
+  return gTemplatePlugIn.InsertCamera(camera, state);
 }
 
 long PlugInWrapper::GetDMVersion()
 {
-	return gTemplatePlugIn.GetDMVersion();
+  return gTemplatePlugIn.GetDMVersion();
 }
 
 int PlugInWrapper::SetShutterNormallyClosed(long camera, long shutter)
