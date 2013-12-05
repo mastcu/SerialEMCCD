@@ -490,11 +490,15 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   // Commands for K2 camera
   if (m_iReadMode >= 0) {
     if (m_bDoseFrac) {
+
+      // WORKAROUND to bug in frame time, save & set the global frame time, restore after
       sprintf(m_strTemp, "Object k2dfa = alloc(K2_DoseFracAcquisition)\n"
         "k2dfa.DoseFrac_SetHardwareProcessing(%d)\n"
         "k2dfa.DoseFrac_SetAlignOption(%d)\n"
-        "k2dfa.DoseFrac_SetFrameExposure(%f)\n", m_iReadMode ? m_iHardwareProc : 0,
-        m_bAlignFrames ? 1 : 0, m_dFrameTime);
+        "k2dfa.DoseFrac_SetFrameExposure(%f)\n"
+        "Number savedFrameTime = K2_DoseFrac_GetFrameExposure(camera)\n"
+        "K2_DoseFrac_SetFrameExposure(camera, %f)\n", m_iReadMode ? m_iHardwareProc : 0,
+        m_bAlignFrames ? 1 : 0, m_dFrameTime, m_dFrameTime);
       m_strCommand += m_strTemp;
       if (m_bAlignFrames) {
         sprintf(m_strTemp, "k2dfa.DoseFrac_SetFilter(\"%s\")\n", m_strFilterName);
@@ -563,7 +567,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 //            "CM_AcquireDarkReference(camera, acqParams, img, NULL)\n";
     else if (m_iReadMode >= 0 && m_bDoseFrac)
       m_strCommand += "Image stack\n"
-      "Image img := k2dfa.DoseFrac_AcquireImage(camera, acqParams, stack)\n";
+      "Image img := k2dfa.DoseFrac_AcquireImage(camera, acqParams, stack)\n"
+      "K2_DoseFrac_SetFrameExposure(camera, savedFrameTime)\n";
 
     else
       m_strCommand += "Image img := CM_AcquireImage(camera, acqParams)\n";
@@ -1868,6 +1873,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   m_iSaveFlags = flags;
   m_bWriteTiff = flags & (K2_SAVE_LZW_TIFF | K2_SAVE_ZIP_TIFF);
   m_iTiffCompression = (flags & K2_SAVE_ZIP_TIFF) ? 8 : 5;
+  m_bAsyncSave = (flags & K2_SAVE_SYNCHRO) == 0;
 
   // Copy all the strings if they are changed
   if (CopyStringIfChanged(dirName, &m_strSaveDir, newDir, error))

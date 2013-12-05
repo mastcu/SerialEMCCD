@@ -4,6 +4,31 @@
 using namespace Gatan;
 using namespace PlugIn;
 
+static void K2_DoseFrac_SetFrameExposure(const CM::CameraPtr &camera, double frame_exposure)
+{
+	static DM::Function __sFunction = (DM_FunctionToken) NULL;
+	static const char *__sSignature = "void K2_DoseFrac_SetFrameExposure(ScriptObject, double)";
+
+	Gatan::PlugIn::DM_Variant params[2];
+	params[0].v_object = (DM_ObjectToken) camera.get();
+	params[1].v_float64 = frame_exposure;
+
+	GatanPlugIn::gDigitalMicrographInterface.CallFunction( __sFunction.get_ptr(), 2, params, __sSignature );
+}
+
+static double K2_DoseFrac_GetFrameExposure(const CM::CameraPtr &camera)
+{
+	static DM::Function __sFunction = (DM_FunctionToken) NULL;
+	static const char *__sSignature = "double K2_DoseFrac_GetFrameExposure(ScriptObject)";
+
+	Gatan::PlugIn::DM_Variant params[2];
+	params[1].v_object = (DM_ObjectToken) camera.get();
+
+	GatanPlugIn::gDigitalMicrographInterface.CallFunction( __sFunction.get_ptr(), 2, params, __sSignature );
+
+	return params[0].v_float64;
+}
+
 K2_DoseFracAcquisition::K2_DoseFracAcquisition()
 {
 	PlugIn::DM_PlugInEnv dm_env;
@@ -147,6 +172,11 @@ bool K2_DoseFracAcquisition::GetAsyncOption()
 // acquire sum image only
 DM::Image K2_DoseFracAcquisition::AcquireImage(const CM::CameraPtr &camera, const CM::AcquisitionParametersPtr &acq_params)
 {
+	// --WORKAROUND FOR BUG IN EXPOSURE VALIDATION: set global frame exposure before calling DoseFrac_AcquireImage method to ensure correct validation
+	double old_frame_exposure = K2_DoseFrac_GetFrameExposure(camera);
+	double new_frame_exposure = this->GetFrameExposure();
+	K2_DoseFrac_SetFrameExposure(camera, new_frame_exposure);
+
 	static DM::Function __sFunction = (DM_FunctionToken) NULL;
 	static const char *__sSignature = "BasicImage DoseFrac_AcquireImage(ScriptObject, ScriptObject, ScriptObject)";
 
@@ -157,14 +187,21 @@ DM::Image K2_DoseFracAcquisition::AcquireImage(const CM::CameraPtr &camera, cons
 
 	GatanPlugIn::gDigitalMicrographInterface.CallFunction( __sFunction.get_ptr(), 4, params, __sSignature );
 
-	DM::Image sumImage = (DM_ImageToken_1Ref) params[0].v_object;
+	// --WORKAROUND FOR BUG IN EXPOSURE VALIDATION: set old frame exposure
+	K2_DoseFrac_SetFrameExposure(camera, old_frame_exposure);
 
+	DM::Image sumImage = (DM_ImageToken_1Ref) params[0].v_object;
 	return sumImage;
 }
 
 // acquire sum image and stack image
 DM::Image K2_DoseFracAcquisition::AcquireImage(const CM::CameraPtr &camera, const CM::AcquisitionParametersPtr &acq_params, DM::Image &stackImage)
 {
+	// --WORKAROUND FOR BUG IN EXPOSURE VALIDATION: set global frame exposure before calling DoseFrac_AcquireImage method to ensure correct validation
+	double old_frame_exposure = K2_DoseFrac_GetFrameExposure(camera);
+	double new_frame_exposure = this->GetFrameExposure();
+	K2_DoseFrac_SetFrameExposure(camera, new_frame_exposure);
+
 	static DM::Function __sFunction = (DM_FunctionToken) NULL;
 	static const char *__sSignature = "BasicImage DoseFrac_AcquireImage(ScriptObject, ScriptObject, ScriptObject, BasicImage*)";
 
@@ -175,6 +212,9 @@ DM::Image K2_DoseFracAcquisition::AcquireImage(const CM::CameraPtr &camera, cons
 	params[4].v_object_ref = (DM_ObjectToken*) stackImage.get_ptr();
 
 	GatanPlugIn::gDigitalMicrographInterface.CallFunction( __sFunction.get_ptr(), 5, params, __sSignature );
+
+	// --WORKAROUND FOR BUG IN EXPOSURE VALIDATION: set old frame exposure
+	K2_DoseFrac_SetFrameExposure(camera, old_frame_exposure);
 
 	DM::Image sumImage = (DM_ImageToken_1Ref) params[0].v_object;
 
