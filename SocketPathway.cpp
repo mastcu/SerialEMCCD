@@ -248,6 +248,8 @@ static DWORD WINAPI SocketProc(LPVOID pParam)
 
   // Set the value to indicate we are through all the startup
   sStartupError = 0;
+  if (gPlugInWrapper.GetDebugVal() > 1)
+    gPlugInWrapper.DebugToResult("Socket startup OK, going to start select loop\n");
   
   // Loop on listening for connections and accepting them or receiving commands
   for (;;) {

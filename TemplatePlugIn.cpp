@@ -88,6 +88,7 @@ public:
   double ExecuteScript(char *strScript);
   void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
   void ErrorToResult(const char *strMessage, const char *strPrefix = NULL);
+  BOOL SleepMsg(DWORD dwTime_ms);
   virtual void Start();
   virtual void Run();
   virtual void Cleanup();
@@ -663,7 +664,11 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   unsigned char *bData, *packed;
   unsigned char lowbyte;
   GatanPlugIn::ImageDataLocker *imageLp = NULL;
+#ifdef _GMS2
+  ImageDataPlugin::image_data_t fData;
+#else
   ImageData::image_data_t fData;
+#endif
   void *imageData;
   short *outData, *outForRot, *rotBuf = NULL;
   short *sData;
@@ -885,7 +890,13 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
               numSlices = k2dfa.GetNumFramesProcessed();
               if (numSlices > slice || stackAllReady)
                 break;
-              Sleep(10);
+
+              // Sleep while processing events.  If it returns false, it is a quit,
+              // so break and let the loop finish
+              if (!SleepMsg(10)) {
+                m_iErrorFromSave = QUIT_DURING_SAVE;
+                break;
+              }
             }
             sprintf(m_strTemp, "numSlices %d  isStackDone %s\n", numSlices,
               stackAllReady ? "Y":"N");
@@ -1016,6 +1027,12 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 
           // Pack 4-bit data into bytes; move into array if not there yet
           if (save4bit) {
+            /* if (!slice) {
+              Islice sl;
+              sliceInit(&sl, nxout, nyout, SLICE_MODE_BYTE, outData);
+              sprintf(m_strTemp, "%s\\firstFrameUnpacked.mrc", m_strSaveDir);
+              sliceWriteMRCfile(m_strTemp, &sl);
+            } */
             bData = (unsigned char *)outData;
             packed = (unsigned char *)array;
             outData = (short *)array;
@@ -1950,6 +1967,33 @@ int TemplatePlugIn::CopyStringIfChanged(char *newStr, char **memberStr, int &cha
     }
   }
   return 0;
+}
+
+// sleeps for the given amount of time while pumping messages
+// returns TRUE if successful, FALSE otherwise
+BOOL TemplatePlugIn::SleepMsg(DWORD dwTime_ms)
+{
+  DWORD dwStart = GetTickCount();
+  DWORD dwElapsed;
+  while ((dwElapsed = GetTickCount() - dwStart) < dwTime_ms) {
+    DWORD dwStatus = MsgWaitForMultipleObjects(0, NULL, FALSE,
+                                               dwTime_ms - dwElapsed, QS_ALLINPUT);
+    
+    if (dwStatus == WAIT_OBJECT_0) {
+      MSG msg;
+      while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+        if (msg.message == WM_QUIT) {
+          PostQuitMessage((int)msg.wParam);
+          return FALSE; // abandoned due to WM_QUIT
+        }
+
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+      }
+    }
+  }
+
+  return TRUE;
 }
 
 // Get results of last frame saving operation
