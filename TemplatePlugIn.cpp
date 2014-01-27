@@ -664,7 +664,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   unsigned char *bData, *packed;
   unsigned char lowbyte;
   GatanPlugIn::ImageDataLocker *imageLp = NULL;
-#ifdef _GMS2
+#ifdef GMS2
   ImageDataPlugin::image_data_t fData;
 #else
   ImageData::image_data_t fData;
