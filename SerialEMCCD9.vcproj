@@ -759,7 +759,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				InlineFunctionExpansion="1"
-				AdditionalIncludeDirectories="&quot;$(BOOST_1_38_0)&quot;;&quot;$(GMS2_SDK)\include&quot;"
+				AdditionalIncludeDirectories="&quot;$(BOOST_1_38-64)&quot;;&quot;$(GMS2-64_SDK)\include&quot;"
 				PreprocessorDefinitions="NDEBUG;WIN32;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE"
 				StringPooling="true"
 				RuntimeLibrary="2"
@@ -794,7 +794,7 @@
 				OutputFile=".\$(OutDir)/SEMCCD-GMS2.$(GMS2_SDK_VERSION)-64.dll"
 				LinkIncremental="1"
 				SuppressStartupBanner="true"
-				AdditionalLibraryDirectories="..\SerialEM\Utilities;..\SerialEM\Shared;.\Shared;&quot;$(GMS2_SDK)\lib\x64&quot;"
+				AdditionalLibraryDirectories="..\SerialEM\Utilities;..\SerialEM\Shared;.\Shared;&quot;$(GMS2-64_SDK)\lib\x64&quot;"
 				IgnoreDefaultLibraryNames="LIBCMT,LIBCMTD"
 				ModuleDefinitionFile=".\SerialEMCCD.def"
 				ProgramDatabaseFile=".\ReleaseMinDependency/SerialEMCCD.pdb"
@@ -845,7 +845,7 @@
 			<Tool
 				Name="VCCustomBuildTool"
 				Description="Performing registration"
-				CommandLine="regsvr32 /s /u &quot;C:\Program Files\Gatan\Plugins\SEMCCD-GMS2-32.dll&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; &quot;C:\Program Files\Gatan\Plugins\SEMCCD-GMS2-32.dll&quot;&#x0D;&#x0A;regsvr32 /s /c &quot;C:\Program Files\Gatan\Plugins\SEMCCD-GMS2-32.dll&quot;&#x0D;&#x0A;echo regsvr32 exec. time &gt; &quot;$(OutDir)\regsvr32.trg&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot; .&#x0D;&#x0A;"
+				CommandLine=""
 				Outputs="$(OutDir)\regsvr32.trg"
 			/>
 			<Tool
@@ -864,7 +864,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				InlineFunctionExpansion="1"
-				AdditionalIncludeDirectories="&quot;$(BOOST_1_38_0)&quot;;&quot;$(GMS2_SDK)\include&quot;"
+				AdditionalIncludeDirectories="&quot;$(BOOST_1_38-32)&quot;;&quot;$(GMS2-32_SDK)\include&quot;"
 				PreprocessorDefinitions="GMS2_SDK_VERSION=$(GMS2_SDK_VERSION);GMS2;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NOINHERIT)"
 				StringPooling="true"
 				RuntimeLibrary="2"
@@ -898,7 +898,7 @@
 				OutputFile="$(IntDir)/SEMCCD-GMS2.$(GMS2_SDK_VERSION)-32.dll"
 				LinkIncremental="1"
 				SuppressStartupBanner="true"
-				AdditionalLibraryDirectories="&quot;$(GMS2_SDK)\lib\Win32\&quot;"
+				AdditionalLibraryDirectories="&quot;$(GMS2-32_SDK)\lib\Win32\&quot;"
 				IgnoreAllDefaultLibraries="false"
 				IgnoreDefaultLibraryNames=""
 				ModuleDefinitionFile=".\SerialEMCCD.def"
@@ -930,7 +930,7 @@
 			<Tool
 				Name="VCPostBuildEventTool"
 				Description="Building proxy/stub"
-				CommandLine="nmake -f SerialEMCCDps.mk SEMCCDps-GMS2-32.dll&#x0D;&#x0A;regsvr32 /s SEMCCDps-GMS2-32.dll&#x0D;&#x0A;"
+				CommandLine="nmake -f SerialEMCCDps.mk SEMCCDps-GMS2-32.dll&#x0D;&#x0A;&#x0D;&#x0A;"
 			/>
 		</Configuration>
 		<Configuration
