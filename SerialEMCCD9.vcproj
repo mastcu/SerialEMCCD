@@ -766,7 +766,7 @@
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="2"
 				PrecompiledHeaderThrough="stdafx.h"
-				PrecompiledHeaderFile=".\ReleaseMinDependency/SerialEMCCD.pch"
+				PrecompiledHeaderFile=".\$(ConfigurationName)/SerialEMCCD.pch"
 				AssemblerListingLocation="$(IntDir)\"
 				ObjectFile="$(IntDir)\"
 				ProgramDataBaseFileName="$(IntDir)\"
@@ -845,7 +845,7 @@
 			<Tool
 				Name="VCCustomBuildTool"
 				Description="Performing registration"
-				CommandLine=""
+				CommandLine="copy &quot;$(TargetPath)&quot; .&#x0D;&#x0A;"
 				Outputs="$(OutDir)\regsvr32.trg"
 			/>
 			<Tool
@@ -871,7 +871,7 @@
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="2"
 				PrecompiledHeaderThrough="stdafx.h"
-				PrecompiledHeaderFile=".\ReleaseMinDependency/SerialEMCCD.pch"
+				PrecompiledHeaderFile=".\$(ConfigurationName)/SerialEMCCD.pch"
 				AssemblerListingLocation="$(IntDir)\"
 				ObjectFile="$(IntDir)\"
 				ProgramDataBaseFileName="$(IntDir)\"

@@ -38,6 +38,8 @@ enum {NO_DEL_IM = 0, DEL_IMAGE};
 static int sReadModes[3] = {K2_LINEAR_READ_MODE, K2_COUNTING_READ_MODE, 
 K2_SUPERRES_READ_MODE};
 
+static int sCMHardCorrs[4] = {0x0, 0x100, 0x200, 0x300};
+static int sK2HardProcs[4] = {0, 2, 4, 6};
 
 class TemplatePlugIn :  public Gatan::PlugIn::PlugInMain
 {
@@ -252,6 +254,15 @@ void TemplatePlugIn::Run()
     m_bDebug = true;
     DebugToResult("SerialEMCCD: Error getting Digital Micrograph version\n");
   }
+  HANDLE hMutex = CreateMutex(NULL, FALSE, "SEMCCD-SingleInstance");
+  if (hMutex && GetLastError() == ERROR_ALREADY_EXISTS)
+    ErrorToResult("WARNING: THERE ARE TWO COPIES OF THE SERIALEMCCD PLUGIN LOADED!!!\n"
+    "  Look in both C:\\ProgramData\\Gatan\\Plugins and C:\\Program Files\\Gatan\\Plugins"
+    "\n  (or in C:\\Program Files\\Gatan\\DigitalMicrograph\\Plugins on Windows XP) for\n"
+    "  copies of SEMCCD-GMS2...dll.\n  Shut down DigitalMicrograph and remove the extra "
+    "copy.\n  Rename the remaining file, if necessary, to remove minor version numbers\n"
+    "  (i.e., it should be named SEMCCD-GMS2-32.dll or SEMCCD-GMS2-64.dll\n"
+    "WARNING: THERE ARE TWO COPIES OF THE SERIALEMCCD PLUGIN LOADED!!!\n", "");
   DebugToResult("Going to start socket\n");
   socketRet = StartSocket(wsaError);
   if (socketRet) {
@@ -446,10 +457,13 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   // Set up acquisition parameters
   if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
     sprintf(m_strTemp, "Object acqParams = CM_CreateAcquisitionParameters_FullCCD"
-      "(camera, %d, %g, %d, %d)\n"
-      "CM_SetBinnedReadArea(camera, acqParams, %d, %d, %d, %d)\n",
-      newProc, exposure, binning, binning, top, left, bottom, right);
+      "(camera, %d, %g, %d, %d)\n", newProc, exposure, binning, binning);
     m_strCommand += m_strTemp;
+    if (!m_bDoseFrac) {
+      sprintf(m_strTemp, "CM_SetBinnedReadArea(camera, acqParams, %d, %d, %d, %d)\n",
+       top, left, bottom, right);
+      m_strCommand += m_strTemp;
+    }
 
     // Specify corrections if incoming value is >= 0
     // As of DM 3.9.3 (3.9?) need to modify only the allowed coorections to avoid an
@@ -498,7 +512,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
         "k2dfa.DoseFrac_SetAlignOption(%d)\n"
         "k2dfa.DoseFrac_SetFrameExposure(%f)\n"
         "Number savedFrameTime = K2_DoseFrac_GetFrameExposure(camera)\n"
-        "K2_DoseFrac_SetFrameExposure(camera, %f)\n", m_iReadMode ? m_iHardwareProc : 0,
+        "K2_DoseFrac_SetFrameExposure(camera, %f)\n", 
+        m_iReadMode ? sK2HardProcs[m_iHardwareProc / 2] : 0,
         m_bAlignFrames ? 1 : 0, m_dFrameTime, m_dFrameTime);
       m_strCommand += m_strTemp;
       if (m_bAlignFrames) {
@@ -507,10 +522,20 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       }
     }
     sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
+#if defined(GMS2) && GMS2_SDK_VERSION < 31
       "K2_SetHardwareProcessing(camera, %d)\n"
+#else
+      "CM_SetHardwareCorrections(acqParams, %d)\n"
+#endif
       "Number wait_time_s\n"
       "CM_PrepareCameraForAcquire(manager, camera, acqParams, NULL, wait_time_s)\n"
-      "Sleep(wait_time_s)\n", sReadModes[m_iReadMode], m_iReadMode ? m_iHardwareProc : 0);
+      "Sleep(wait_time_s)\n", sReadModes[m_iReadMode], 
+#if defined(GMS2) && GMS2_SDK_VERSION < 31
+      m_iReadMode ? sK2HardProcs[m_iHardwareProc / 2] : 0
+#else
+      m_iReadMode ? sCMHardCorrs[m_iHardwareProc / 2] : 0
+#endif
+      );
     m_strCommand += m_strTemp;
   }
 
@@ -664,7 +689,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   unsigned char *bData, *packed;
   unsigned char lowbyte;
   GatanPlugIn::ImageDataLocker *imageLp = NULL;
-#if defined(GMS2) && GMS2_SDK_VERSION > 2
+#if defined(GMS2) && GMS2_SDK_VERSION >= 30
   ImageDataPlugin::image_data_t fData;
 #else
   ImageData::image_data_t fData;
@@ -715,16 +740,16 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       CM::CameraManagerPtr manager = CM::GetCameraManager();
       k2dfa.SetFrameExposure(m_dFrameTime);
       k2dfa.SetAlignOption(m_bAlignFrames);
-      k2dfa.SetHardwareProcessing(m_iReadMode ? m_iHardwareProc : 0);
+      k2dfa.SetHardwareProcessing(m_iReadMode ? sK2HardProcs[m_iHardwareProc / 2] : 0);
       k2dfa.SetAsyncOption(true);
       if (m_bAlignFrames) {
         std::string filter = m_strFilterName;
         k2dfa.SetFilter(filter);
       }
 
-      CM::AcquisitionParametersPtr acq_params = CM::CreateAcquisitionParameters(camera,
+      CM::AcquisitionParametersPtr acq_params = CM::CreateAcquisitionParameters_FullCCD(camera,
         (CM::AcquisitionProcessing)m_iK2Processing, m_dK2Exposure + 0.001, m_iK2Binning, 
-        m_iK2Binning, m_iK2Top, m_iK2Left, m_iK2Bottom, m_iK2Right);
+        m_iK2Binning);//, m_iK2Top, m_iK2Left, m_iK2Bottom, m_iK2Right);
       CM::SetSettling(acq_params, m_dK2Settling);
       CM::SetShutterIndex(acq_params, m_iK2Shutter);
       CM::SetReadMode(acq_params, sReadModes[m_iReadMode]);
@@ -801,6 +826,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 
       // Get the size and adjust if necessary to fit output array
       DM::GetSize( image.get(), width, height );
+      sprintf(m_strTemp, "loop %d width %d height %d\n", loop, *width, *height);
+      DebugToResult(m_strTemp);
       if (*width * *height > outLimit) {
         ErrorToResult("Warning: image is larger than the supplied array\n",
           "\nA problem occurred acquiring an image for SerialEM:\n");
@@ -1861,6 +1888,7 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
 {
   SetReadMode(mode, scaling);
   m_iHardwareProc = hardwareProc;
+  B3DCLAMP(m_iHardwareProc, 0, 6);
   m_bDoseFrac = doseFrac;
   m_dFrameTime = frameTime;
   m_bAlignFrames = alignFrames;
@@ -1884,7 +1912,11 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   struct _stat statbuf;
   FILE *fp;
   int newDir, dummy;
+#if defined(GMS2) && GMS2_SDK_VERSION < 31
   m_iRotationFlip = rotationFlip;
+#else
+  m_iRotationFlip = 0;
+#endif
   m_bFilePerImage = filePerImage;
   m_dPixelSize = pixelSize;
   m_iSaveFlags = flags;
@@ -2062,27 +2094,42 @@ int TemplatePlugIn::InsertCamera(long camera, BOOL state)
 }
 
 // Get version from DM, return it and set internal version number
+// HERE IS WHERE IT MATTERS HOW GMS2_SDK_VERSION IS DEFINED
+// IT MUST BE 0, 1, 2, then 30, 31, etc above 2.
 long TemplatePlugIn::GetDMVersion()
 {
   unsigned int code;
   m_strCommand.resize(0);
+#ifdef GMS2
+#if GMS2_SDK_VERSION < 2
+  DebugToResult("GMS2 version < 2, just returning 40000");
+  return 40000;
+#endif
+  m_strCommand += "number major, minor, build\n"
+          "GetApplicationVersion(major, minor, build)\n"
+          "Exit(10000 * major + minor)";
+#else
   m_strCommand += "number version\n"
           "GetApplicationInfo(2, version)\n"
           "Exit(version)";
+#endif
   double retval = ExecuteScript((char *)m_strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
     return -1;
   code = (unsigned int)(retval + 0.1);
+#ifdef GMS2
+  int major = code / 10000;
+  int minor = code % 10000;
+  m_iDMVersion = 10000 * (2 + major) + 100 * (minor / 10) + (minor % 10);
+#else
   // They don't support the last digit
-//  m_iDMVersion = 1000 * (code >> 24) + 100 * ((code >> 16) & 0xff) + 
-//    10 * ((code >> 8) & 0xff) + (code & 0xff);
   if ((code >> 24) < 4 && ((code >> 16) & 0xff) < 11)
     m_iDMVersion = 100 * (code >> 24) + 10 * ((code >> 16) & 0xff) + 
       ((code >> 8) & 0xff);
   else
     m_iDMVersion = 10000 * (code >> 24) + 100 * ((code >> 16) & 0xff) + 
       ((code >> 8) & 0xff);
-
+#endif
   sprintf(m_strTemp, "retval = %g, code = %x, version = %d\n", retval, code, m_iDMVersion);
   DebugToResult(m_strTemp);
   return m_iDMVersion;
