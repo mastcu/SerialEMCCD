@@ -32,7 +32,7 @@ static int sSuperChunkSize = 33554432;
 static FILE *sFPdebug = NULL;
 
 // Declarations needed on both sides
-#define ARGS_BUFFER_SIZE 1024
+#define ARGS_BUFFER_CHUNK 1024
 #define MAX_LONG_ARGS 16
 #define MAX_DBL_ARGS 8
 #define MAX_BOOL_ARGS 8
@@ -43,7 +43,7 @@ enum {GS_ExecuteScript = 1, GS_SetDebugMode, GS_SetDMVersion, GS_SetCurrentCamer
       GS_SetShutterNormallyClosed, GS_SetNoDMSettling, GS_GetDSProperties,
       GS_AcquireDSImage, GS_ReturnDSChannel, GS_StopDSAcquisition, GS_CheckReferenceTime,
       GS_SetK2Parameters, GS_ChunkHandshake, GS_SetupFileSaving, GS_GetFileSaveResult,
-      GS_SetupFileSaving2};
+      GS_SetupFileSaving2, GS_GetDefectList};
 
 static int sNumLongSend;
 static int sNumBoolSend;
@@ -55,7 +55,8 @@ static long *sLongArray;
 static long sLongArgs[MAX_LONG_ARGS];   // Max is 13
 static double sDoubleArgs[MAX_DBL_ARGS];  // Max is 3
 static BOOL sBoolArgs[MAX_BOOL_ARGS];   // Max is 3
-static char sArgsBuffer[ARGS_BUFFER_SIZE];
+static char *sArgsBuffer = NULL;
+static int sArgBufSize = 0;
 static int sNumBytesSend;
 static BOOL sHasLongArray;
 
@@ -102,6 +103,7 @@ static ArgDescriptor sFuncTable[] = {
   {GS_SetupFileSaving,      2, 1, 1,   1, 0, 0,   TRUE},
   {GS_GetFileSaveResult,    0, 0, 0,   2, 0, 0,   FALSE},
   {GS_SetupFileSaving2,     3, 1, 5,   1, 0, 0,   TRUE},
+  {GS_GetDefectList,        1, 0, 0,   4, 0, 0,   FALSE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -207,6 +209,13 @@ static DWORD WINAPI SocketProc(LPVOID pParam)
   int numBytes, err, numExpected;
   fd_set readFds;      // file descriptor list for select()
 
+  sArgsBuffer = (char *)malloc(ARGS_BUFFER_CHUNK);
+  if (!sArgsBuffer) {
+    sStartupError = 8;
+    return sStartupError;
+  }
+  sArgBufSize = ARGS_BUFFER_CHUNK;
+
   // Get the listener socket
   hListener = socket(PF_INET, SOCK_STREAM, 0);
   if (hListener == INVALID_SOCKET) {
@@ -286,13 +295,28 @@ static DWORD WINAPI SocketProc(LPVOID pParam)
 
     // There is something to do.  Check the client first (Does ISSET Work?)
     if (sHClient != INVALID_SOCKET && FD_ISSET(sHClient, &readFds)) {
-      numBytes = recv(sHClient, sArgsBuffer, ARGS_BUFFER_SIZE, 0);
+      numBytes = recv(sHClient, sArgsBuffer, sArgBufSize, 0);
  
       // Close client on error or disconnect, but allow new connect
       if (numBytes <= 0) {
         ReportErrorAndClose(numBytes, "recv from ready client");
       } else {
         memcpy(&numExpected, &sArgsBuffer[0], sizeof(int));
+
+        // Reallocate buffer if necessary
+        if (numExpected > sArgBufSize - 4) {
+          sArgBufSize = ((numExpected + ARGS_BUFFER_CHUNK - 1) / ARGS_BUFFER_CHUNK) *
+            ARGS_BUFFER_CHUNK;
+          sArgsBuffer = (char *)realloc(sArgsBuffer, sArgBufSize);
+          if (!sArgsBuffer) {
+            sStartupError = 8;
+            gPlugInWrapper.ErrorToResult("Failed to reallocate buffer for receiving data",
+              "SerialEMSocket: ");
+            return sStartupError;
+          }
+          gPlugInWrapper.DebugToResult("Reallocated the argument buffer\n");
+        }
+
         if (!FinishGettingBuffer(numBytes, numExpected)) {
           sprintf(sMessageBuf, "SerialEMSocket: got %d bytes via recv on socket %d\n",
             numExpected, sHClient);
@@ -346,9 +370,9 @@ static int FinishGettingBuffer(int numReceived, int numExpected)
 
     // If message is too big for buffer, just get it all and throw away the start
     ind = numReceived;
-    if (numExpected > ARGS_BUFFER_SIZE)
+    if (numExpected > sArgBufSize)
       ind = 0;
-    numNew = recv(sHClient, &sArgsBuffer[ind], ARGS_BUFFER_SIZE - ind, 0);
+    numNew = recv(sHClient, &sArgsBuffer[ind], sArgBufSize - ind, 0);
     if (numNew <= 0) {
       ReportErrorAndClose(numNew, "recv to get expected number of bytes\n");
       return 1;
@@ -437,7 +461,7 @@ static int ListenForHandshake(int superChunk)
     return 1;
   }
 
-  numBytes = recv(sHClient, sArgsBuffer, ARGS_BUFFER_SIZE, 0);
+  numBytes = recv(sHClient, sArgsBuffer, sArgBufSize, 0);
 
   // Close client on error or disconnect or too few bytes or anything wrong
   memcpy(&numExpected, &sArgsBuffer[0], sizeof(int));
@@ -456,10 +480,11 @@ static int ProcessCommand(int numBytes)
   short *imArray;
   char *command = NULL;
   char *refName = NULL;
+  char *defects = NULL;
   struct __stat64 statbuf;
 
   // Get the function code as the second element of the buffer
-  if (numBytes < 8 || numBytes > ARGS_BUFFER_SIZE) {
+  if (numBytes < 8 || numBytes > sArgBufSize) {
     SendArgsBack(numBytes < 8 ? -4 : -5);  // Inadequate length or too big
     return 1;
   }
@@ -577,7 +602,7 @@ static int ProcessCommand(int numBytes)
     case GS_SetupFileSaving:
       ind = (int)strlen((char *)sLongArray) + 1;
       gPlugInWrapper.SetupFileSaving(sLongArgs[1], sBoolArgs[0], sDoubleArgs[0], 0,
-        0., 0., 0., 0., (char *)sLongArray, (char *)sLongArray + ind, NULL, NULL, 
+        0., 0., 0., 0., (char *)sLongArray, (char *)sLongArray + ind, NULL, NULL, NULL,
         &sLongArgs[1]);
       SendArgsBack(0);
       break;
@@ -589,13 +614,17 @@ static int ProcessCommand(int numBytes)
         nextInd += (int)strlen((char *)sLongArray + nextInd) + 1;
         refName = (char *)sLongArray + nextInd;
       }
+      if (sLongArgs[2] & K2_SAVE_DEFECTS) {
+        nextInd += (int)strlen((char *)sLongArray + nextInd) + 1;
+        defects = (char *)sLongArray + nextInd;
+      }
       if (sLongArgs[2] & K2_RUN_COMMAND) {
         nextInd += (int)strlen((char *)sLongArray + nextInd) + 1;
         command = (char *)sLongArray + nextInd;
       }
       gPlugInWrapper.SetupFileSaving(sLongArgs[1], sBoolArgs[0], sDoubleArgs[0], 
         sLongArgs[2], sDoubleArgs[1], sDoubleArgs[2], sDoubleArgs[3], sDoubleArgs[4], 
-        (char *)sLongArray, (char *)sLongArray + rootInd, refName, command,
+        (char *)sLongArray, (char *)sLongArray + rootInd, refName, defects, command,
         &sLongArgs[1]);
       SendArgsBack(0);
       break;
@@ -603,6 +632,12 @@ static int ProcessCommand(int numBytes)
     case GS_GetFileSaveResult:
       gPlugInWrapper.GetFileSaveResult(&sLongArgs[1], &sLongArgs[2]);
       SendArgsBack(0);
+      break;
+
+    case GS_GetDefectList:
+      imArray = new short[sLongArgs[1]];
+      SendImageBack(gPlugInWrapper.GetDefectList(imArray, &sLongArgs[1], &sLongArgs[2],
+        &sLongArgs[3]), imArray, 2); 
       break;
 
     case GS_GetNumberOfCameras:
@@ -779,21 +814,21 @@ static int PackDataToSend()
   sNumBytesSend = sizeof(int);
   if (sNumLongSend) {
     numAdd = sNumLongSend * sizeof(long);
-    if (numAdd + sNumBytesSend > ARGS_BUFFER_SIZE)
+    if (numAdd + sNumBytesSend > sArgBufSize)
       return 1;
     memcpy(&sArgsBuffer[sNumBytesSend], sLongArgs, numAdd);
     sNumBytesSend += numAdd;
   }
   if (sNumBoolSend) {
     numAdd = sNumBoolSend * sizeof(BOOL);
-    if (numAdd + sNumBytesSend > ARGS_BUFFER_SIZE)
+    if (numAdd + sNumBytesSend > sArgBufSize)
       return 1;
     memcpy(&sArgsBuffer[sNumBytesSend], sBoolArgs, numAdd);
     sNumBytesSend += numAdd;
   }
   if (sNumDblSend) {
     numAdd = sNumDblSend * sizeof(double);
-    if (numAdd + sNumBytesSend > ARGS_BUFFER_SIZE)
+    if (numAdd + sNumBytesSend > sArgBufSize)
       return 1;
     memcpy(&sArgsBuffer[sNumBytesSend], sDoubleArgs, numAdd);
     sNumBytesSend += numAdd;

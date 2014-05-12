@@ -184,19 +184,32 @@ STDMETHODIMP CDMCamera::SetupFileSaving2(long rotationFlip, BOOL filePerImage,
   char *cnames = (char *)names;
   char *command = NULL;
   char *refName = NULL;
+  char *defects = NULL;
   int rootind = (int)strlen(cnames) + 1;
   int nextInd = rootind;
   if (flags & K2_COPY_GAIN_REF) {
     nextInd += (int)strlen(&cnames[nextInd]) + 1;
     refName = &cnames[nextInd];
   }
+  if (flags & K2_SAVE_DEFECTS) {
+    nextInd += (int)strlen(&cnames[nextInd]) + 1;
+    defects = &cnames[nextInd];
+  }
   if (flags & K2_RUN_COMMAND) {
     nextInd += (int)strlen(&cnames[nextInd]) + 1;
     command = &cnames[nextInd];
   }
   gPlugInWrapper.SetupFileSaving(rotationFlip, filePerImage, pixelSize, flags, dummy1,
-    dummy2, dummy3, dummy4, cnames, &cnames[rootind], refName, command, error);
+    dummy2, dummy3, dummy4, cnames, &cnames[rootind], refName, defects, command, error);
   return S_OK;
+}
+
+STDMETHODIMP CDMCamera::GetDefectList(short xyPairs[], long *arrSize, long *numPoints, 
+                                      long *numTotal)
+{
+  if (gPlugInWrapper.GetDefectList(xyPairs, arrSize, numPoints, numTotal))
+		return E_FAIL;
+	return S_OK;
 }
 
 STDMETHODIMP CDMCamera::GetFileSaveResult(long *numSaved, long *error)

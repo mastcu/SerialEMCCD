@@ -3,7 +3,7 @@
 enum {IMAGE_NOT_FOUND = 1, WRONG_DATA_TYPE, DM_CALL_EXCEPTION, NO_STACK_ID, STACK_NOT_3D,
 FILE_OPEN_ERROR, SEEK_ERROR, WRITE_DATA_ERROR, HEADER_ERROR, ROTBUF_MEMORY_ERROR, 
 DIR_ALREADY_EXISTS, DIR_CREATE_ERROR, DIR_NOT_EXIST, SAVEDIR_IS_FILE, DIR_NOT_WRITABLE,
-FILE_ALREADY_EXISTS, QUIT_DURING_SAVE};
+FILE_ALREADY_EXISTS, QUIT_DURING_SAVE, OPEN_DEFECTS_ERROR, WRITE_DEFECTS_ERROR};
 #define DARK_REFERENCE  -1
 #define UNPROCESSED 0
 #define DARK_SUBTRACTED 1
@@ -21,6 +21,7 @@ FILE_ALREADY_EXISTS, QUIT_DURING_SAVE};
 #define K2_SAVE_LZW_TIFF   (1 << 3)
 #define K2_SAVE_ZIP_TIFF   (1 << 4)
 #define K2_SAVE_SYNCHRO    (1 << 5)
+#define K2_SAVE_DEFECTS    (1 << 6)
 
 #define OLD_OPEN_SHUTTER_BROKEN    360
 #define OLD_SELECT_SHUTTER_BROKEN    360
@@ -49,8 +50,10 @@ public:
     double frameTime, BOOL alignFrames, BOOL saveFrames, char *filter);
   void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, long flags,
     double dummy1, double dummy2, double dummy3, double dummy4, char *dirName, 
-    char *rootName, char *refName, char *command, long *error);
+    char *rootName, char *refName, char *defects, char *command, long *error);
   void GetFileSaveResult(long *numSaved, long *error);
+  int GetDefectList(short xyPairs[], long *arrSize, long *numPoints, 
+    long *numTotal);
 	int GetImage(short *array, long *arrSize, long *width, 
 		long *height, long processing, double exposure,
 		long binning, long top, long left, long bottom, 

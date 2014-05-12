@@ -38,6 +38,8 @@ enum {NO_DEL_IM = 0, DEL_IMAGE};
 static int sReadModes[3] = {K2_LINEAR_READ_MODE, K2_COUNTING_READ_MODE, 
 K2_SUPERRES_READ_MODE};
 
+// Values to send to CM_SetHardwareCorrections or K2_SetHardwareProcessing given hardware
+// processing value of 0, 2, 4, 6 divided by 2
 static int sCMHardCorrs[4] = {0x0, 0x100, 0x200, 0x300};
 static int sK2HardProcs[4] = {0, 2, 4, 6};
 
@@ -56,8 +58,10 @@ public:
     double frameTime, BOOL alignFrames, BOOL saveFrames, char *filter);
   void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, long flags,
     double dummy1, double dummy2, double dummy3, double dummy4, char *dirName, 
-    char *rootName, char *refName, char *command, long *error);
+    char *rootName, char *refName, char *defects, char *command, long *error);
   void GetFileSaveResult(long *numSaved, long *error);
+  int GetDefectList(short xyPairs[], long *arrSize, long *numPoints, 
+    long *numTotal);
   int CopyK2ReferenceIfNeeded();
   double ExecuteClientScript(char *strScript, BOOL selectCamera);
   int AcquireAndTransferImage(void *array, int dataSize, long *arrSize, long *width,
@@ -151,6 +155,7 @@ private:
   char *m_strGainRefToCopy;
   char *m_strLastRefName;
   char *m_strLastRefDir;
+  char *m_strDefectsToSave;
 };
 
 // Declarations of global functions called from here
@@ -197,6 +202,7 @@ TemplatePlugIn::TemplatePlugIn()
   m_strGainRefToCopy = NULL;
   m_strLastRefName = NULL;
   m_strLastRefDir = NULL;
+  m_strDefectsToSave = NULL;
   m_iSaveFlags = 0;
   m_bFilePerImage = true;
   m_bWriteTiff = false;
@@ -1907,11 +1913,12 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
                                      double pixelSize, long flags, double dummy1, 
                                      double dummy2, double dummy3, double dummy4, 
                                      char *dirName, char *rootName, char *refName,
-                                     char *command, long *error)
+                                     char *defects, char *command, long *error)
 {
   struct _stat statbuf;
   FILE *fp;
-  int newDir, dummy;
+  int newDir, dummy, newDefects = 0;
+  char *fend, *tmpDef;
 #if defined(GMS2) && GMS2_SDK_VERSION < 31
   m_iRotationFlip = rotationFlip;
 #else
@@ -1931,6 +1938,10 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     return;
   if (refName && (flags & K2_COPY_GAIN_REF)) {
     if (CopyStringIfChanged(refName, &m_strGainRefToCopy, dummy, error))
+      return;
+  }
+  if (defects && (flags & K2_SAVE_DEFECTS)) {
+    if (CopyStringIfChanged(defects, &m_strDefectsToSave, newDefects, error))
       return;
   }
   if (command && (flags & K2_RUN_COMMAND)) {
@@ -1974,6 +1985,47 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
       } else {
         fclose(fp);
         DeleteFile((LPCTSTR)m_strTemp);
+      }
+    }
+  }
+  if (!*error && defects && (flags & K2_SAVE_DEFECTS)) {
+    DebugToResult(m_strDefectsToSave);
+    // Extract or make up a filename
+    m_strTemp[0] = 0x00;
+    if (m_strDefectsToSave[0] == '#') {
+      fend = strchr(&m_strDefectsToSave[1], '\n');
+      if (fend) {
+        if (*(fend - 1) == '\r')
+          fend--;
+        dummy = (int)(fend - &m_strDefectsToSave[1]);
+        if (dummy > 3 && dummy < MAX_TEMP_STRING - 2) {
+          tmpDef = (char *)malloc(dummy + 2);
+          if (tmpDef) {
+            strncpy(tmpDef, &m_strDefectsToSave[1], dummy);
+            tmpDef[dummy] = 0x00;
+            sprintf(m_strTemp, "%s\\%s", m_strSaveDir, tmpDef);
+            free(tmpDef);
+          }
+        }
+      }
+    }
+
+    if (!m_strTemp[0])
+      sprintf(m_strTemp, "%s\\defects%d.txt", m_strSaveDir,
+      (GetTickCount() / 1000) % 10000);
+    DebugToResult(m_strTemp);
+
+    // If the string is new, one file per image, new directory, or the file doesn't
+    // exist, write the text
+    if (newDefects || filePerImage || newDir || !_stat(m_strTemp, &statbuf)) {
+      fp = fopen(m_strTemp, "wt");
+      if (!fp) {
+        *error = OPEN_DEFECTS_ERROR;
+      } else {
+        dummy = (int)strlen(m_strDefectsToSave);
+        if (fwrite(m_strDefectsToSave, 1, dummy, fp) != dummy)
+          *error = WRITE_DEFECTS_ERROR;
+        fclose(fp);
       }
     }
   }
@@ -2033,6 +2085,36 @@ void TemplatePlugIn::GetFileSaveResult(long *numSaved, long *error)
 {
   *numSaved = m_iFramesSaved;
   *error = m_iErrorFromSave;
+}
+
+// Get the defect list from DM for the current camera
+int TemplatePlugIn::GetDefectList(short xyPairs[], long *arrSize, 
+                                  long *numPoints, long *numTotal)
+{
+#if defined(GMS2) && GMS2_SDK_VERSION > 30
+  unsigned short *pairs = (unsigned short *)xyPairs;
+  long minRetSize = B3DMIN(2048, *arrSize);
+  memset(xyPairs, 0, 2 * minRetSize);
+  try {
+    DM::TagGroup defectList = CM::CCD_GetSystemDefectLocations(CM::GetCurrentCamera(), 
+      "");
+    *numTotal = defectList.CountTags();
+    *numPoints = B3DMIN(*arrSize / 2, *numTotal);
+    *arrSize = B3DMAX(minRetSize, 2 * *numPoints);
+    for (long i = 0; i < *numPoints; i++) {
+      SSIZE_T x, y;
+      defectList.GetIndexedTagAsLongPoint(i, &x, &y);
+      pairs[2 * i] = (unsigned short)x;
+      pairs[2 * i + 1] = (unsigned short)y;
+    }
+  }
+  catch (exception exc) {
+    return 1;
+  }
+  return 0;
+#else
+  return 1;
+#endif
 }
 
 // Return number of cameras or -1 for error
@@ -2473,10 +2555,10 @@ void PlugInWrapper::SetupFileSaving(long rotationFlip, BOOL filePerImage,
                                     double pixelSize, long flags, double dummy1, 
                                     double dummy2, double dummy3, double dummy4, 
                                     char *dirName, char *rootName, char *refName, 
-                                    char *command, long *error)
+                                    char *defects, char *command, long *error)
 {
   gTemplatePlugIn.SetupFileSaving(rotationFlip, filePerImage, pixelSize, flags, dummy1,
-    dummy2, dummy3, dummy4, dirName, rootName, refName, command, error);
+    dummy2, dummy3, dummy4, dirName, rootName, refName, defects, command, error);
 }
 
 void PlugInWrapper::GetFileSaveResult(long *numSaved, long *error)
@@ -2484,6 +2566,11 @@ void PlugInWrapper::GetFileSaveResult(long *numSaved, long *error)
   gTemplatePlugIn.GetFileSaveResult(numSaved, error);
 }
 
+int PlugInWrapper::GetDefectList(short xyPairs[], long *arrSize, long *numPoints,
+                                 long *numTotal)
+{
+  return gTemplatePlugIn.GetDefectList(xyPairs, arrSize, numPoints, numTotal);
+}
 
 int PlugInWrapper::GetNumberOfCameras()
 {
