@@ -26,6 +26,12 @@ using namespace std ;
 #include "Shared\iimage.h"
 #include "Shared\b3dutil.h"
 
+// For GMS2, this must be defined to a single digit below 3 (0, 1, 2) or to double digits
+// for 3 onwards (30, 31, etc)
+#ifndef GMS2_SDK_VERSION
+#define GMS2_SDK_VERSION -1
+#endif
+
 #define MAX_TEMP_STRING   1000
 #define MAX_FILTER_NAME   64
 #define MAX_CAMERAS  10
@@ -42,6 +48,9 @@ K2_SUPERRES_READ_MODE};
 // processing value of 0, 2, 4, 6 divided by 2
 static int sCMHardCorrs[4] = {0x0, 0x100, 0x200, 0x300};
 static int sK2HardProcs[4] = {0, 2, 4, 6};
+
+// Transpose values to use to cancel default transpose for GMS 2.3.1 with dose frac
+static int sInverseTranspose[8] = {0, 258, 3, 257, 1, 256, 2, 259};
 
 class TemplatePlugIn :  public Gatan::PlugIn::PlugInMain
 {
@@ -209,7 +218,7 @@ TemplatePlugIn::TemplatePlugIn()
   m_iTiffCompression = 5;  // 5 is LZW, 8 is ZIP
   m_iTiffQuality = -1;
   m_bAsyncSave = true;
-  m_iRotationFlip = 7;
+  m_iRotationFlip = 0;
   m_dPixelSize = 5.;
   const char *temp = getenv("SERIALEMCCD_ROOTNAME");
   if (temp)
@@ -522,26 +531,29 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
         m_iReadMode ? sK2HardProcs[m_iHardwareProc / 2] : 0,
         m_bAlignFrames ? 1 : 0, m_dFrameTime, m_dFrameTime);
       m_strCommand += m_strTemp;
+      if (m_bGMS2 && GMS2_SDK_VERSION > 30 && m_iRotationFlip) {
+        sprintf(m_strTemp, "CM_SetAcqTranspose(acqParams, %d)\n", 
+          sInverseTranspose[m_iRotationFlip]);
+        m_strCommand += m_strTemp;
+      }
       if (m_bAlignFrames) {
         sprintf(m_strTemp, "k2dfa.DoseFrac_SetFilter(\"%s\")\n", m_strFilterName);
         m_strCommand += m_strTemp;
       }
     }
+    if (GMS2_SDK_VERSION < 31) {
+      sprintf(m_strTemp, "K2_SetHardwareProcessing(camera, %d)\n", 
+        m_iReadMode ? sK2HardProcs[m_iHardwareProc / 2] : 0);
+    } else {
+      sprintf(m_strTemp, "CM_SetHardwareCorrections(acqParams, %d)\n",
+        m_iReadMode ? sCMHardCorrs[m_iHardwareProc / 2] : 0);
+    }
+    m_strCommand += m_strTemp;
+
     sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
-#if defined(GMS2) && GMS2_SDK_VERSION < 31
-      "K2_SetHardwareProcessing(camera, %d)\n"
-#else
-      "CM_SetHardwareCorrections(acqParams, %d)\n"
-#endif
       "Number wait_time_s\n"
       "CM_PrepareCameraForAcquire(manager, camera, acqParams, NULL, wait_time_s)\n"
-      "Sleep(wait_time_s)\n", sReadModes[m_iReadMode], 
-#if defined(GMS2) && GMS2_SDK_VERSION < 31
-      m_iReadMode ? sK2HardProcs[m_iHardwareProc / 2] : 0
-#else
-      m_iReadMode ? sCMHardCorrs[m_iHardwareProc / 2] : 0
-#endif
-      );
+      "Sleep(wait_time_s)\n", sReadModes[m_iReadMode]);
     m_strCommand += m_strTemp;
   }
 
@@ -759,6 +771,10 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       CM::SetSettling(acq_params, m_dK2Settling);
       CM::SetShutterIndex(acq_params, m_iK2Shutter);
       CM::SetReadMode(acq_params, sReadModes[m_iReadMode]);
+      if (GMS2_SDK_VERSION > 30) {
+        i = sInverseTranspose[m_iRotationFlip];
+        CM::SetAcqTranspose(acq_params, (i & 1) != 0, (i & 2) != 0, (i & 256) != 0);
+      }
       CM::PrepareCameraForAcquire(manager, camera, acq_params,
         k2dfa.m_DoseFracAcquisitionObj, retval);
       if (retval >= 0.001)
@@ -911,7 +927,6 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         }
 
         procWall = saveWall = 0.;
-        wallStart = wallTime();
         int slice = 0;
         do {
 #ifdef _WIN64
@@ -938,6 +953,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
               break;
           }
 #endif
+          wallStart = wallTime();
           imageLp->GetImageData(2, slice, fData);
           imageData = fData.get_data();
           outData = (short *)imageData;
@@ -1919,11 +1935,8 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   FILE *fp;
   int newDir, dummy, newDefects = 0;
   char *fend, *tmpDef;
-#if defined(GMS2) && GMS2_SDK_VERSION < 31
   m_iRotationFlip = rotationFlip;
-#else
-  m_iRotationFlip = 0;
-#endif
+  B3DCLAMP(m_iRotationFlip, 0, 7);
   m_bFilePerImage = filePerImage;
   m_dPixelSize = pixelSize;
   m_iSaveFlags = flags;
@@ -2182,36 +2195,37 @@ long TemplatePlugIn::GetDMVersion()
 {
   unsigned int code;
   m_strCommand.resize(0);
-#ifdef GMS2
-#if GMS2_SDK_VERSION < 2
-  DebugToResult("GMS2 version < 2, just returning 40000");
-  return 40000;
-#endif
-  m_strCommand += "number major, minor, build\n"
+  if (m_bGMS2) {
+    if (GMS2_SDK_VERSION < 2) {
+      DebugToResult("GMS2 version < 2, just returning 40000");
+      return 40000;
+    }
+    m_strCommand += "number major, minor, build\n"
           "GetApplicationVersion(major, minor, build)\n"
           "Exit(10000 * major + minor)";
-#else
-  m_strCommand += "number version\n"
+  } else {
+    m_strCommand += "number version\n"
           "GetApplicationInfo(2, version)\n"
           "Exit(version)";
-#endif
+  }
   double retval = ExecuteScript((char *)m_strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
     return -1;
   code = (unsigned int)(retval + 0.1);
-#ifdef GMS2
-  int major = code / 10000;
-  int minor = code % 10000;
-  m_iDMVersion = 10000 * (2 + major) + 100 * (minor / 10) + (minor % 10);
-#else
-  // They don't support the last digit
-  if ((code >> 24) < 4 && ((code >> 16) & 0xff) < 11)
-    m_iDMVersion = 100 * (code >> 24) + 10 * ((code >> 16) & 0xff) + 
-      ((code >> 8) & 0xff);
-  else
-    m_iDMVersion = 10000 * (code >> 24) + 100 * ((code >> 16) & 0xff) + 
-      ((code >> 8) & 0xff);
-#endif
+  if (m_bGMS2) {
+    int major = code / 10000;
+    int minor = code % 10000;
+    m_iDMVersion = 10000 * (2 + major) + 100 * (minor / 10) + (minor % 10);
+  } else {
+
+    // They don't support the last digit
+    if ((code >> 24) < 4 && ((code >> 16) & 0xff) < 11)
+      m_iDMVersion = 100 * (code >> 24) + 10 * ((code >> 16) & 0xff) + 
+        ((code >> 8) & 0xff);
+    else
+      m_iDMVersion = 10000 * (code >> 24) + 100 * ((code >> 16) & 0xff) + 
+        ((code >> 8) & 0xff);
+  }
   sprintf(m_strTemp, "retval = %g, code = %x, version = %d\n", retval, code, m_iDMVersion);
   DebugToResult(m_strTemp);
   return m_iDMVersion;
