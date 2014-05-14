@@ -41,6 +41,8 @@ using namespace std ;
 enum {CHAN_UNUSED = 0, CHAN_ACQUIRED, CHAN_RETURNED};
 enum {NO_SAVE = 0, SAVE_FRAMES};
 enum {NO_DEL_IM = 0, DEL_IMAGE};
+
+// Mapping from program read modes (0-2) to values for K2
 static int sReadModes[3] = {K2_LINEAR_READ_MODE, K2_COUNTING_READ_MODE, 
 K2_SUPERRES_READ_MODE};
 
@@ -52,6 +54,75 @@ static int sK2HardProcs[4] = {0, 2, 4, 6};
 // Transpose values to use to cancel default transpose for GMS 2.3.1 with dose frac
 static int sInverseTranspose[8] = {0, 258, 3, 257, 1, 256, 2, 259};
 
+// THE debug mode flag
+static BOOL sDebug;
+
+// Structure to hold data to pass to acquire proc/thread
+struct ThreadData 
+{
+  // Arguments to AcquireAndTransferImage
+  void *array;
+  int dataSize;
+  long arrSize, width, height, divideBy2, transpose, delImage, saveFrames;
+
+  // former members of the class, used to start with m_
+  float fFloatScaling;
+  BOOL bFilePerImage;
+  int iFramesSaved;
+  int iErrorFromSave;
+  double dPixelSize;
+  int iRotationFlip;
+  int iSaveFlags;
+  BOOL bWriteTiff;
+  int iTiffCompression;
+  int iTiffQuality;
+  BOOL bAsyncSave;
+  double dK2Exposure;
+  double dK2Settling;
+  int iK2Binning;
+  int iK2Shutter;
+  int iK2Processing;
+  int iK2Left;
+  int iK2Right;
+  int iK2Top;
+  int iK2Bottom;
+  string strCommand;
+  char strTemp[MAX_TEMP_STRING];   // Give it its own temp string separate from class
+  int iDSimageID;
+  double dLastReturnTime;
+  int iReadMode;
+  double dFrameTime;
+  BOOL bAlignFrames;
+  char strFilterName[MAX_FILTER_NAME];
+  int iHardwareProc;
+  char *strRootName;
+  char *strSaveDir;
+  char *strGainRefToCopy;
+  char *strLastRefName;
+  char *strLastRefDir;
+};
+
+// Local functions callable from thread
+static DWORD WINAPI AcquireProc(LPVOID pParam);
+static void  ProcessImage(void *imageData, void *array, int dataSize, long width, 
+                          long height, long divideBy2, long transpose, int byteSize, 
+                          bool isInteger, bool isUnsignedInt, float floatScaling);
+static void RotateFlip(short int *array, int mode, int nx, int ny, int operation, 
+                       bool invert, short int *brray, int *nxout, int *nyout);
+static int CopyK2ReferenceIfNeeded(ThreadData *td);
+static void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
+static void ErrorToResult(const char *strMessage, const char *strPrefix = NULL);
+static BOOL SleepMsg(DWORD dwTime_ms);
+static double ExecuteScript(char *strScript);
+
+// Declarations of global functions called from here
+void TerminateModuleUninitializeCOM();
+BOOL WasCOMInitialized();
+int GetSocketInitialization(int &wsaError);
+int StartSocket(int &wsaError);
+void ShutdownSocket(void);
+
+// The plugin class
 class TemplatePlugIn :  public Gatan::PlugIn::PlugInMain
 {
 public:
@@ -71,16 +142,9 @@ public:
   void GetFileSaveResult(long *numSaved, long *error);
   int GetDefectList(short xyPairs[], long *arrSize, long *numPoints, 
     long *numTotal);
-  int CopyK2ReferenceIfNeeded();
   double ExecuteClientScript(char *strScript, BOOL selectCamera);
   int AcquireAndTransferImage(void *array, int dataSize, long *arrSize, long *width,
     long *height, long divideBy2, long transpose, long delImage, long saveFrames);
-  void  ProcessImage(void *imageData, void *array, int dataSize, 
-                                  long width, long height, long divideBy2, 
-                                  long transpose, int byteSize, bool isInteger,
-                                  bool isUnsignedInt);
-  void RotateFlip(short int *array, int mode, int nx, int ny, int operation, bool invert,
-                    short int *brray, int *nxout, int *nyout);
   int CopyStringIfChanged(char *newStr, char **memberStr, int &changed, long *error);
   void AddCameraSelection(int camera = -1);
   int GetGainReference(float *array, long *arrSize, long *width, 
@@ -99,11 +163,7 @@ public:
   int ReturnDSChannel(short array[], long *arrSize, long *width, 
     long *height, long channel, long divideBy2);
   int StopDSAcquisition();
-  void SetDebugMode(BOOL inVal) {m_bDebug = inVal;};
-  double ExecuteScript(char *strScript);
-  void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
-  void ErrorToResult(const char *strMessage, const char *strPrefix = NULL);
-  BOOL SleepMsg(DWORD dwTime_ms);
+  void SetDebugMode(BOOL inVal) {sDebug = inVal;};
   virtual void Start();
   virtual void Run();
   virtual void Cleanup();
@@ -113,72 +173,32 @@ public:
   int m_iDebugVal;
   
 private:
-  BOOL m_bDebug;
+  ThreadData mTD;
   BOOL m_bGMS2;
   int m_iDMVersion;
   int m_iCurrentCamera;
   int m_iDMSettlingOK[MAX_CAMERAS];
   string m_strQueue;
-  string m_strCommand;
   char m_strTemp[MAX_TEMP_STRING];
   int m_iDSAcquired[MAX_DS_CHANNELS];
   BOOL m_bContinuousDS;
   int m_iDSparamID;
-  int m_iDSimageID;
-  double m_dLastReturnTime;
   double m_dContExpTime;
   int m_iExtraDSdelay;
   double m_dFlyback;
   double m_dLineFreq;
   double m_dSyncMargin;
-  int m_iReadMode;
-  float m_fFloatScaling;
   BOOL m_bDoseFrac;
-  double m_dFrameTime;
-  BOOL m_bAlignFrames;
-  char m_strFilterName[MAX_FILTER_NAME];
   BOOL m_bSaveFrames;
-  int m_iHardwareProc;
-  char *m_strRootName;
-  char *m_strSaveDir;
-  BOOL m_bFilePerImage;
-  int m_iFramesSaved;
-  int m_iErrorFromSave;
-  double m_dPixelSize;
-  int m_iRotationFlip;
-  int m_iSaveFlags;
-  BOOL m_bWriteTiff;
-  int m_iTiffCompression;
-  int m_iTiffQuality;
-  BOOL m_bAsyncSave;
-  double m_dK2Exposure;
-  double m_dK2Settling;
-  int m_iK2Binning;
-  int m_iK2Shutter;
-  int m_iK2Processing;
-  int m_iK2Left;
-  int m_iK2Right;
-  int m_iK2Top;
-  int m_iK2Bottom;
   char *m_strPostSaveCom;
-  char *m_strGainRefToCopy;
-  char *m_strLastRefName;
-  char *m_strLastRefDir;
   char *m_strDefectsToSave;
 };
 
-// Declarations of global functions called from here
-void TerminateModuleUninitializeCOM();
-BOOL WasCOMInitialized();
-int GetSocketInitialization(int &wsaError);
-int StartSocket(int &wsaError);
-void ShutdownSocket(void);
-
 TemplatePlugIn::TemplatePlugIn()
 {
-  m_bDebug = getenv("SERIALEMCCD_DEBUG") != NULL;
+  sDebug = getenv("SERIALEMCCD_DEBUG") != NULL;
   m_iDebugVal = 0;
-  if (m_bDebug)
+  if (sDebug)
     m_iDebugVal = atoi(getenv("SERIALEMCCD_DEBUG"));
 
   m_iDMVersion = 340;
@@ -195,37 +215,37 @@ TemplatePlugIn::TemplatePlugIn()
 #endif
   m_bContinuousDS = false;
   m_iDSparamID = 0;
-  m_iDSimageID = 0;
+  mTD.iDSimageID = 0;
   m_iExtraDSdelay = 10;
   m_dFlyback = 400.;
   m_dLineFreq = 60.;
   m_dSyncMargin = 10.;
-  m_iReadMode = -1;
-  m_fFloatScaling = 1.;
-  m_iHardwareProc = 6;
+  mTD.iReadMode = -1;
+  mTD.fFloatScaling = 1.;
+  mTD.iHardwareProc = 6;
   m_bDoseFrac = false;
   m_bSaveFrames = false;
-  m_strRootName = NULL;
-  m_strSaveDir = NULL;
+  mTD.strRootName = NULL;
+  mTD.strSaveDir = NULL;
   m_strPostSaveCom = NULL;
-  m_strGainRefToCopy = NULL;
-  m_strLastRefName = NULL;
-  m_strLastRefDir = NULL;
+  mTD.strGainRefToCopy = NULL;
+  mTD.strLastRefName = NULL;
+  mTD.strLastRefDir = NULL;
   m_strDefectsToSave = NULL;
-  m_iSaveFlags = 0;
-  m_bFilePerImage = true;
-  m_bWriteTiff = false;
-  m_iTiffCompression = 5;  // 5 is LZW, 8 is ZIP
-  m_iTiffQuality = -1;
-  m_bAsyncSave = true;
-  m_iRotationFlip = 0;
-  m_dPixelSize = 5.;
+  mTD.iSaveFlags = 0;
+  mTD.bFilePerImage = true;
+  mTD.bWriteTiff = false;
+  mTD.iTiffCompression = 5;  // 5 is LZW, 8 is ZIP
+  mTD.iTiffQuality = -1;
+  mTD.bAsyncSave = true;
+  mTD.iRotationFlip = 0;
+  mTD.dPixelSize = 5.;
   const char *temp = getenv("SERIALEMCCD_ROOTNAME");
   if (temp)
-    m_strRootName = _strdup(temp);
+    mTD.strRootName = _strdup(temp);
   temp = getenv("SERIALEMCCD_SAVEDIR");
   if (temp)
-    m_strSaveDir = _strdup(temp);
+    mTD.strSaveDir = _strdup(temp);
 }
 
 
@@ -261,12 +281,12 @@ void TemplatePlugIn::Run()
     DebugToResult("SerialEMCCD: COM was initialized through DllMain\n");
     //PlugIn::gResultOut << "COM was initialized through DllMain" << std::endl;
   else {
-    m_bDebug = true;
+    sDebug = true;
     DebugToResult("DllMain was never called when SerialEMCCD was loaded - trouble!\n");
     //PlugIn::gResultOut << "DllMain was never called - trouble!" << std::endl;
   }
   if (GetDMVersion() < 0) {
-    m_bDebug = true;
+    sDebug = true;
     DebugToResult("SerialEMCCD: Error getting Digital Micrograph version\n");
   }
   HANDLE hMutex = CreateMutex(NULL, FALSE, "SEMCCD-SingleInstance");
@@ -315,9 +335,10 @@ void TemplatePlugIn::End()
 }
 
 
-void TemplatePlugIn::DebugToResult(const char *strMessage, const char *strPrefix)
+static void DebugToResult(const char *strMessage, const char *strPrefix)
 {
-  if (!m_bDebug) return;
+  if (!sDebug) 
+    return;
   double time = (::GetTickCount() % (DWORD)3600000) / 1000.;
   char timestr[20];
   sprintf(timestr, "%.3f ", time);
@@ -332,9 +353,9 @@ void TemplatePlugIn::DebugToResult(const char *strMessage, const char *strPrefix
 
 // Outputs messages to the results window upon error; just the message itself if in 
 // debug mode, or a supplied or defulat prefix first if not in debug mode
-void TemplatePlugIn::ErrorToResult(const char *strMessage, const char *strPrefix)
+static void ErrorToResult(const char *strMessage, const char *strPrefix)
 {
-  if (m_bDebug) {
+  if (sDebug) {
     DebugToResult(strMessage);
   } else {
     DM::OpenResultsWindow();
@@ -349,12 +370,12 @@ void TemplatePlugIn::ErrorToResult(const char *strMessage, const char *strPrefix
 /*
  * Executes a script, first printing it in the Results window if in debug mode
  */
-double TemplatePlugIn::ExecuteScript(char *strScript)
+static double ExecuteScript(char *strScript)
 {
   double retval;
   char last, retstr[128];
   DebugToResult(strScript, "DMCamera executing script :\n\n");
-  if (m_bDebug) {
+  if (sDebug) {
 
     // 11/15/06: switch to this from using strlen which falied with DMSDK 3.8.2
     for (int i = 0; strScript[i]; i++)
@@ -368,7 +389,7 @@ double TemplatePlugIn::ExecuteScript(char *strScript)
   }
   catch (exception exc) {
     DebugToResult("Exception thrown while executing script");
-    if (!m_bDebug) {
+    if (!sDebug) {
       DM::OpenResultsWindow();
       DM::Result("\nAn exception occurred executing this script for SerialEM:\n\n\n");
       DM::Result(strScript);
@@ -387,14 +408,14 @@ double TemplatePlugIn::ExecuteScript(char *strScript)
 // camera first
 double TemplatePlugIn::ExecuteClientScript(char *strScript, BOOL selectCamera)
 {
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   if (selectCamera)
     AddCameraSelection();
-  m_strCommand += strScript;
-  char last = m_strCommand[m_strCommand.length() - 1];
+  mTD.strCommand += strScript;
+  char last = mTD.strCommand[mTD.strCommand.length() - 1];
   if (last != '\n' && last != '\r')
-    m_strCommand += "\n";
-  return ExecuteScript((char *)m_strCommand.c_str());
+    mTD.strCommand += "\n";
+  return ExecuteScript((char *)mTD.strCommand.c_str());
 }
 
 // Add a command to a script to be executed in the future
@@ -405,7 +426,7 @@ void TemplatePlugIn::QueueScript(char *strScript)
   if (last != '\n' && last != '\r')
     m_strQueue += "\n";
   DebugToResult("QueueScript called, queue is now:\n");
-  if (m_bDebug)
+  if (sDebug)
     DM::Result((char *)m_strQueue.c_str());
 }
 
@@ -443,28 +464,28 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   // Workaround for Downing camera problem, inexplicable wild values coming through
   if (divideBy2 > 1 || divideBy2 < -1)
     divideBy2 = 0;
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   AddCameraSelection();
 
   // Add and clear the queue
   if (!m_strQueue.empty()) {
-    m_strCommand += m_strQueue;
+    mTD.strCommand += m_strQueue;
     m_strQueue.resize(0);
   }
 
   // Intercept K2 asynchronous saving here
-  if (m_bSaveFrames && m_iReadMode >= 0 && m_bDoseFrac && m_strSaveDir && m_strRootName &&
-    m_bAsyncSave) {
+  mTD.iK2Processing = newProc;
+  if (m_bSaveFrames && mTD.iReadMode >= 0 && m_bDoseFrac && mTD.strSaveDir && mTD.strRootName &&
+    mTD.bAsyncSave) {
       sprintf(m_strTemp, "Exit(0)");
-      m_strCommand += m_strTemp;
-      m_iK2Top = top;
-      m_iK2Bottom = bottom;
-      m_iK2Left = left;
-      m_iK2Right = right;
-      m_dK2Exposure = exposure;
-      m_dK2Settling = settling;
-      m_iK2Processing = newProc;
-      m_iK2Shutter = shutter;
+      mTD.strCommand += m_strTemp;
+      mTD.iK2Top = top;
+      mTD.iK2Bottom = bottom;
+      mTD.iK2Left = left;
+      mTD.iK2Right = right;
+      mTD.dK2Exposure = exposure;
+      mTD.dK2Settling = settling;
+      mTD.iK2Shutter = shutter;
       return AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
         divideBy2, 0, DEL_IMAGE, SAVE_FRAMES);
   }
@@ -473,11 +494,11 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
     sprintf(m_strTemp, "Object acqParams = CM_CreateAcquisitionParameters_FullCCD"
       "(camera, %d, %g, %d, %d)\n", newProc, exposure, binning, binning);
-    m_strCommand += m_strTemp;
+    mTD.strCommand += m_strTemp;
     if (!m_bDoseFrac) {
       sprintf(m_strTemp, "CM_SetBinnedReadArea(camera, acqParams, %d, %d, %d, %d)\n",
        top, left, bottom, right);
-      m_strCommand += m_strTemp;
+      mTD.strCommand += m_strTemp;
     }
 
     // Specify corrections if incoming value is >= 0
@@ -485,40 +506,40 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     // overscan image in simulator, so change 255 to 49
     if (corrections >= 0) {
       sprintf(m_strTemp, "CM_SetCorrections(acqParams, 49, %d)\n", corrections);
-      m_strCommand += m_strTemp;
+      mTD.strCommand += m_strTemp;
     }
     // Turn off defect correction for raw images and dark references
     //if (newProc == NEWCM_UNPROCESSED)
-    //  m_strCommand += "CM_SetCorrections(acqParams, 1, 0)\n";
+    //  mTD.strCommand += "CM_SetCorrections(acqParams, 1, 0)\n";
   }
 
   // Old version, set the settling and the alternate shutter through notes
   if (m_iDMVersion < OLD_SETTLING_BROKEN) {
     sprintf(m_strTemp, 
       "SetPersistentNumberNote(\"MSC:Parameters:2:Settling\", %g)\n", settling);
-    m_strCommand += m_strTemp;
+    mTD.strCommand += m_strTemp;
   }
 
   // 5/23/06: drift settling in Record set from DM was being applied, so set settling
   // unconditionally as long as settling is OK (not in Faux camera)
   if (m_iDMVersion >= NEW_SETTLING_OK && m_iDMSettlingOK[m_iCurrentCamera]) {
     sprintf(m_strTemp, "CM_SetSettling(acqParams, %g)\n", settling);
-    m_strCommand += m_strTemp;
+    mTD.strCommand += m_strTemp;
   }
   
   if (m_iDMVersion < OLD_SELECT_SHUTTER_BROKEN && shutter >= 0) {
     sprintf(m_strTemp, "SetPersistentNumberNote"
       "(\"MSC:Parameters:2:Alternate Shutter\", %d)\n", shutter);
-    m_strCommand += m_strTemp;
+    mTD.strCommand += m_strTemp;
   }
 
   if (m_iDMVersion >= NEW_SELECT_SHUTTER_OK && shutter >= 0) {
     sprintf(m_strTemp, "CM_SetShutterIndex(acqParams, %d)\n", shutter);
-    m_strCommand += m_strTemp;
+    mTD.strCommand += m_strTemp;
   }
 
   // Commands for K2 camera
-  if (m_iReadMode >= 0) {
+  if (mTD.iReadMode >= 0) {
     if (m_bDoseFrac) {
 
       // WORKAROUND to bug in frame time, save & set the global frame time, restore after
@@ -528,56 +549,56 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
         "k2dfa.DoseFrac_SetFrameExposure(%f)\n"
         "Number savedFrameTime = K2_DoseFrac_GetFrameExposure(camera)\n"
         "K2_DoseFrac_SetFrameExposure(camera, %f)\n", 
-        m_iReadMode ? sK2HardProcs[m_iHardwareProc / 2] : 0,
-        m_bAlignFrames ? 1 : 0, m_dFrameTime, m_dFrameTime);
-      m_strCommand += m_strTemp;
-      if (m_bGMS2 && GMS2_SDK_VERSION > 30 && m_iRotationFlip) {
+        mTD.iReadMode ? sK2HardProcs[mTD.iHardwareProc / 2] : 0,
+        mTD.bAlignFrames ? 1 : 0, mTD.dFrameTime, mTD.dFrameTime);
+      mTD.strCommand += m_strTemp;
+      if (m_bGMS2 && GMS2_SDK_VERSION > 30 && mTD.iRotationFlip) {
         sprintf(m_strTemp, "CM_SetAcqTranspose(acqParams, %d)\n", 
-          sInverseTranspose[m_iRotationFlip]);
-        m_strCommand += m_strTemp;
+          sInverseTranspose[mTD.iRotationFlip]);
+        mTD.strCommand += m_strTemp;
       }
-      if (m_bAlignFrames) {
-        sprintf(m_strTemp, "k2dfa.DoseFrac_SetFilter(\"%s\")\n", m_strFilterName);
-        m_strCommand += m_strTemp;
+      if (mTD.bAlignFrames) {
+        sprintf(m_strTemp, "k2dfa.DoseFrac_SetFilter(\"%s\")\n", mTD.strFilterName);
+        mTD.strCommand += m_strTemp;
       }
     }
     if (GMS2_SDK_VERSION < 31) {
       sprintf(m_strTemp, "K2_SetHardwareProcessing(camera, %d)\n", 
-        m_iReadMode ? sK2HardProcs[m_iHardwareProc / 2] : 0);
+        mTD.iReadMode ? sK2HardProcs[mTD.iHardwareProc / 2] : 0);
     } else {
       sprintf(m_strTemp, "CM_SetHardwareCorrections(acqParams, %d)\n",
-        m_iReadMode ? sCMHardCorrs[m_iHardwareProc / 2] : 0);
+        mTD.iReadMode ? sCMHardCorrs[mTD.iHardwareProc / 2] : 0);
     }
-    m_strCommand += m_strTemp;
+    mTD.strCommand += m_strTemp;
 
     sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
       "Number wait_time_s\n"
       "CM_PrepareCameraForAcquire(manager, camera, acqParams, NULL, wait_time_s)\n"
-      "Sleep(wait_time_s)\n", sReadModes[m_iReadMode]);
-    m_strCommand += m_strTemp;
+      "Sleep(wait_time_s)\n", sReadModes[mTD.iReadMode]);
+    mTD.strCommand += m_strTemp;
   }
 
   // Open shutter if a delay is set
   if (shutterDelay) {
     if (m_iDMVersion < NEW_OPEN_SHUTTER_OK)
-      m_strCommand += "SSCOpenShutter()\n";
+      mTD.strCommand += "SSCOpenShutter()\n";
     else {
       // Specify the other shutter as being closed first; 1 means closed
       sprintf(m_strTemp, "CM_SetCurrentShutterState(camera, %d, 1)\n", 
         shutter > 0 ? 1 : 0);
-      m_strCommand += m_strTemp;
+      mTD.strCommand += m_strTemp;
       sprintf(m_strTemp, "CM_SetCurrentShutterState(camera, %d, 0)\n", 
         shutter > 0 ? 0 : 1);
-      m_strCommand += m_strTemp;
+      mTD.strCommand += m_strTemp;
     }
     sprintf(m_strTemp, "Delay(%d)\n", shutterDelay);
-    m_strCommand += m_strTemp;
+    mTD.strCommand += m_strTemp;
     // Probably unneeded
     /*
     if (m_iDMVersion < NEW_OPEN_SHUTTER_OK)
-      m_strCommand += "SSCCloseShutter()\n";
+      mTD.strCommand += "SSCCloseShutter()\n";
     else
-      m_strCommand += "CM_SetCurrentShutterState(camera, 1, 1)\n";
+      mTD.strCommand += "CM_SetCurrentShutterState(camera, 1, 1)\n";
     */
   }
 
@@ -585,61 +606,61 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   if (m_iDMVersion < NEW_CAMERA_MANAGER) {
     switch (processing) {
     case UNPROCESSED:
-      m_strCommand += "Image img := SSCUnprocessedBinnedAcquire";
+      mTD.strCommand += "Image img := SSCUnprocessedBinnedAcquire";
       break;
     case DARK_SUBTRACTED:
-      m_strCommand += "Image img := SSCDarkSubtractedBinnedAcquire";
+      mTD.strCommand += "Image img := SSCDarkSubtractedBinnedAcquire";
       break;
     case GAIN_NORMALIZED:
-      m_strCommand += "Image img := SSCGainNormalizedBinnedAcquire";
+      mTD.strCommand += "Image img := SSCGainNormalizedBinnedAcquire";
       break;
     case DARK_REFERENCE:
-      m_strCommand += "Image img := SSCGetDarkReference";
+      mTD.strCommand += "Image img := SSCGetDarkReference";
       break;
     }
 
     sprintf(m_strTemp, "(%f, %d, %d, %d, %d, %d)\n", exposure, binning, top, left, 
       bottom, right);
-    m_strCommand += m_strTemp;
+    mTD.strCommand += m_strTemp;
   } else {
     if (processing == DARK_REFERENCE)
       // This command has an inverted sense, 1 means keep shutter closed
       // Need to use this to get defect correction
-      m_strCommand += "CM_SetShutterExposure(acqParams, 1)\n"
+      mTD.strCommand += "CM_SetShutterExposure(acqParams, 1)\n"
           "Image img := CM_AcquireImage(camera, acqParams)\n";
 //      "Image img := CM_CreateImageForAcquire(camera, acqParams, \"temp\")\n"
 //            "CM_AcquireDarkReference(camera, acqParams, img, NULL)\n";
-    else if (m_iReadMode >= 0 && m_bDoseFrac)
-      m_strCommand += "Image stack\n"
+    else if (mTD.iReadMode >= 0 && m_bDoseFrac)
+      mTD.strCommand += "Image stack\n"
       "Image img := k2dfa.DoseFrac_AcquireImage(camera, acqParams, stack)\n"
       "K2_DoseFrac_SetFrameExposure(camera, savedFrameTime)\n";
 
     else
-      m_strCommand += "Image img := CM_AcquireImage(camera, acqParams)\n";
+      mTD.strCommand += "Image img := CM_AcquireImage(camera, acqParams)\n";
   }
   
   // Restore drift settling to zero if it was set
   if (m_iDMVersion < OLD_SETTLING_BROKEN && settling > 0.)
-    m_strCommand += "SetPersistentNumberNote(\"MSC:Parameters:2:Settling\", 0.)\n";
+    mTD.strCommand += "SetPersistentNumberNote(\"MSC:Parameters:2:Settling\", 0.)\n";
   
   // Final calls to retain image and return its ID
   sprintf(m_strTemp, "KeepImage(img)\n"
     "number retval = GetImageID(img)\n");
-  m_strCommand += m_strTemp;
-  if (m_bSaveFrames && m_iReadMode >= 0 && m_bDoseFrac && m_strSaveDir && m_strRootName) {
+  mTD.strCommand += m_strTemp;
+  if (m_bSaveFrames && mTD.iReadMode >= 0 && m_bDoseFrac && mTD.strSaveDir && mTD.strRootName) {
     saveFrames = SAVE_FRAMES;
     sprintf(m_strTemp, "KeepImage(stack)\n"
       "number stackID = GetImageID(stack)\n"
       //"Result(retval + \"  \" + stackID + \"\\n\")\n"
       "retval = retval + %d * stackID\n", ID_MULTIPLIER);
-    m_strCommand += m_strTemp;
+    mTD.strCommand += m_strTemp;
   } else if (m_bSaveFrames) {
-    sprintf(m_strTemp, "Save set but %d %d   %s   %s\n", m_iReadMode, m_bDoseFrac ? 1 : 0,
-      m_strSaveDir ? m_strSaveDir : "NO DIR", m_strRootName ? m_strRootName : "NO ROOT");
+    sprintf(m_strTemp, "Save set but %d %d   %s   %s\n", mTD.iReadMode, m_bDoseFrac ? 1 : 0,
+      mTD.strSaveDir ? mTD.strSaveDir : "NO DIR", mTD.strRootName ? mTD.strRootName : "NO ROOT");
     DebugToResult(m_strTemp);
   }
   sprintf(m_strTemp, "Exit(retval)");
-  m_strCommand += m_strTemp;
+  mTD.strCommand += m_strTemp;
 
   //sprintf(m_strTemp, "Calling AcquireAndTransferImage with divideBy2 %d\n", divideBy2);
   //DebugToResult(m_strTemp);
@@ -659,22 +680,22 @@ int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width,
   int retval, tmp;
   long transpose = 0;
   if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
-    m_strCommand.resize(0);
+    mTD.strCommand.resize(0);
     AddCameraSelection();
-    m_strCommand += "Number transpose = CM_Config_GetDefaultTranspose(camera)\n"
+    mTD.strCommand += "Number transpose = CM_Config_GetDefaultTranspose(camera)\n"
       "Exit(transpose)";
-    double retval = ExecuteScript((char *)m_strCommand.c_str());
+    double retval = ExecuteScript((char *)mTD.strCommand.c_str());
     if (retval != SCRIPT_ERROR_RETURN)
       transpose = (int)retval;
   }
 
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   AddCameraSelection();
   sprintf(m_strTemp, "Image img := SSCGetGainReference(%d)\n"
     "KeepImage(img)\n"
     "number retval = GetImageID(img)\n"
     "Exit(retval)", binning);
-  m_strCommand += m_strTemp;
+  mTD.strCommand += m_strTemp;
   retval = AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0, transpose, 
     DEL_IMAGE, NO_SAVE);
   if (transpose & 256) {
@@ -686,7 +707,7 @@ int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width,
 }
 
 #define SET_ERROR(a) if (doingStack) \
-        m_iErrorFromSave = a; \
+        td->iErrorFromSave = a; \
       else \
         errorRet = a; \
       continue;
@@ -699,9 +720,35 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
                       long *width, long *height, long divideBy2, long transpose, 
                       long delImage, long saveFrames)
 {
-  long ID, imageID, stackID, frameDivide = divideBy2;
+  int retval;
+  mTD.array = array;
+  mTD.dataSize = dataSize;
+  mTD.arrSize = *arrSize;
+  mTD.width = *width;
+  mTD.height = *height;
+  mTD.divideBy2 = divideBy2;
+  mTD.transpose = transpose;
+  mTD.delImage = delImage;
+  mTD.saveFrames = saveFrames;
+  retval = (int)AcquireProc(&mTD);
+  *arrSize = mTD.arrSize;
+  *width = mTD.width;
+  *height = mTD.height;
+  return retval;
+}
+
+static DWORD WINAPI AcquireProc(LPVOID pParam)
+{
+  ThreadData *td = (ThreadData *)pParam;
+  long ID, imageID, stackID, frameDivide = td->divideBy2;
+  void *array = td->array;
+  int dataSize = td->dataSize;
+  long divideBy2 = td->divideBy2;
+  long transpose = td->transpose;
+  long delImage = td->delImage;
+  long saveFrames = td->saveFrames;
   DM::Image image, sumImage;
-  long outLimit = *arrSize;
+  long outLimit = td->arrSize;
   int byteSize, i, j, numDim, loop, outByteSize, numLoop = 1;
   unsigned short *usData;
   unsigned char *bData, *packed;
@@ -722,26 +769,26 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   MrcHeader hdata;
   ImodImageFile *iifile = NULL;
   int fileSlice, tmin, tmax, tsum, val, numSlices, fileMode, nxout, nyout, nxFile;
-  float tmean, meanSum, scaleSave = m_fFloatScaling, scaling = 1.;
+  float tmean, meanSum, scaleSave = td->fFloatScaling, scaling = 1.;
   int errorRet = 0;
 #ifdef _WIN64
   K2_DoseFracAcquisition k2dfa;
 #endif
 
   // Set these values to zero in case of error returns
-  *width = 0;
-  *height = 0;
-  *arrSize = 0;
-  m_iFramesSaved = 0;
-  m_iErrorFromSave = 0;
-  doingAsyncSave = saveFrames && m_bAsyncSave;
+  td->width = 0;
+  td->height = 0;
+  td->arrSize = 0;
+  td->iFramesSaved = 0;
+  td->iErrorFromSave = 0;
+  doingAsyncSave = saveFrames && td->bAsyncSave;
 
   // Execute the command string as developed
-  if (m_strCommand.length() > 0)
-    retval = ExecuteScript((char *)m_strCommand.c_str());
+  if (td->strCommand.length() > 0)
+    retval = ExecuteScript((char *)td->strCommand.c_str());
   else
-    retval = m_iDSimageID;
-  m_dLastReturnTime = GetTickCount();
+    retval = td->iDSimageID;
+  td->dLastReturnTime = GetTickCount();
   
   // If error, zero out the return values and return error code
   if (retval == SCRIPT_ERROR_RETURN)
@@ -757,26 +804,26 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       j = 0;
       CM::CameraPtr camera = CM::GetCurrentCamera();  j++;
       CM::CameraManagerPtr manager = CM::GetCameraManager();  j++;
-      k2dfa.SetFrameExposure(m_dFrameTime);  j++;
-      k2dfa.SetAlignOption(m_bAlignFrames);  j++;
-      k2dfa.SetHardwareProcessing(m_iReadMode ? sK2HardProcs[m_iHardwareProc / 2] : 0);
+      k2dfa.SetFrameExposure(td->dFrameTime);  j++;
+      k2dfa.SetAlignOption(td->bAlignFrames);  j++;
+      k2dfa.SetHardwareProcessing(td->iReadMode ? sK2HardProcs[td->iHardwareProc / 2] : 0);
       j++;
       k2dfa.SetAsyncOption(true);  j++;
-      if (m_bAlignFrames) {
-        std::string filter = m_strFilterName;  j++;
+      if (td->bAlignFrames) {
+        std::string filter = td->strFilterName;  j++;
         k2dfa.SetFilter(filter);
       }
 
       j = 8;
       CM::AcquisitionParametersPtr acq_params = CM::CreateAcquisitionParameters_FullCCD(camera,
-        (CM::AcquisitionProcessing)m_iK2Processing, m_dK2Exposure + 0.001, m_iK2Binning, 
-        m_iK2Binning);//, m_iK2Top, m_iK2Left, m_iK2Bottom, m_iK2Right);
+        (CM::AcquisitionProcessing)td->iK2Processing, td->dK2Exposure + 0.001, td->iK2Binning, 
+        td->iK2Binning);//, td->iK2Top, td->iK2Left, td->iK2Bottom, td->iK2Right);
       j++;
-      CM::SetSettling(acq_params, m_dK2Settling);  j++;
-      CM::SetShutterIndex(acq_params, m_iK2Shutter);  j++;
-      CM::SetReadMode(acq_params, sReadModes[m_iReadMode]);  j++;
+      CM::SetSettling(acq_params, td->dK2Settling);  j++;
+      CM::SetShutterIndex(acq_params, td->iK2Shutter);  j++;
+      CM::SetReadMode(acq_params, sReadModes[td->iReadMode]);  j++;
       if (GMS2_SDK_VERSION > 30) {
-        i = sInverseTranspose[m_iRotationFlip];
+        i = sInverseTranspose[td->iRotationFlip];
         CM::SetAcqTranspose(acq_params, (i & 1) != 0, (i & 2) != 0, (i & 256) != 0);
       }
       j = 14;
@@ -789,9 +836,9 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       DebugToResult("Returned from asynchronous start of acquire\n");
     }
     catch (exception exc) {
-      sprintf(m_strTemp, "Caught an exception from call %d to start dose frac exposure\n",
+      sprintf(td->strTemp, "Caught an exception from call %d to start dose frac exposure\n",
         j);
-      ErrorToResult(m_strTemp);
+      ErrorToResult(td->strTemp);
       try {
         k2dfa.Abort();
         DM::DeleteImage(image.get());
@@ -810,10 +857,10 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       ID = stackID;
     } else {
       saveFrames = 0;
-      m_iErrorFromSave = NO_STACK_ID;
+      td->iErrorFromSave = NO_STACK_ID;
     }
-    sprintf(m_strTemp, "Image ID %d  stack ID %d\n", imageID, stackID);
-    DebugToResult(m_strTemp);
+    sprintf(td->strTemp, "Image ID %d  stack ID %d\n", imageID, stackID);
+    DebugToResult(td->strTemp);
   }
 
   // Loop on stack then image if there are both
@@ -832,8 +879,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
     try {
 
       if (!doingAsyncSave && !DM::GetImageFromID(image, ID)) {
-        sprintf(m_strTemp, "Image not found from ID %d\n", ID);
-        ErrorToResult(m_strTemp);
+        sprintf(td->strTemp, "Image not found from ID %d\n", ID);
+        ErrorToResult(td->strTemp);
         SET_ERROR(IMAGE_NOT_FOUND);
       }
 
@@ -846,20 +893,21 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       if (byteSize != dataSize && !((dataSize == 2 && byteSize == 4 && 
         (isInteger || isFloat)) ||
         (dataSize == 2 && byteSize == 1 && doingStack))) {
-          sprintf(m_strTemp, "Image data are not of the expected type (bs %d  ds %d  int"
+          sprintf(td->strTemp, "Image data are not of the expected type (bs %d  ds %d  int"
              " %d  uint %d)\n", byteSize, dataSize, isInteger ? 1:0, isUnsignedInt?1:0);
-          ErrorToResult(m_strTemp);
+          ErrorToResult(td->strTemp);
           SET_ERROR(WRONG_DATA_TYPE);
       }
 
       // Get the size and adjust if necessary to fit output array
-      DM::GetSize( image.get(), width, height );
-      sprintf(m_strTemp, "loop %d width %d height %d\n", loop, *width, *height);
-      DebugToResult(m_strTemp);
-      if (*width * *height > outLimit) {
+      DM::GetSize( image.get(), &td->width, &td->height );
+      sprintf(td->strTemp, "loop %d width %d height %d  bs %d int %d uint %d\n", loop, 
+        td->width, td->height, byteSize, isInteger ? 1:0, isUnsignedInt?1:0);
+      DebugToResult(td->strTemp);
+      if (td->width * td->height > outLimit) {
         ErrorToResult("Warning: image is larger than the supplied array\n",
           "\nA problem occurred acquiring an image for SerialEM:\n");
-        *height = outLimit / *width;
+        td->height = outLimit / td->width;
       }
 
       // Get data pointer and transfer the data
@@ -867,23 +915,23 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       if (doingStack) {
         numDim = DM::ImageGetNumDimensions(image.get());
         if (numDim < 3) {
-          m_iErrorFromSave = STACK_NOT_3D;
+          td->iErrorFromSave = STACK_NOT_3D;
           continue;
         }
-        stackAllReady = !m_bAsyncSave;
-        numSlices = m_bAsyncSave ? 0 : DM::ImageGetDimensionSize(image.get(), 2);
+        stackAllReady = !td->bAsyncSave;
+        numSlices = td->bAsyncSave ? 0 : DM::ImageGetDimensionSize(image.get(), 2);
 
         // Float super-res image is from software processing and needs special scaling
         // into bytes, set divide -1 as flag for this
-        if (sReadModes[m_iReadMode] == K2_SUPERRES_READ_MODE && isFloat)
+        if (sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE && isFloat)
           frameDivide = -1;
 
         // But if they are counting mode images in integer, they need to not be scaled
         // or divided by 2 if placed into shorts, and they may be packed to bytes
-        if (sReadModes[m_iReadMode] == K2_COUNTING_READ_MODE && isInteger) {
-          m_fFloatScaling = 1.;
+        if (sReadModes[td->iReadMode] == K2_COUNTING_READ_MODE && isInteger) {
+          td->fFloatScaling = 1.;
           frameDivide = 0;
-          if(m_iSaveFlags & K2_SAVE_RAW_PACKED)
+          if(td->iSaveFlags & K2_SAVE_RAW_PACKED)
             frameDivide = -2;
         }
         outByteSize = 2;
@@ -895,34 +943,36 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           fileMode = MRC_MODE_SHORT;
         else
           fileMode = MRC_MODE_USHORT;
-        save4bit = sReadModes[m_iReadMode] == K2_SUPERRES_READ_MODE && byteSize == 1 &&
-            (m_iSaveFlags & K2_SAVE_RAW_PACKED);
+        save4bit = sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE && byteSize == 1 &&
+            (td->iSaveFlags & K2_SAVE_RAW_PACKED);
         needProc = byteSize > 2 || signedBytes || frameDivide < 0;
 
         // Allocate buffer for rotation/flip if processing needs to be done too
-        if (needProc && (m_iRotationFlip || !m_bWriteTiff)) {
+        // Do a rotation/flip if needed or if writing MRC, to get flip for output
+        if (needProc && (td->iRotationFlip || !td->bWriteTiff)) {
           try {
             if (outByteSize == 1)
-              rotBuf = (short *)(new unsigned char [*width * *height]);
+              rotBuf = (short *)(new unsigned char [td->width * td->height]);
             else
-              rotBuf = new short [*width * *height];
+              rotBuf = new short [td->width * td->height];
           }
           catch (...) {
-            m_iErrorFromSave = ROTBUF_MEMORY_ERROR;
+            td->iErrorFromSave = ROTBUF_MEMORY_ERROR;
             rotBuf = NULL;
             continue;
           }
         }
 
-        if (((sReadModes[m_iReadMode] == K2_SUPERRES_READ_MODE && byteSize == 1) ||
-          (sReadModes[m_iReadMode] == K2_COUNTING_READ_MODE && !isFloat)) &&
-          (m_iSaveFlags & K2_COPY_GAIN_REF) && m_strGainRefToCopy)
-          CopyK2ReferenceIfNeeded();
+        if (((sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE ||
+          sReadModes[td->iReadMode] == K2_COUNTING_READ_MODE) && !isFloat && 
+          td->iK2Processing != NEWCM_GAIN_NORMALIZED) &&
+          (td->iSaveFlags & K2_COPY_GAIN_REF) && td->strGainRefToCopy)
+          CopyK2ReferenceIfNeeded(td);
 
         // Set up Tiff output file structure
-        if (m_bWriteTiff) {
+        if (td->bWriteTiff) {
           iifile = iiNew();
-          iifile->nz = (m_bFilePerImage || m_bAsyncSave) ? 1 : numSlices; // Has no effect
+          iifile->nz = (td->bFilePerImage || td->bAsyncSave) ? 1 : numSlices; // Has no effect
           iifile->format = IIFORMAT_LUMINANCE;
           iifile->file = IIFILE_TIFF;
           iifile->type = IITYPE_UBYTE;
@@ -938,7 +988,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 #ifdef _WIN64
 
           // If doing asynchronous save, wait until a slice is ready to process
-          if (m_bAsyncSave) {
+          if (td->bAsyncSave) {
             while (slice >= numSlices) {
               stackAllReady = k2dfa.IsDone();
               numSlices = k2dfa.GetNumFramesProcessed();
@@ -948,13 +998,13 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
               // Sleep while processing events.  If it returns false, it is a quit,
               // so break and let the loop finish
               if (!SleepMsg(10)) {
-                m_iErrorFromSave = QUIT_DURING_SAVE;
+                td->iErrorFromSave = QUIT_DURING_SAVE;
                 break;
               }
             }
-            sprintf(m_strTemp, "numSlices %d  isStackDone %s\n", numSlices,
+            sprintf(td->strTemp, "numSlices %d  isStackDone %s\n", numSlices,
               stackAllReady ? "Y":"N");
-            DebugToResult(m_strTemp);
+            DebugToResult(td->strTemp);
             if (slice >= numSlices)
               break;
           }
@@ -968,12 +1018,12 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           // Process a float image (from software normalized frames)
           // It goes from the DM array into the passed array
           if (needProc) {
-            ProcessImage(imageData, array, dataSize, *width, *height, frameDivide,
-              transpose, byteSize, isInteger, isUnsignedInt);
+            ProcessImage(imageData, array, dataSize, td->width, td->height, frameDivide,
+              transpose, byteSize, isInteger, isUnsignedInt, td->fFloatScaling);
             outData = (short *)array;
             outForRot = rotBuf;
             if (byteSize > 2) {
-              scaling = m_fFloatScaling;
+              scaling = td->fFloatScaling;
               if (frameDivide > 0)
                 scaling /= 2.;
               else if (frameDivide == -1)
@@ -983,13 +1033,13 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 
           // Rotate and flip if desired and change the array pointer to save to use the 
           // passed array or the rotation array
-          if (m_iRotationFlip || !m_bWriteTiff) {
-            RotateFlip(outData, fileMode, *width, *height, m_iRotationFlip, !m_bWriteTiff,
+          if (td->iRotationFlip || !td->bWriteTiff) {
+            RotateFlip(outData, fileMode, td->width, td->height, td->iRotationFlip, !td->bWriteTiff,
               outForRot, &nxout, &nyout);
             outData = outForRot;
           } else {
-            nxout = *width;
-            nyout = *height;
+            nxout = td->width;
+            nyout = td->height;
           }
           wallNow = wallTime();
           procWall += wallNow - wallStart;
@@ -997,42 +1047,42 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           nxFile = save4bit ? nxout / 2 : nxout;
 
           // open file if needed
-          if (!slice || m_bFilePerImage) {
-            if (m_bFilePerImage)
-              sprintf(m_strTemp, "%s\\%s_%03d.%s", m_strSaveDir, m_strRootName, slice +1,
-              m_bWriteTiff ? "tif" : "mrc");
+          if (!slice || td->bFilePerImage) {
+            if (td->bFilePerImage)
+              sprintf(td->strTemp, "%s\\%s_%03d.%s", td->strSaveDir, td->strRootName, slice +1,
+              td->bWriteTiff ? "tif" : "mrc");
             else
-              sprintf(m_strTemp, "%s\\%s.%s", m_strSaveDir, m_strRootName, 
-              m_bWriteTiff ? "tif" : "mrc");
-            if (m_bWriteTiff) {
+              sprintf(td->strTemp, "%s\\%s.%s", td->strSaveDir, td->strRootName, 
+              td->bWriteTiff ? "tif" : "mrc");
+            if (td->bWriteTiff) {
               iifile->nx = nxFile;
               iifile->ny = nyout;
-              iifile->filename = _strdup(m_strTemp);
+              iifile->filename = _strdup(td->strTemp);
               i = tiffOpenNew(iifile);
             } else {
-              fp = fopen(m_strTemp, "wb");
+              fp = fopen(td->strTemp, "wb");
             }
-            if ((m_bWriteTiff && i) || (!m_bWriteTiff && !fp)) {
+            if ((td->bWriteTiff && i) || (!td->bWriteTiff && !fp)) {
               j = errno;
-              i = (int)strlen(m_strTemp);
-              m_strTemp[i] = '\n';
-              m_strTemp[i+1] = 0x00;
-              ErrorToResult(m_strTemp);
-              sprintf(m_strTemp, "Failed to open above file: %s\n", strerror(j));
-              ErrorToResult(m_strTemp);
-              m_iErrorFromSave = FILE_OPEN_ERROR;
+              i = (int)strlen(td->strTemp);
+              td->strTemp[i] = '\n';
+              td->strTemp[i+1] = 0x00;
+              ErrorToResult(td->strTemp);
+              sprintf(td->strTemp, "Failed to open above file: %s\n", strerror(j));
+              ErrorToResult(td->strTemp);
+              td->iErrorFromSave = FILE_OPEN_ERROR;
               break;
             }
 
             // Set up header for one slice
-            if (!m_bWriteTiff) {
+            if (!td->bWriteTiff) {
               mrc_head_new(&hdata, nxFile, nyout, 1, fileMode);
-              sprintf(m_strTemp, "SerialEMCCD: Dose fractionation image, scaled by %.2f", 
+              sprintf(td->strTemp, "SerialEMCCD: Dose fractionation image, scaled by %.2f", 
                 scaling);
               if (save4bit)
-                sprintf(m_strTemp, "SerialEMCCD: Dose fractionation image, 4 bits packed"
+                sprintf(td->strTemp, "SerialEMCCD: Dose fractionation image, 4 bits packed"
                 ); 
-              mrc_head_label(&hdata, m_strTemp);
+              mrc_head_label(&hdata, td->strTemp);
             }
             fileSlice = 0;
             tmin = 1000000;
@@ -1085,8 +1135,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             /* if (!slice) {
               Islice sl;
               sliceInit(&sl, nxout, nyout, SLICE_MODE_BYTE, outData);
-              sprintf(m_strTemp, "%s\\firstFrameUnpacked.mrc", m_strSaveDir);
-              sliceWriteMRCfile(m_strTemp, &sl);
+              sprintf(td->strTemp, "%s\\firstFrameUnpacked.mrc", td->strSaveDir);
+              sliceWriteMRCfile(td->strTemp, &sl);
             } */
             bData = (unsigned char *)outData;
             packed = (unsigned char *)array;
@@ -1097,18 +1147,18 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             }
           }
 
-          if (m_bWriteTiff) {
+          if (td->bWriteTiff) {
             iifile->amin = (float)tmin;
             iifile->amax = (float)tmax;
             iifile->amean = tmean / (float)(nxout * nyout);
 
-            i = tiffWriteSection(iifile, outData, m_iTiffCompression, 1, 
-              B3DNINT(2.54e8 / m_dPixelSize), m_iTiffQuality);
+            i = tiffWriteSection(iifile, outData, td->iTiffCompression, 1, 
+              B3DNINT(2.54e8 / td->dPixelSize), td->iTiffQuality);
             if (i) {
-              m_iErrorFromSave = WRITE_DATA_ERROR;
-              sprintf(m_strTemp, "Error (%d) writing section %d to TIFF file\n", i, 
+              td->iErrorFromSave = WRITE_DATA_ERROR;
+              sprintf(td->strTemp, "Error (%d) writing section %d to TIFF file\n", i, 
                 slice);
-              ErrorToResult(m_strTemp);
+              ErrorToResult(td->strTemp);
               break;
             }
           } else {
@@ -1117,23 +1167,23 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             i = mrc_big_seek(fp, hdata.headerSize, nxFile * outByteSize, 
               nyout * fileSlice, SEEK_SET);
             if (i) {
-              sprintf(m_strTemp, "Error %d seeking for slice %d: %s\n", i, slice, 
+              sprintf(td->strTemp, "Error %d seeking for slice %d: %s\n", i, slice, 
                 strerror(errno));
-              ErrorToResult(m_strTemp);
-              m_iErrorFromSave = SEEK_ERROR;
+              ErrorToResult(td->strTemp);
+              td->iErrorFromSave = SEEK_ERROR;
               break;
             }
 
             if ((i = (int)b3dFwrite(outData, outByteSize * nxFile, nyout, fp)) != nyout) {
-              sprintf(m_strTemp, "Failed to write data past line %d of slice %d: %s\n", i, 
+              sprintf(td->strTemp, "Failed to write data past line %d of slice %d: %s\n", i, 
                 slice, strerror(errno));
-              ErrorToResult(m_strTemp);
-              m_iErrorFromSave = WRITE_DATA_ERROR;
+              ErrorToResult(td->strTemp);
+              td->iErrorFromSave = WRITE_DATA_ERROR;
               break;
             }
 
             // This can't have any effect; all errors broke the loop above
-            if (m_iErrorFromSave)
+            if (td->iErrorFromSave)
               continue;
 
             // Completely update and write the header regardless of whether one file/slice
@@ -1143,18 +1193,18 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             hdata.amax = (float)tmax;
             meanSum += tmean / B3DMAX(1.f, (float)(nxout * nyout));
             hdata.amean = meanSum / hdata.nz;
-            mrc_set_scale(&hdata, m_dPixelSize, m_dPixelSize, m_dPixelSize);
+            mrc_set_scale(&hdata, td->dPixelSize, td->dPixelSize, td->dPixelSize);
             if (mrc_head_write(fp, &hdata)) {
               ErrorToResult("Failed to write header\n");
-              m_iErrorFromSave = HEADER_ERROR;
+              td->iErrorFromSave = HEADER_ERROR;
               break;
             }
           }
 
           // Finally, increment successful save count and close file if needed
-          m_iFramesSaved++;
-          if (m_bFilePerImage || (stackAllReady && slice == numSlices - 1)) {
-            if (m_bWriteTiff) {
+          td->iFramesSaved++;
+          if (td->bFilePerImage || (stackAllReady && slice == numSlices - 1)) {
+            if (td->bWriteTiff) {
               iiClose(iifile);
               free(iifile->filename);
               iifile->filename = NULL;
@@ -1168,24 +1218,24 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
           wallStart = wallNow;
           slice++;
         } while (slice < numSlices || !stackAllReady);
-        m_fFloatScaling = scaleSave;
+        td->fFloatScaling = scaleSave;
 
-        if (m_iErrorFromSave)
+        if (td->iErrorFromSave)
           continue;
-        sprintf(m_strTemp, "Processing time %.3f   saving time %.3f sec\n", procWall,
+        sprintf(td->strTemp, "Processing time %.3f   saving time %.3f sec\n", procWall,
           saveWall);
-        DebugToResult(m_strTemp);
+        DebugToResult(td->strTemp);
       } else {
 
         // Regular old image
         numDim = DM::ImageGetNumDimensions(image.get());
         if (numDim != 2) {
-          sprintf(m_strTemp, "image with ID %d has %d dimensions!\n", ID, numDim);
-          DebugToResult(m_strTemp);
+          sprintf(td->strTemp, "image with ID %d has %d dimensions!\n", ID, numDim);
+          DebugToResult(td->strTemp);
         }
         imageData = imageLp->get();
-        ProcessImage(imageData, array, dataSize, *width, *height, divideBy2, transpose, 
-          byteSize, isInteger, isUnsignedInt);
+        ProcessImage(imageData, array, dataSize, td->width, td->height, divideBy2, transpose, 
+          byteSize, isInteger, isUnsignedInt, td->fFloatScaling);
       }
 
     }
@@ -1230,7 +1280,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       DebugToResult("Cannot find stack for deleting it\n");
 
   }
-  *arrSize = *width * *height;
+  td->arrSize = td->width * td->height;
 
   return errorRet;
 }
@@ -1239,21 +1289,20 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 * ProcessImage copies data from DM to given array with conversion, truncation, scaling
 * and division by 2 as needed.  There are way too many cases handled here, thanks to the
 * K2 camera.  Here is list of the kind of data that it produces in various cases from
-* actual camera (values in parentheses are from the simulator)
-*                Linear              Counting           Super-res
-* Unproc single  us int              us int             us short (int)
-* Unproc df sum  us int              us int             us int
-* Unproc frames  us short            us short           byte
-* DS single      sign int            sign int           sign short (int)
-* DS df sum      sign int            sign int           sign int
-* DS frames      sign int (short)    sign int (short)   sign byte
-* GN single/sum  float               float              float
-* GN frames      float               float              float
+* actual camera (values in parentheses are from the simulator, * for 2.3.1 only)
+*                Linear              Counting                   Super-res
+* Unproc single  us int              us int                     us short (int)
+* Unproc df sum  us int              us int                     us int
+* Unproc frames  us short            us short (us int*)         byte (us int*)
+* DS single      sign int            sign int                   sign short (int)
+* DS df sum      sign int            sign int                   sign int
+* DS frames      sign int (short)    sign int (short -> ushort) sign byte (us int*)
+* GN single/sum  float               float                      float
+* GN frames      float               float                      float
 */
-void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize, 
-                                  long width, long height, long divideBy2, 
-                                  long transpose, int byteSize, bool isInteger,
-                                  bool isUnsignedInt)
+static void  ProcessImage(void *imageData, void *array, int dataSize, long width, 
+                          long height, long divideBy2, long transpose, int byteSize, 
+                          bool isInteger, bool isUnsignedInt, float floatScaling)
 {
   int i, j;
   unsigned int *uiData;
@@ -1270,7 +1319,7 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
 
   // Do a simple copy if sizes match and not dividing by 2 and not transposing
   // or if bytes are passed in
-  if ((dataSize == byteSize && !divideBy2 && m_fFloatScaling == 1.) || byteSize == 1 ||
+  if ((dataSize == byteSize && !divideBy2 && floatScaling == 1.) || byteSize == 1 ||
     divideBy2 == -2) {
     
     // If they are signed bytes, need to copy with truncation
@@ -1387,8 +1436,8 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
         DebugToResult("Dividing unsigned bytes by 2 with scaling\n");
         bData = (unsigned char *)imageData;
         for (i = 0; i < width * height; i++)
-          outData[i] = (short)((float)bData[i] * m_fFloatScaling / 2.f + 0.5f);
-      } else if (byteSize == 2 && m_fFloatScaling == 1.) {
+          outData[i] = (short)((float)bData[i] * floatScaling / 2.f + 0.5f);
+      } else if (byteSize == 2 && floatScaling == 1.) {
 
         // unsigned short to short
         DebugToResult("Dividing unsigned shorts by 2\n");
@@ -1401,8 +1450,8 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
         DebugToResult("Dividing unsigned shorts by 2 with scaling\n");
         usData = (unsigned short *)imageData;
         for (i = 0; i < width * height; i++)
-          outData[i] = (short)((float)usData[i] * m_fFloatScaling / 2.f + 0.5f);
-      } else if (m_fFloatScaling == 1.) {
+          outData[i] = (short)((float)usData[i] * floatScaling / 2.f + 0.5f);
+      } else if (floatScaling == 1.) {
 
         // unsigned long to short
         DebugToResult("Dividing unsigned integers by 2\n");
@@ -1415,10 +1464,10 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
         DebugToResult("Dividing unsigned integers by 2 with scaling\n");
         uiData = (unsigned int *)imageData;
         for (i = 0; i < width * height; i++)
-          outData[i] = (short)((float)uiData[i] * m_fFloatScaling / 2.f + 0.5f);
+          outData[i] = (short)((float)uiData[i] * floatScaling / 2.f + 0.5f);
       }
     } else if (isInteger) {
-      if (byteSize == 2 && m_fFloatScaling == 1.) {
+      if (byteSize == 2 && floatScaling == 1.) {
 
         // signed short to short
         DebugToResult("Dividing signed shorts by 2\n");
@@ -1431,8 +1480,8 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
         DebugToResult("Dividing signed shorts by 2 with scaling\n");
         sData = (short *)imageData;
         for (i = 0; i < width * height; i++)
-          outData[i] = (short)((float)sData[i] * m_fFloatScaling / 2.f + 0.5f);
-      } else if (m_fFloatScaling == 1.) {
+          outData[i] = (short)((float)sData[i] * floatScaling / 2.f + 0.5f);
+      } else if (floatScaling == 1.) {
 
         // signed long to short
         DebugToResult("Dividing signed integers by 2\n");
@@ -1445,7 +1494,7 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
         DebugToResult("Dividing signed integers by 2 with scaling\n");
         iData = (int *)imageData;
         for (i = 0; i < width * height; i++)
-          outData[i] = (short)((float)iData[i] * m_fFloatScaling / 2.f + 0.5f);
+          outData[i] = (short)((float)iData[i] * floatScaling / 2.f + 0.5f);
       }
     } else {
 
@@ -1453,7 +1502,7 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
       DebugToResult("Dividing floats by 2 with scaling\n");
       flIn = (float *)imageData;
       for (i = 0; i < width * height; i++)
-        outData[i] = (short)(flIn[i] * m_fFloatScaling / 2.f + 0.5f);
+        outData[i] = (short)(flIn[i] * floatScaling / 2.f + 0.5f);
     }
 
   } else {
@@ -1467,17 +1516,17 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
         DebugToResult("Converting unsigned bytes to unsigned shorts with scaling\n");
         bData = (unsigned char *)imageData;
         for (i = 0; i < width * height; i++)
-          usData[i] = (unsigned short)((float)bData[i] * m_fFloatScaling + 0.5f);
+          usData[i] = (unsigned short)((float)bData[i] * floatScaling + 0.5f);
       } else if (byteSize == 2) {
 
         DebugToResult("Scaling unsigned shorts\n");
         usData2 = (unsigned short *)imageData;
         for (i = 0; i < width * height; i++)
-          usData[i] = (unsigned short)((float)usData2[i] * m_fFloatScaling + 0.5f);
+          usData[i] = (unsigned short)((float)usData2[i] * floatScaling + 0.5f);
 
         // Unsigned short to ushort with scaling
 
-      } else if (m_fFloatScaling == 1.) {
+      } else if (floatScaling == 1.) {
 
         // If these are long integers and they are unsigned, just transfer
         DebugToResult("Converting unsigned integers to unsigned shorts\n");
@@ -1490,7 +1539,7 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
         DebugToResult("Converting unsigned integers to unsigned shorts with scaling\n");
         uiData = (unsigned int *)imageData;
         for (i = 0; i < width * height; i++)
-          usData[i] = (unsigned short)((float)uiData[i] * m_fFloatScaling + 0.5f);
+          usData[i] = (unsigned short)((float)uiData[i] * floatScaling + 0.5f);
       }
     } else if (isInteger) {
 
@@ -1502,11 +1551,11 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
         sData = (short *)imageData;
         for (i = 0; i < width * height; i++) {
           if (sData[i] >= 0)
-            usData[i] = (unsigned short)((float)sData[i] * m_fFloatScaling + 0.5f);
+            usData[i] = (unsigned short)((float)sData[i] * floatScaling + 0.5f);
           else
             usData[i] = 0;
         }
-      } else if (m_fFloatScaling == 1.) {
+      } else if (floatScaling == 1.) {
 
         // Otherwise there are ints: need to truncate at zero to copy signed to unsigned
         DebugToResult("Converting signed integers to unsigned shorts with "
@@ -1526,7 +1575,7 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
         iData = (int *)imageData;
         for (i = 0; i < width * height; i++) {
           if (iData[i] >= 0)
-            usData[i] = (unsigned short)((float)iData[i] * m_fFloatScaling + 0.5f);
+            usData[i] = (unsigned short)((float)iData[i] * floatScaling + 0.5f);
           else
             usData[i] = 0;
         }
@@ -1539,7 +1588,7 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
       flIn = (float *)imageData;
       for (i = 0; i < width * height; i++) {
         if (flIn[i] >= 0)
-          usData[i] = (unsigned short)(flIn[i] * m_fFloatScaling + 0.5f);
+          usData[i] = (unsigned short)(flIn[i] * floatScaling + 0.5f);
         else
           usData[i] = 0;
       }
@@ -1551,8 +1600,8 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
 // operation = 0-3 for rotation by 90 * operation, plus 4 for flipping around Y axis 
 // before rotation or 8 for flipping around Y after.  THIS IS COPY OF ProcRotateFlip
 // with the type and invertCon arguments removed and invert contrast code also
-void TemplatePlugIn::RotateFlip(short int *array, int mode, int nx, int ny, int operation, 
-                              bool invert, short int *brray, int *nxout, int *nyout)
+static void RotateFlip(short int *array, int mode, int nx, int ny, int operation, 
+                       bool invert, short int *brray, int *nxout, int *nyout)
 {
   int xalong[4] = {1, 0, -1, 0};
   int yalong[4] = {0, -1, 0, 1};
@@ -1769,19 +1818,19 @@ void TemplatePlugIn::RotateFlip(short int *array, int mode, int nx, int ny, int 
 }
 
 // Copy a gain reference file to the directory if there is not a newer one
-int TemplatePlugIn::CopyK2ReferenceIfNeeded()
+static int CopyK2ReferenceIfNeeded(ThreadData *td)
 {
   WIN32_FIND_DATA findRefData, findCopyData;
   HANDLE hFindRef, hFindCopy;
-  string saveDir = m_strSaveDir;
-  string rootName = m_strRootName;
+  string saveDir = td->strSaveDir;
+  string rootName = td->strRootName;
   char *prefix[2] = {"Count", "Super"};
   int ind, retVal = 0;
   bool needCopy = true, namesOK = false;
-  int prefInd = sReadModes[m_iReadMode] == K2_SUPERRES_READ_MODE ? 1 : 0;
+  int prefInd = sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE ? 1 : 0;
 
   // For single image files, find the date-time root and split up the name
-  if (m_bFilePerImage) {
+  if (td->bFilePerImage) {
     ind = (int)saveDir.find_last_of("\\");
     if (ind < 2 || ind >= (int)saveDir.length() - 1)
       return 1;
@@ -1791,28 +1840,28 @@ int TemplatePlugIn::CopyK2ReferenceIfNeeded()
 
 
   // Get the reference file first
-  hFindRef = FindFirstFile(m_strGainRefToCopy, &findRefData);
+  hFindRef = FindFirstFile(td->strGainRefToCopy, &findRefData);
   if (hFindRef == INVALID_HANDLE_VALUE) {
-    sprintf(m_strTemp, "Cannot find K2 gain reference file: %s\n", 
-      m_strGainRefToCopy);
-    ErrorToResult(m_strTemp);
+    sprintf(td->strTemp, "Cannot find K2 gain reference file: %s\n", 
+      td->strGainRefToCopy);
+    ErrorToResult(td->strTemp);
     return 1;
   } 
   FindClose(hFindRef);
 
   // If there is an existing copy and the mode and the directory match, find the copy
   // Otherwise look for all matching files in directory
-  if (m_strLastRefName && strstr(m_strLastRefName, prefix[prefInd]) && 
-    !strcmp(m_strLastRefDir, saveDir.data())) {
-    //sprintf(m_strTemp, "Finding %s\n", m_strLastRefName);
-    hFindCopy = FindFirstFile(m_strLastRefName, &findCopyData);
+  if (td->strLastRefName && strstr(td->strLastRefName, prefix[prefInd]) && 
+    !strcmp(td->strLastRefDir, saveDir.data())) {
+    //sprintf(td->strTemp, "Finding %s\n", td->strLastRefName);
+    hFindCopy = FindFirstFile(td->strLastRefName, &findCopyData);
     namesOK = true;
   } else {
-    sprintf(m_strTemp, "%s\\%sRef_*.dm4", saveDir.data(), prefix[prefInd]);
-    hFindCopy = FindFirstFile(m_strTemp, &findCopyData);
-    //sprintf(m_strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefix[prefInd]);
+    sprintf(td->strTemp, "%s\\%sRef_*.dm4", saveDir.data(), prefix[prefInd]);
+    hFindCopy = FindFirstFile(td->strTemp, &findCopyData);
+    //sprintf(td->strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefix[prefInd]);
   }
-  // DebugToResult(m_strTemp);
+  // DebugToResult(td->strTemp);
 
   // Test that file or all candidate files in the directory and stop if find one
   // is sufficiently newer then the ref
@@ -1828,8 +1877,8 @@ int TemplatePlugIn::CopyK2ReferenceIfNeeded()
         1.e-7 * findRefData.ftCreationTime.dwLowDateTime;
       double copySec = 429.4967296 * findCopyData.ftCreationTime.dwHighDateTime + 
         1.e-7 * findCopyData.ftCreationTime.dwLowDateTime;
-      //sprintf(m_strTemp, "refSec  %f  copySec %f\n", refSec, copySec);
-      //DebugToResult(m_strTemp);
+      //sprintf(td->strTemp, "refSec  %f  copySec %f\n", refSec, copySec);
+      //DebugToResult(td->strTemp);
       needCopy = refSec > copySec + 10.;
       if (!needCopy || !FindNextFile(hFindCopy, &findCopyData))
         break;
@@ -1841,25 +1890,25 @@ int TemplatePlugIn::CopyK2ReferenceIfNeeded()
 
   // Fix up the directory and reference name if they are changed, whether it is an old
   // reference or a new copy
-  B3DFREE(m_strLastRefDir);
-  B3DFREE(m_strLastRefName);
-  m_strLastRefDir = strdup(saveDir.data());
+  B3DFREE(td->strLastRefDir);
+  B3DFREE(td->strLastRefName);
+  td->strLastRefDir = strdup(saveDir.data());
   if (!needCopy) {
-    sprintf(m_strTemp, "%s\\%s", saveDir.data(), findCopyData.cFileName);
-    m_strLastRefName = strdup(m_strTemp);
+    sprintf(td->strTemp, "%s\\%s", saveDir.data(), findCopyData.cFileName);
+    td->strLastRefName = strdup(td->strTemp);
     return 0;
   }
-  sprintf(m_strTemp, "%s\\%sRef_%s.dm4", saveDir.data(), prefix[prefInd],
+  sprintf(td->strTemp, "%s\\%sRef_%s.dm4", saveDir.data(), prefix[prefInd],
     rootName.data());
-  m_strLastRefName = strdup(m_strTemp);
+  td->strLastRefName = strdup(td->strTemp);
 
   // Copy the reference
   DebugToResult("Making new copy of gain reference\n");
-  if (!CopyFile(m_strGainRefToCopy, m_strTemp, false)) {
-    sprintf(m_strTemp, "An error occurred copying %s to %s\n", m_strGainRefToCopy,
-      m_strTemp);
-    ErrorToResult(m_strTemp);
-    B3DFREE(m_strLastRefName);
+  if (!CopyFile(td->strGainRefToCopy, td->strTemp, false)) {
+    sprintf(td->strTemp, "An error occurred copying %s to %s\n", td->strGainRefToCopy,
+      td->strTemp);
+    ErrorToResult(td->strTemp);
+    B3DFREE(td->strLastRefName);
     return 1;
   }
 
@@ -1880,16 +1929,16 @@ void TemplatePlugIn::AddCameraSelection(int camera)
             "CM_SelectCamera(manager, camera)\n", camera);
   else
     sprintf(m_strTemp, "MSCSelectCamera(%d)\n", camera);
-  m_strCommand += m_strTemp;
+  mTD.strCommand += m_strTemp;
 }
 
 // Make camera be the current camera and execute selection script
 int TemplatePlugIn::SelectCamera(long camera)
 {
   m_iCurrentCamera = camera;
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   AddCameraSelection();
-  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  double retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
     return 1;
   return 0;
@@ -1905,8 +1954,8 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
   // counting mode scaling, newer SEM sends 1 for Summit linear or 0.25 for Base mode
   if (mode <= 0 && scaling > 1.)
     scaling = 1.;
-  m_iReadMode = mode;
-  m_fFloatScaling = (float)scaling;
+  mTD.iReadMode = mode;
+  mTD.fFloatScaling = (float)scaling;
 }
 
 // Set the parameters for the next K2 acquisition
@@ -1915,14 +1964,14 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
                                      BOOL saveFrames, char *filter)
 {
   SetReadMode(mode, scaling);
-  m_iHardwareProc = hardwareProc;
-  B3DCLAMP(m_iHardwareProc, 0, 6);
+  mTD.iHardwareProc = hardwareProc;
+  B3DCLAMP(mTD.iHardwareProc, 0, 6);
   m_bDoseFrac = doseFrac;
-  m_dFrameTime = frameTime;
-  m_bAlignFrames = alignFrames;
+  mTD.dFrameTime = frameTime;
+  mTD.bAlignFrames = alignFrames;
   if (alignFrames) {
-    strncpy(m_strFilterName, filter, MAX_FILTER_NAME - 1);
-    m_strFilterName[MAX_FILTER_NAME - 1] = 0x00;
+    strncpy(mTD.strFilterName, filter, MAX_FILTER_NAME - 1);
+    mTD.strFilterName[MAX_FILTER_NAME - 1] = 0x00;
   }
   m_bSaveFrames = saveFrames;
   sprintf(m_strTemp, "SetK2Parameters called with save %s\n", m_bSaveFrames ? "Y":"N");
@@ -1941,22 +1990,22 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   FILE *fp;
   int newDir, dummy, newDefects = 0;
   char *fend, *tmpDef;
-  m_iRotationFlip = rotationFlip;
-  B3DCLAMP(m_iRotationFlip, 0, 7);
-  m_bFilePerImage = filePerImage;
-  m_dPixelSize = pixelSize;
-  m_iSaveFlags = flags;
-  m_bWriteTiff = flags & (K2_SAVE_LZW_TIFF | K2_SAVE_ZIP_TIFF);
-  m_iTiffCompression = (flags & K2_SAVE_ZIP_TIFF) ? 8 : 5;
-  m_bAsyncSave = (flags & K2_SAVE_SYNCHRO) == 0;
+  mTD.iRotationFlip = rotationFlip;
+  B3DCLAMP(mTD.iRotationFlip, 0, 7);
+  mTD.bFilePerImage = filePerImage;
+  mTD.dPixelSize = pixelSize;
+  mTD.iSaveFlags = flags;
+  mTD.bWriteTiff = flags & (K2_SAVE_LZW_TIFF | K2_SAVE_ZIP_TIFF);
+  mTD.iTiffCompression = (flags & K2_SAVE_ZIP_TIFF) ? 8 : 5;
+  mTD.bAsyncSave = (flags & K2_SAVE_SYNCHRO) == 0;
 
   // Copy all the strings if they are changed
-  if (CopyStringIfChanged(dirName, &m_strSaveDir, newDir, error))
+  if (CopyStringIfChanged(dirName, &mTD.strSaveDir, newDir, error))
     return;
-  if (CopyStringIfChanged(rootName, &m_strRootName, dummy, error))
+  if (CopyStringIfChanged(rootName, &mTD.strRootName, dummy, error))
     return;
   if (refName && (flags & K2_COPY_GAIN_REF)) {
-    if (CopyStringIfChanged(refName, &m_strGainRefToCopy, dummy, error))
+    if (CopyStringIfChanged(refName, &mTD.strGainRefToCopy, dummy, error))
       return;
   }
   if (defects && (flags & K2_SAVE_DEFECTS)) {
@@ -1969,15 +2018,15 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   }
 
   sprintf(m_strTemp, "SetupFileSaving called with rf %d %s fpi %s pix %f copy %s dir %s "
-    "root %s\n", rotationFlip, m_bWriteTiff ? "TIFF" : "MRC", filePerImage ? "Y":"N", 
-    pixelSize, (flags & K2_COPY_GAIN_REF) ? m_strGainRefToCopy : "NO",
-    m_strSaveDir, m_strRootName);
+    "root %s\n", rotationFlip, mTD.bWriteTiff ? "TIFF" : "MRC", filePerImage ? "Y":"N", 
+    pixelSize, (flags & K2_COPY_GAIN_REF) ? mTD.strGainRefToCopy : "NO",
+    mTD.strSaveDir, mTD.strRootName);
   DebugToResult(m_strTemp);
 
   // For one file per image, create the directory, which must not exist
   *error = 0;
   if (filePerImage) {
-    if (_mkdir(m_strSaveDir)) {
+    if (_mkdir(mTD.strSaveDir)) {
       if (errno == EEXIST)
         *error = DIR_ALREADY_EXISTS;
       else
@@ -1986,13 +2035,13 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   } else {
 
     // Otherwise, make sure directory exists and is a directory
-    if (_stat(m_strSaveDir, &statbuf))
+    if (_stat(mTD.strSaveDir, &statbuf))
       *error = DIR_NOT_EXIST;
     if (! *error && !(statbuf.st_mode & _S_IFDIR))
       *error = SAVEDIR_IS_FILE;
 
     // Check whether the file exists
-    sprintf(m_strTemp, "%s\\%s.mrc", m_strSaveDir, m_strRootName);
+    sprintf(m_strTemp, "%s\\%s.mrc", mTD.strSaveDir, mTD.strRootName);
     if (! *error && !_stat(m_strTemp, &statbuf))
       *error = FILE_ALREADY_EXISTS;
 
@@ -2022,7 +2071,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
           if (tmpDef) {
             strncpy(tmpDef, &m_strDefectsToSave[1], dummy);
             tmpDef[dummy] = 0x00;
-            sprintf(m_strTemp, "%s\\%s", m_strSaveDir, tmpDef);
+            sprintf(m_strTemp, "%s\\%s", mTD.strSaveDir, tmpDef);
             free(tmpDef);
           }
         }
@@ -2030,7 +2079,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     }
 
     if (!m_strTemp[0])
-      sprintf(m_strTemp, "%s\\defects%d.txt", m_strSaveDir,
+      sprintf(m_strTemp, "%s\\defects%d.txt", mTD.strSaveDir,
       (GetTickCount() / 1000) % 10000);
     DebugToResult(m_strTemp);
 
@@ -2074,7 +2123,7 @@ int TemplatePlugIn::CopyStringIfChanged(char *newStr, char **memberStr, int &cha
 
 // sleeps for the given amount of time while pumping messages
 // returns TRUE if successful, FALSE otherwise
-BOOL TemplatePlugIn::SleepMsg(DWORD dwTime_ms)
+static BOOL SleepMsg(DWORD dwTime_ms)
 {
   DWORD dwStart = GetTickCount();
   DWORD dwElapsed;
@@ -2102,8 +2151,8 @@ BOOL TemplatePlugIn::SleepMsg(DWORD dwTime_ms)
 // Get results of last frame saving operation
 void TemplatePlugIn::GetFileSaveResult(long *numSaved, long *error)
 {
-  *numSaved = m_iFramesSaved;
-  *error = m_iErrorFromSave;
+  *numSaved = mTD.iFramesSaved;
+  *error = mTD.iErrorFromSave;
 }
 
 // Get the defect list from DM for the current camera
@@ -2139,16 +2188,16 @@ int TemplatePlugIn::GetDefectList(short xyPairs[], long *arrSize,
 // Return number of cameras or -1 for error
 int TemplatePlugIn::GetNumberOfCameras()
 {
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   if (m_iDMVersion < NEW_CAMERA_MANAGER)
-    m_strCommand += "number num = MSCGetCameraCount()\n"
+    mTD.strCommand += "number num = MSCGetCameraCount()\n"
             "Exit(num)";
   else
-    m_strCommand += "Object manager = CM_GetCameraManager()\n"
+    mTD.strCommand += "Object manager = CM_GetCameraManager()\n"
             "Object cameraList = CM_GetCameras(manager)\n"
             "number listsize = SizeOfList(cameraList)\n"
             "Exit(listsize)";
-  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  double retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
     return -1;
   return (int)(retval + 0.1);
@@ -2157,7 +2206,7 @@ int TemplatePlugIn::GetNumberOfCameras()
 // Determine insertion state of given camera: return -1 for error, 0 if out, 1 if in
 int TemplatePlugIn::IsCameraInserted(long camera)
 {
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   if (m_iDMVersion < NEW_CAMERA_MANAGER)
     sprintf(m_strTemp, "MSCSelectCamera(%d)\n"
             "number inserted = MSCIsCameraIn()\n"
@@ -2168,8 +2217,8 @@ int TemplatePlugIn::IsCameraInserted(long camera)
             "Object camera = ObjectAt(cameraList, %d)\n"
             "number inserted = CM_GetCameraInserted(camera)\n"
             "Exit(inserted)", camera);
-  m_strCommand += m_strTemp;
-  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  mTD.strCommand += m_strTemp;
+  double retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
     return -1;
   return (int)(retval + 0.1);
@@ -2178,7 +2227,7 @@ int TemplatePlugIn::IsCameraInserted(long camera)
 // Set the insertion state of the given camera
 int TemplatePlugIn::InsertCamera(long camera, BOOL state)
 {
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   if (m_iDMVersion < NEW_CAMERA_MANAGER)
     sprintf(m_strTemp, "MSCSelectCamera(%d)\n"
             "MSCSetCameraIn(%d)", camera, state ? 1 : 0);
@@ -2187,8 +2236,8 @@ int TemplatePlugIn::InsertCamera(long camera, BOOL state)
             "Object cameraList = CM_GetCameras(manager)\n"
             "Object camera = ObjectAt(cameraList, %d)\n"
             "CM_SetCameraInserted(camera, %d)\n", camera, state ? 1 : 0);
-  m_strCommand += m_strTemp;
-  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  mTD.strCommand += m_strTemp;
+  double retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
     return 1;
   return 0;
@@ -2200,21 +2249,21 @@ int TemplatePlugIn::InsertCamera(long camera, BOOL state)
 long TemplatePlugIn::GetDMVersion()
 {
   unsigned int code;
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   if (m_bGMS2) {
     if (GMS2_SDK_VERSION < 2) {
       DebugToResult("GMS2 version < 2, just returning 40000");
       return 40000;
     }
-    m_strCommand += "number major, minor, build\n"
+    mTD.strCommand += "number major, minor, build\n"
           "GetApplicationVersion(major, minor, build)\n"
           "Exit(10000 * major + minor)";
   } else {
-    m_strCommand += "number version\n"
+    mTD.strCommand += "number version\n"
           "GetApplicationInfo(2, version)\n"
           "Exit(version)";
   }
-  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  double retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
     return -1;
   code = (unsigned int)(retval + 0.1);
@@ -2242,14 +2291,14 @@ int TemplatePlugIn::SetShutterNormallyClosed(long camera, long shutter)
 {
   if (m_iDMVersion < SET_IDLE_STATE_OK)
     return 0;
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   sprintf(m_strTemp, "Object manager = CM_GetCameraManager()\n"
             "Object cameraList = CM_GetCameras(manager)\n"
             "Object camera = ObjectAt(cameraList, %d)\n"
             "CM_SetIdleShutterState(camera, %d, 1)\n"
             "CM_SetIdleShutterState(camera, %d, 0)\n", camera, shutter, 1 - shutter);
-  m_strCommand += m_strTemp;
-  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  mTD.strCommand += m_strTemp;
+  double retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
     return 1;
   return 0;
@@ -2271,37 +2320,37 @@ int TemplatePlugIn::GetDSProperties(long extraDelay, double addedFlyback, double
   DebugToResult("In GetDSProperties\n");
   m_iExtraDSdelay = extraDelay;
   m_dSyncMargin = margin;
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   sprintf(m_strTemp, "Number retval = DSGetFlyBackTime()\n"
     "Exit(retval)\n");
-  m_strCommand += m_strTemp;
-  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  mTD.strCommand += m_strTemp;
+  double retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
     return 1;
   *flyback = retval;
   m_dFlyback = retval + addedFlyback;
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   sprintf(m_strTemp, "Number retval = DSGetLineFrequency()\n"
     "Exit(retval)\n");
-  m_strCommand += m_strTemp;
-  retval = ExecuteScript((char *)m_strCommand.c_str());
+  mTD.strCommand += m_strTemp;
+  retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
     return 1;
   *lineFreq = retval;
   m_dLineFreq = retval;
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   sprintf(m_strTemp, "Number retval = DSGetRotationOffset()\n"
     "Exit(retval)\n");
-  m_strCommand += m_strTemp;
-  retval = ExecuteScript((char *)m_strCommand.c_str());
+  mTD.strCommand += m_strTemp;
+  retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
     return 1;
   *rotOffset = retval;
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   sprintf(m_strTemp, "Number retval = DSGetDoFlip()\n"
     "Exit(retval)\n");
-  m_strCommand += m_strTemp;
-  retval = ExecuteScript((char *)m_strCommand.c_str());
+  mTD.strCommand += m_strTemp;
+  retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
     return 1;
   *doFlip = retval != 0. ? 1 : 0;
@@ -2333,7 +2382,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
       return 1;
 
     // Timeout since last return of data
-    double elapsed = GetTickCount() - m_dLastReturnTime;
+    double elapsed = GetTickCount() - mTD.dLastReturnTime;
     if (elapsed < 0)
       elapsed += 4294967296.;
     again = (int)(fullExpTime + 180 - elapsed);
@@ -2348,10 +2397,10 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
   if (m_bContinuousDS)
     StopDSAcquisition();
 
-  m_strCommand.resize(0);
-  m_strCommand += "Number exists, xsize, ysize, oldx, oldy, nbytes, idchan, idfirst\n";
-  m_strCommand += "image imdel, imchan\n";
-  m_strCommand += "String channame\n";
+  mTD.strCommand.resize(0);
+  mTD.strCommand += "Number exists, xsize, ysize, oldx, oldy, nbytes, idchan, idfirst\n";
+  mTD.strCommand += "image imdel, imchan\n";
+  mTD.strCommand += "String channame\n";
 
   // First see if there are channels that haven't been returned and need to be deleted
   for (chan = 0; chan < MAX_DS_CHANNELS; chan++) {
@@ -2365,7 +2414,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
         sprintf(m_strTemp, "exists = GetNamedImage(imdel, \"SEMchan%d\")\n"
           "if (exists)\n"
           "  DeleteImage(imdel)\n", chan);
-        m_strCommand += m_strTemp;
+        mTD.strCommand += m_strTemp;
       }
     }
     m_iDSAcquired[chan] = CHAN_UNUSED;
@@ -2376,7 +2425,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
     "ysize = %d\n"
     "Number paramID = DSCreateParameters(xsize, ysize, %f, %f, %d)\n", 
     *width, *height, rotation, pixelTime, lineSync ? 1: 0);
-  m_strCommand += m_strTemp;
+  mTD.strCommand += m_strTemp;
 
   // Add commands for each channel
   for (chan = 0; chan < numChan; chan++) {
@@ -2393,18 +2442,18 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
       "if (! exists) {\n"
       "  imchan := IntegerImage(channame, nbytes, 0, xsize, ysize)\n",
       channels[chan], dataSize);
-    m_strCommand += m_strTemp;
+    mTD.strCommand += m_strTemp;
     if (!m_bGMS2)
-      m_strCommand += "  ShowImage(imchan)\n";
+      mTD.strCommand += "  ShowImage(imchan)\n";
     else
-      m_strCommand += "  KeepImage(imchan)\n";
-    m_strCommand += "}\n"
+      mTD.strCommand += "  KeepImage(imchan)\n";
+    mTD.strCommand += "}\n"
       "idchan = GetImageID(imchan)\n";
     if (!chan)
-      m_strCommand += "idfirst = idchan\n";
+      mTD.strCommand += "idfirst = idchan\n";
     sprintf(m_strTemp, "DSSetParametersSignal(paramID, %d, nbytes, 1, idchan)\n", 
       channels[chan]);
-    m_strCommand += m_strTemp;
+    mTD.strCommand += m_strTemp;
     m_iDSAcquired[channels[chan]] = CHAN_ACQUIRED;
   }
 
@@ -2414,16 +2463,16 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
     if (m_iExtraDSdelay > 0) {
 
       // With this loop, it doesn't seem to need any delay at the end
-      m_strCommand += "DSStartAcquisition(paramID, 0, 0)\n"
+      mTD.strCommand += "DSStartAcquisition(paramID, 0, 0)\n"
         "while (DSIsViewActive()) {\n"
         "  Delay(2)\n"
         "}\n";
       //sprintf(m_strTemp, "Delay(%d)\n", j);
-      //m_strCommand += m_strTemp;
+      //mTD.strCommand += m_strTemp;
     } else {
-      m_strCommand += "DSStartAcquisition(paramID, 0, 1)\n";
+      mTD.strCommand += "DSStartAcquisition(paramID, 0, 1)\n";
     }
-    m_strCommand += "DSDeleteParameters(paramID)\n"
+    mTD.strCommand += "DSDeleteParameters(paramID)\n"
     "Exit(idfirst)\n";
 
     again = AcquireAndTransferImage((void *)array, dataSize, arrSize, width, height,
@@ -2434,18 +2483,18 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
   } else {
 
     // For continuous acquire, start it, get the parameter ID, 
-    m_strCommand += "DSStartAcquisition(paramID, 1, 0)\n"
+    mTD.strCommand += "DSStartAcquisition(paramID, 1, 0)\n"
       "Exit(paramID + 1000000. * idfirst)\n";
-    double retval = ExecuteScript((char *)m_strCommand.c_str());
+    double retval = ExecuteScript((char *)mTD.strCommand.c_str());
     if (retval == SCRIPT_ERROR_RETURN)
       return 1;
-    m_iDSimageID = (int)(retval / 1000000. + 0.5);
-    m_iDSparamID = (int)(retval + 0.5 - 1000000. * m_iDSimageID);
+    mTD.iDSimageID = (int)(retval / 1000000. + 0.5);
+    m_iDSparamID = (int)(retval + 0.5 - 1000000. * mTD.iDSimageID);
     m_bContinuousDS = true;
     m_dContExpTime = *width * *height * pixelTime / 1000.;
     for (j = 0; j < *width * *height; j++)
       array[j] = 0;
-    m_dLastReturnTime = GetTickCount();
+    mTD.dLastReturnTime = GetTickCount();
     return 0;
   }
 }
@@ -2458,7 +2507,7 @@ int TemplatePlugIn::ReturnDSChannel(short array[], long *arrSize, long *width,
 {
   if (m_iDSAcquired[channel] != CHAN_ACQUIRED)
     return 1;
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   if (!m_bContinuousDS) {
     sprintf(m_strTemp, "image imzero\n"
       "Number idzero = -1.\n"
@@ -2466,7 +2515,7 @@ int TemplatePlugIn::ReturnDSChannel(short array[], long *arrSize, long *width,
       "if (exists)\n" 
       "  idzero = GetImageID(imzero)\n"
       "Exit(idzero)\n", channel);
-    m_strCommand += m_strTemp;
+    mTD.strCommand += m_strTemp;
   }
   int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height, 
     divideBy2, 0, (!m_bContinuousDS && m_bGMS2) ? DEL_IMAGE : NO_DEL_IM, NO_SAVE);
@@ -2479,17 +2528,17 @@ int TemplatePlugIn::StopDSAcquisition()
 {
   if (!m_bContinuousDS)
     return 1;
-  m_strCommand.resize(0);
+  mTD.strCommand.resize(0);
   sprintf(m_strTemp, "DSStopAcquisition(%d)\n"
       "Delay(%d)\n"
       "DSDeleteParameters(%d)\n"
       "Exit(0)\n", m_iDSparamID, (int)(0.06 * m_iExtraDSdelay + 0.5), m_iDSparamID);
-  m_strCommand += m_strTemp;
-  double retval = ExecuteScript((char *)m_strCommand.c_str());
+  mTD.strCommand += m_strTemp;
+  double retval = ExecuteScript((char *)mTD.strCommand.c_str());
   m_iDSparamID = 0;
-  m_iDSimageID = 0;
+  mTD.iDSimageID = 0;
   m_bContinuousDS = false;
-  //m_dLastReturnTime = GetTickCount();
+  //mTD.dLastReturnTime = GetTickCount();
   return (retval == SCRIPT_ERROR_RETURN) ? 1 : 0;
 }
 
@@ -2653,11 +2702,11 @@ int PlugInWrapper::StopDSAcquisition()
 
 void PlugInWrapper::ErrorToResult(const char *strMessage, const char *strPrefix)
 {
-  gTemplatePlugIn.ErrorToResult(strMessage, strPrefix);
+  ::ErrorToResult(strMessage, strPrefix);
 }
 void PlugInWrapper::DebugToResult(const char *strMessage, const char *strPrefix)
 {
-  gTemplatePlugIn.DebugToResult(strMessage, strPrefix);
+  ::DebugToResult(strMessage, strPrefix);
 }
 int PlugInWrapper::GetDebugVal()
 {
