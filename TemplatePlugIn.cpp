@@ -79,7 +79,7 @@ public:
                                   long width, long height, long divideBy2, 
                                   long transpose, int byteSize, bool isInteger,
                                   bool isUnsignedInt);
-  void RotateFlip(short int *array, int mode, int nx, int ny, int operation, 
+  void RotateFlip(short int *array, int mode, int nx, int ny, int operation, bool invert,
                     short int *brray, int *nxout, int *nyout);
   int CopyStringIfChanged(char *newStr, char **memberStr, int &changed, long *error);
   void AddCameraSelection(int camera = -1);
@@ -754,38 +754,44 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
     try {
 
       // If doing asynchronous save, now have to do the parameter setup and acquisition
-      CM::CameraPtr camera = CM::GetCurrentCamera();
-      CM::CameraManagerPtr manager = CM::GetCameraManager();
-      k2dfa.SetFrameExposure(m_dFrameTime);
-      k2dfa.SetAlignOption(m_bAlignFrames);
+      j = 0;
+      CM::CameraPtr camera = CM::GetCurrentCamera();  j++;
+      CM::CameraManagerPtr manager = CM::GetCameraManager();  j++;
+      k2dfa.SetFrameExposure(m_dFrameTime);  j++;
+      k2dfa.SetAlignOption(m_bAlignFrames);  j++;
       k2dfa.SetHardwareProcessing(m_iReadMode ? sK2HardProcs[m_iHardwareProc / 2] : 0);
-      k2dfa.SetAsyncOption(true);
+      j++;
+      k2dfa.SetAsyncOption(true);  j++;
       if (m_bAlignFrames) {
-        std::string filter = m_strFilterName;
+        std::string filter = m_strFilterName;  j++;
         k2dfa.SetFilter(filter);
       }
 
+      j = 8;
       CM::AcquisitionParametersPtr acq_params = CM::CreateAcquisitionParameters_FullCCD(camera,
         (CM::AcquisitionProcessing)m_iK2Processing, m_dK2Exposure + 0.001, m_iK2Binning, 
         m_iK2Binning);//, m_iK2Top, m_iK2Left, m_iK2Bottom, m_iK2Right);
-      CM::SetSettling(acq_params, m_dK2Settling);
-      CM::SetShutterIndex(acq_params, m_iK2Shutter);
-      CM::SetReadMode(acq_params, sReadModes[m_iReadMode]);
+      j++;
+      CM::SetSettling(acq_params, m_dK2Settling);  j++;
+      CM::SetShutterIndex(acq_params, m_iK2Shutter);  j++;
+      CM::SetReadMode(acq_params, sReadModes[m_iReadMode]);  j++;
       if (GMS2_SDK_VERSION > 30) {
         i = sInverseTranspose[m_iRotationFlip];
         CM::SetAcqTranspose(acq_params, (i & 1) != 0, (i & 2) != 0, (i & 256) != 0);
       }
+      j = 14;
       CM::PrepareCameraForAcquire(manager, camera, acq_params,
-        k2dfa.m_DoseFracAcquisitionObj, retval);
+        k2dfa.m_DoseFracAcquisitionObj, retval);  j++;
       if (retval >= 0.001)
         Sleep((DWORD)(retval * 1000. + 0.5));
-      k2dfa.SetAsyncOption(true);
       sumImage = k2dfa.AcquireImage(camera, acq_params, image);
       numLoop = 2;
       DebugToResult("Returned from asynchronous start of acquire\n");
     }
     catch (exception exc) {
-      ErrorToResult("Caught an exception from a call to start dose frac exposure\n");
+      sprintf(m_strTemp, "Caught an exception from call %d to start dose frac exposure\n",
+        j);
+      ErrorToResult(m_strTemp);
       try {
         k2dfa.Abort();
         DM::DeleteImage(image.get());
@@ -894,7 +900,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         needProc = byteSize > 2 || signedBytes || frameDivide < 0;
 
         // Allocate buffer for rotation/flip if processing needs to be done too
-        if (needProc && m_iRotationFlip) {
+        if (needProc && (m_iRotationFlip || !m_bWriteTiff)) {
           try {
             if (outByteSize == 1)
               rotBuf = (short *)(new unsigned char [*width * *height]);
@@ -977,9 +983,9 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 
           // Rotate and flip if desired and change the array pointer to save to use the 
           // passed array or the rotation array
-          if (m_iRotationFlip) {
-            RotateFlip(outData, fileMode, *width, *height, m_iRotationFlip, outForRot,
-              &nxout, &nyout);
+          if (m_iRotationFlip || !m_bWriteTiff) {
+            RotateFlip(outData, fileMode, *width, *height, m_iRotationFlip, !m_bWriteTiff,
+              outForRot, &nxout, &nyout);
             outData = outForRot;
           } else {
             nxout = *width;
@@ -1096,7 +1102,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
             iifile->amax = (float)tmax;
             iifile->amean = tmean / (float)(nxout * nyout);
 
-            i = tiffWriteSection(iifile, outData, m_iTiffCompression, 0, 
+            i = tiffWriteSection(iifile, outData, m_iTiffCompression, 1, 
               B3DNINT(2.54e8 / m_dPixelSize), m_iTiffQuality);
             if (i) {
               m_iErrorFromSave = WRITE_DATA_ERROR;
@@ -1312,7 +1318,7 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
       // This routine builds in a final flip around X "for output" so the operations
       // are derived to specify such flipped output to give the desired one
       RotateFlip((short *)imageData, MRC_MODE_FLOAT, width, height, 
-        operations[transpose & 3], (short *)array, &i, &j);
+        operations[transpose & 3], true, (short *)array, &i, &j);
     } else {
 
       // Just copy data to array to start or end with if no transpose around Y
@@ -1546,7 +1552,7 @@ void  TemplatePlugIn::ProcessImage(void *imageData, void *array, int dataSize,
 // before rotation or 8 for flipping around Y after.  THIS IS COPY OF ProcRotateFlip
 // with the type and invertCon arguments removed and invert contrast code also
 void TemplatePlugIn::RotateFlip(short int *array, int mode, int nx, int ny, int operation, 
-                                short int *brray, int *nxout, int *nyout)
+                              bool invert, short int *brray, int *nxout, int *nyout)
 {
   int xalong[4] = {1, 0, -1, 0};
   int yalong[4] = {0, -1, 0, 1};
@@ -1571,7 +1577,7 @@ void TemplatePlugIn::RotateFlip(short int *array, int mode, int nx, int ny, int 
   float *fbrray = (float *)brray;
 
   // Map the operation to produce a final flipping around X axis for output
-  if (operation < 8)
+  if (operation < 8 && invert)
     operation = mapping[operation];
   rotation = operation % 4;
 
@@ -2002,7 +2008,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     }
   }
   if (!*error && defects && (flags & K2_SAVE_DEFECTS)) {
-    DebugToResult(m_strDefectsToSave);
+    
     // Extract or make up a filename
     m_strTemp[0] = 0x00;
     if (m_strDefectsToSave[0] == '#') {
