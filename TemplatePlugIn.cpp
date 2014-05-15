@@ -720,7 +720,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
                       long *width, long *height, long divideBy2, long transpose, 
                       long delImage, long saveFrames)
 {
-  int retval;
+  DWORD retval, threadID;
+  HANDLE sHAcquireThread;
   mTD.array = array;
   mTD.dataSize = dataSize;
   mTD.arrSize = *arrSize;
@@ -730,13 +731,33 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   mTD.transpose = transpose;
   mTD.delImage = delImage;
   mTD.saveFrames = saveFrames;
-  retval = (int)AcquireProc(&mTD);
+  if (saveFrames && mTD.bAsyncSave) {
+    *arrSize = *width = *height = 0;
+    sHAcquireThread = CreateThread(NULL, 0, AcquireProc, &mTD, CREATE_SUSPENDED, 
+      &threadID);
+    if (!sHAcquireThread)
+      return THREAD_ERROR;
+    retval = ResumeThread(sHAcquireThread);
+    if (retval == (DWORD)(-1) || retval > 1)
+      return THREAD_ERROR;
+    DebugToResult("Started thread, going into wait loop\n");
+    while (1) {
+      GetExitCodeThread(sHAcquireThread, &retval);
+      if (retval != STILL_ACTIVE)
+        break;
+      if (!SleepMsg(10))
+        break;
+    }
+  } else {
+    retval = AcquireProc(&mTD);
+  }
   *arrSize = mTD.arrSize;
   *width = mTD.width;
   *height = mTD.height;
-  return retval;
+  return (int)retval;
 }
 
+// The actual procedure for acquiring and processing image
 static DWORD WINAPI AcquireProc(LPVOID pParam)
 {
   ThreadData *td = (ThreadData *)pParam;

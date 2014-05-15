@@ -155,7 +155,7 @@ int StartSocket(int &wsaError)
 
   // It returns the previous suspend count; so it should be 1.
   DWORD err = ResumeThread(sHSocketThread);
-  if (err < 0 || err > 1) {
+  if (err == (DWORD)(-1) || err > 1) {
 
     // Probably should signal the thread to shut down here as in FocusRamper
     Cleanup();
