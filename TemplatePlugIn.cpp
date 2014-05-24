@@ -38,9 +38,11 @@ using namespace std ;
 #define MAX_DS_CHANNELS 8
 #define ID_MULTIPLIER 10000000
 #define SUPERRES_FRAME_SCALE 16
+#define DATA_MUTEX_WAIT  100
 enum {CHAN_UNUSED = 0, CHAN_ACQUIRED, CHAN_RETURNED};
 enum {NO_SAVE = 0, SAVE_FRAMES};
 enum {NO_DEL_IM = 0, DEL_IMAGE};
+enum {WAIT_FOR_THREAD, WAIT_FOR_RETURN, WAIT_FOR_NEW_SHOT};
 
 // Mapping from program read modes (0-2) to values for K2
 static int sReadModes[3] = {K2_LINEAR_READ_MODE, K2_COUNTING_READ_MODE, 
@@ -56,6 +58,9 @@ static int sInverseTranspose[8] = {0, 258, 3, 257, 1, 256, 2, 259};
 
 // THE debug mode flag
 static BOOL sDebug;
+
+// Handle for mutex for writing critical components of thread data
+static HANDLE sDataMutexHandle;
 
 // Structure to hold data to pass to acquire proc/thread
 struct ThreadData 
@@ -95,11 +100,32 @@ struct ThreadData
   BOOL bAlignFrames;
   char strFilterName[MAX_FILTER_NAME];
   int iHardwareProc;
-  char *strRootName;
-  char *strSaveDir;
-  char *strGainRefToCopy;
-  char *strLastRefName;
-  char *strLastRefDir;
+  string strRootName;
+  string strSaveDir;
+  string strGainRefToCopy;
+  string strLastRefName;
+  string strLastRefDir;
+
+  // New non-internal items
+  int iNumFramesToSum;
+  int iNumSummed;
+  int iNumGrabAndStack;
+  bool bEarlyReturn;
+  bool bAsyncToRAM;
+  int iReadyToAcquire;
+  int iReadyToReturn;
+  int iDMquitting;
+
+  // Items needed internally in save routine and its functions
+  FILE *fp;
+  ImodImageFile *iifile;
+  short *outData, *rotBuf, *tempBuf;
+  int *sumBuf;
+  void **grabStack;
+  MrcHeader hdata;
+  int fileMode, outByteSize, byteSize;
+  bool isInteger, isUnsignedInt, isFloat, signedBytes, save4bit;
+  float writeScaling;
 };
 
 // Local functions callable from thread
@@ -107,8 +133,21 @@ static DWORD WINAPI AcquireProc(LPVOID pParam);
 static void  ProcessImage(void *imageData, void *array, int dataSize, long width, 
                           long height, long divideBy2, long transpose, int byteSize, 
                           bool isInteger, bool isUnsignedInt, float floatScaling);
+static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, int slice, 
+                            bool finalFrame, int &fileSlice, int &tmin,
+                            int &tmax, float &meanSum);
+static int GetTypeAndSizeInfo(ThreadData *td, DM::Image &image, int loop, int outLimit,
+                              bool doingStack);
+static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum, 
+                            long &frameDivide, bool &needProc);
 static void RotateFlip(short int *array, int mode, int nx, int ny, int operation, 
                        bool invert, short int *brray, int *nxout, int *nyout);
+static void AddToSum(ThreadData *td, void *data, void *sumArray);
+static void AccumulateWallTime(double &cumTime, double &wallStart);
+static void DeleteImageIfNeeded(ThreadData *td, DM::Image &image, bool *needsDelete);
+static void SetWatchedDataValue(int &member, int value);
+static int GetWatchedDataValue(int &member);
+static double TickInterval(double start);
 static int CopyK2ReferenceIfNeeded(ThreadData *td);
 static void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
 static void ErrorToResult(const char *strMessage, const char *strPrefix = NULL);
@@ -145,7 +184,8 @@ public:
   double ExecuteClientScript(char *strScript, BOOL selectCamera);
   int AcquireAndTransferImage(void *array, int dataSize, long *arrSize, long *width,
     long *height, long divideBy2, long transpose, long delImage, long saveFrames);
-  int CopyStringIfChanged(char *newStr, char **memberStr, int &changed, long *error);
+  DWORD WaitForAcquireThread(int waitType);
+  int CopyStringIfChanged(char *newStr, string &memberStr, int &changed, long *error);
   void AddCameraSelection(int camera = -1);
   int GetGainReference(float *array, long *arrSize, long *width, 
               long *height, long binning);
@@ -174,6 +214,8 @@ public:
   
 private:
   ThreadData mTD;
+  ThreadData mTDcopy;
+  HANDLE m_HAcquireThread;
   BOOL m_bGMS2;
   int m_iDMVersion;
   int m_iCurrentCamera;
@@ -190,8 +232,8 @@ private:
   double m_dSyncMargin;
   BOOL m_bDoseFrac;
   BOOL m_bSaveFrames;
-  char *m_strPostSaveCom;
-  char *m_strDefectsToSave;
+  string m_strPostSaveCom;
+  string m_strDefectsToSave;
 };
 
 TemplatePlugIn::TemplatePlugIn()
@@ -201,6 +243,8 @@ TemplatePlugIn::TemplatePlugIn()
   if (sDebug)
     m_iDebugVal = atoi(getenv("SERIALEMCCD_DEBUG"));
 
+  sDataMutexHandle = CreateMutex(0, 0, 0);
+  m_HAcquireThread = NULL;
   m_iDMVersion = 340;
   m_iCurrentCamera = 0;
   m_strQueue.resize(0);
@@ -225,13 +269,6 @@ TemplatePlugIn::TemplatePlugIn()
   mTD.iHardwareProc = 6;
   m_bDoseFrac = false;
   m_bSaveFrames = false;
-  mTD.strRootName = NULL;
-  mTD.strSaveDir = NULL;
-  m_strPostSaveCom = NULL;
-  mTD.strGainRefToCopy = NULL;
-  mTD.strLastRefName = NULL;
-  mTD.strLastRefDir = NULL;
-  m_strDefectsToSave = NULL;
   mTD.iSaveFlags = 0;
   mTD.bFilePerImage = true;
   mTD.bWriteTiff = false;
@@ -242,10 +279,10 @@ TemplatePlugIn::TemplatePlugIn()
   mTD.dPixelSize = 5.;
   const char *temp = getenv("SERIALEMCCD_ROOTNAME");
   if (temp)
-    mTD.strRootName = _strdup(temp);
+    mTD.strRootName = temp;
   temp = getenv("SERIALEMCCD_SAVEDIR");
   if (temp)
-    mTD.strSaveDir = _strdup(temp);
+    mTD.strSaveDir = temp;
 }
 
 
@@ -290,14 +327,20 @@ void TemplatePlugIn::Run()
     DebugToResult("SerialEMCCD: Error getting Digital Micrograph version\n");
   }
   HANDLE hMutex = CreateMutex(NULL, FALSE, "SEMCCD-SingleInstance");
-  if (hMutex && GetLastError() == ERROR_ALREADY_EXISTS)
-    ErrorToResult("WARNING: THERE ARE TWO COPIES OF THE SERIALEMCCD PLUGIN LOADED!!!\n"
+  if (hMutex && GetLastError() == ERROR_ALREADY_EXISTS) {
+    std::string str = "WARNING: THERE ARE TWO COPIES OF THE SERIALEMCCD PLUGIN LOADED!!!"
+      "\n\n"
     "  Look in both C:\\ProgramData\\Gatan\\Plugins and C:\\Program Files\\Gatan\\Plugins"
     "\n  (or in C:\\Program Files\\Gatan\\DigitalMicrograph\\Plugins on Windows XP) for\n"
     "  copies of SEMCCD-GMS2...dll.\n  Shut down DigitalMicrograph and remove the extra "
     "copy.\n  Rename the remaining file, if necessary, to remove minor version numbers\n"
-    "  (i.e., it should be named SEMCCD-GMS2-32.dll or SEMCCD-GMS2-64.dll\n"
-    "WARNING: THERE ARE TWO COPIES OF THE SERIALEMCCD PLUGIN LOADED!!!\n", "");
+    "  (i.e., it should be named SEMCCD-GMS2-32.dll or SEMCCD-GMS2-64.dll";
+    MessageBox(NULL, str.c_str(), "Two Copies of SerialEM Plugin", 
+      MB_OK | MB_ICONQUESTION);
+    str = "\n" + str + 
+      "\n\nWARNING: THERE ARE TWO COPIES OF THE SERIALEMCCD PLUGIN LOADED!!!\n\n";
+    ErrorToResult(str.c_str(), "");
+  }
   DebugToResult("Going to start socket\n");
   socketRet = StartSocket(wsaError);
   if (socketRet) {
@@ -305,6 +348,8 @@ void TemplatePlugIn::Run()
       socketRet, wsaError);
     ErrorToResult(buff, "SerialEMCCD: ");
   }
+
+  overrideWriteBytes(0);
 }
 
 ///
@@ -341,13 +386,19 @@ static void DebugToResult(const char *strMessage, const char *strPrefix)
     return;
   double time = (::GetTickCount() % (DWORD)3600000) / 1000.;
   char timestr[20];
+  const char *findret;
   sprintf(timestr, "%.3f ", time);
   DM::OpenResultsWindow();
   DM::Result(timestr);
   if (strPrefix)
     DM::Result(strPrefix);
-  else
-    DM::Result("DMCamera Debug :\n");
+  else {
+    findret = strchr(strMessage, '\n');
+    if (findret && findret[1] != 0x00)
+      DM::Result("DMCamera Debug :\n");
+    else
+      DM::Result("DMCamera Debug :  ");
+  }
   DM::Result(strMessage );
 }
 
@@ -441,6 +492,9 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 {
   int saveFrames = NO_SAVE;
   int newProc;
+  if (m_bSaveFrames && mTD.iReadMode >= 0 && m_bDoseFrac && mTD.strSaveDir.length() && 
+    mTD.strRootName.length())
+      saveFrames = SAVE_FRAMES;
 
   if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
     
@@ -475,8 +529,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
   // Intercept K2 asynchronous saving here
   mTD.iK2Processing = newProc;
-  if (m_bSaveFrames && mTD.iReadMode >= 0 && m_bDoseFrac && mTD.strSaveDir && mTD.strRootName &&
-    mTD.bAsyncSave) {
+  if (saveFrames == SAVE_FRAMES && mTD.bAsyncSave) {
       sprintf(m_strTemp, "Exit(0)");
       mTD.strCommand += m_strTemp;
       mTD.iK2Top = top;
@@ -540,36 +593,48 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
   // Commands for K2 camera
   if (mTD.iReadMode >= 0) {
-    if (m_bDoseFrac) {
-
-      // WORKAROUND to bug in frame time, save & set the global frame time, restore after
-      sprintf(m_strTemp, "Object k2dfa = alloc(K2_DoseFracAcquisition)\n"
-        "k2dfa.DoseFrac_SetHardwareProcessing(%d)\n"
-        "k2dfa.DoseFrac_SetAlignOption(%d)\n"
-        "k2dfa.DoseFrac_SetFrameExposure(%f)\n"
-        "Number savedFrameTime = K2_DoseFrac_GetFrameExposure(camera)\n"
-        "K2_DoseFrac_SetFrameExposure(camera, %f)\n", 
-        mTD.iReadMode ? sK2HardProcs[mTD.iHardwareProc / 2] : 0,
-        mTD.bAlignFrames ? 1 : 0, mTD.dFrameTime, mTD.dFrameTime);
-      mTD.strCommand += m_strTemp;
-      if (m_bGMS2 && GMS2_SDK_VERSION > 30 && mTD.iRotationFlip) {
-        sprintf(m_strTemp, "CM_SetAcqTranspose(acqParams, %d)\n", 
-          sInverseTranspose[mTD.iRotationFlip]);
-        mTD.strCommand += m_strTemp;
-      }
-      if (mTD.bAlignFrames) {
-        sprintf(m_strTemp, "k2dfa.DoseFrac_SetFilter(\"%s\")\n", mTD.strFilterName);
-        mTD.strCommand += m_strTemp;
-      }
-    }
     if (GMS2_SDK_VERSION < 31) {
       sprintf(m_strTemp, "K2_SetHardwareProcessing(camera, %d)\n", 
         mTD.iReadMode ? sK2HardProcs[mTD.iHardwareProc / 2] : 0);
     } else {
-      sprintf(m_strTemp, "CM_SetHardwareCorrections(acqParams, %d)\n",
-        mTD.iReadMode ? sCMHardCorrs[mTD.iHardwareProc / 2] : 0);
+      sprintf(m_strTemp, "CM_SetHardwareCorrections(acqParams, %d)\n"
+          "CM_SetDoAcquireStack(acqParams, %d)\n",
+          mTD.iReadMode ? sCMHardCorrs[mTD.iHardwareProc / 2] : 0, m_bDoseFrac ? 1 : 0);
     }
     mTD.strCommand += m_strTemp;
+
+    if (m_bDoseFrac) {
+
+      if (GMS2_SDK_VERSION < 31) {
+
+        // WORKAROUND to bug in frame time, save & set the global frame time, restore after
+        sprintf(m_strTemp, "Object k2dfa = alloc(K2_DoseFracAcquisition)\n"
+          "k2dfa.DoseFrac_SetHardwareProcessing(%d)\n"
+          "k2dfa.DoseFrac_SetAlignOption(%d)\n"
+          "k2dfa.DoseFrac_SetFrameExposure(%f)\n"
+          "Number savedFrameTime = K2_DoseFrac_GetFrameExposure(camera)\n"
+          "K2_DoseFrac_SetFrameExposure(camera, %f)\n", 
+          mTD.iReadMode ? sK2HardProcs[mTD.iHardwareProc / 2] : 0,
+          mTD.bAlignFrames ? 1 : 0, mTD.dFrameTime, mTD.dFrameTime);
+        mTD.strCommand += m_strTemp;
+        if (mTD.bAlignFrames) {
+          sprintf(m_strTemp, "k2dfa.DoseFrac_SetFilter(\"%s\")\n", mTD.strFilterName);
+          mTD.strCommand += m_strTemp;
+        }
+      } else {
+        sprintf(m_strTemp, "CM_SetAlignmentFilter(acqParams, \"%s\")\n"
+          "CM_SetFrameExposure(acqParams, %f)\n"
+          "CM_SetStackFormat(acqParams, %d)\n",
+          mTD.bAlignFrames ? mTD.strFilterName : "", mTD.dFrameTime,
+          saveFrames == SAVE_FRAMES ? 0 : 1);
+        mTD.strCommand += m_strTemp;
+        if (mTD.iRotationFlip) {
+          sprintf(m_strTemp, "CM_SetAcqTranspose(acqParams, %d)\n", 
+            sInverseTranspose[mTD.iRotationFlip]);
+          mTD.strCommand += m_strTemp;
+        }
+      }
+    }
 
     sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
       "Number wait_time_s\n"
@@ -623,20 +688,20 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       bottom, right);
     mTD.strCommand += m_strTemp;
   } else {
-    if (processing == DARK_REFERENCE)
+    if (processing == DARK_REFERENCE) {
       // This command has an inverted sense, 1 means keep shutter closed
       // Need to use this to get defect correction
       mTD.strCommand += "CM_SetShutterExposure(acqParams, 1)\n"
           "Image img := CM_AcquireImage(camera, acqParams)\n";
 //      "Image img := CM_CreateImageForAcquire(camera, acqParams, \"temp\")\n"
 //            "CM_AcquireDarkReference(camera, acqParams, img, NULL)\n";
-    else if (mTD.iReadMode >= 0 && m_bDoseFrac)
+    } else if (mTD.iReadMode >= 0 && m_bDoseFrac && GMS2_SDK_VERSION < 31) {
       mTD.strCommand += "Image stack\n"
-      "Image img := k2dfa.DoseFrac_AcquireImage(camera, acqParams, stack)\n"
-      "K2_DoseFrac_SetFrameExposure(camera, savedFrameTime)\n";
-
-    else
+        "Image img := k2dfa.DoseFrac_AcquireImage(camera, acqParams, stack)\n"
+        "K2_DoseFrac_SetFrameExposure(camera, savedFrameTime)\n";
+    } else {
       mTD.strCommand += "Image img := CM_AcquireImage(camera, acqParams)\n";
+    }
   }
   
   // Restore drift settling to zero if it was set
@@ -647,16 +712,16 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   sprintf(m_strTemp, "KeepImage(img)\n"
     "number retval = GetImageID(img)\n");
   mTD.strCommand += m_strTemp;
-  if (m_bSaveFrames && mTD.iReadMode >= 0 && m_bDoseFrac && mTD.strSaveDir && mTD.strRootName) {
-    saveFrames = SAVE_FRAMES;
+  if (saveFrames == SAVE_FRAMES && GMS2_SDK_VERSION < 31) {
     sprintf(m_strTemp, "KeepImage(stack)\n"
       "number stackID = GetImageID(stack)\n"
       //"Result(retval + \"  \" + stackID + \"\\n\")\n"
       "retval = retval + %d * stackID\n", ID_MULTIPLIER);
     mTD.strCommand += m_strTemp;
   } else if (m_bSaveFrames) {
-    sprintf(m_strTemp, "Save set but %d %d   %s   %s\n", mTD.iReadMode, m_bDoseFrac ? 1 : 0,
-      mTD.strSaveDir ? mTD.strSaveDir : "NO DIR", mTD.strRootName ? mTD.strRootName : "NO ROOT");
+    sprintf(m_strTemp, "Save set but %d %d   %s   %s\n", mTD.iReadMode, 
+      m_bDoseFrac ? 1 : 0, mTD.strSaveDir.length() ? mTD.strSaveDir.c_str() : "NO DIR",
+      mTD.strRootName.length() ? mTD.strRootName.c_str() : "NO ROOT");
     DebugToResult(m_strTemp);
   }
   sprintf(m_strTemp, "Exit(retval)");
@@ -706,22 +771,32 @@ int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width,
   return retval;
 }
 
-#define SET_ERROR(a) if (doingStack) \
+#define SET_ERROR(a) {if (doingStack) \
         td->iErrorFromSave = a; \
-      else \
+      if (!doingStack || numLoop == 1) \
         errorRet = a; \
-      continue;
+        continue;}
 
 /*
  * Common routine for executing the current command script, getting an image ID back from
- * it, and copy the image into the supplied array with various transformations
+ * it, and copying the image into the supplied array with various transformations
  */
 int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arrSize, 
                       long *width, long *height, long divideBy2, long transpose, 
                       long delImage, long saveFrames)
 {
-  DWORD retval, threadID;
-  HANDLE sHAcquireThread;
+  DWORD retval = 0, threadID;
+  ThreadData *retTD = &mTD;
+
+  // If there was an acquire thread started, wait until it is done for any dose frac
+  // shot, or until ready for acquisition for other shots
+  if (m_HAcquireThread) {
+    retval = WaitForAcquireThread(m_bDoseFrac ? WAIT_FOR_THREAD : WAIT_FOR_NEW_SHOT);
+    if (!SleepMsg(10))
+      retval = 1;
+  }
+
+  int sizeOrig = *arrSize;
   mTD.array = array;
   mTD.dataSize = dataSize;
   mTD.arrSize = *arrSize;
@@ -731,30 +806,73 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   mTD.transpose = transpose;
   mTD.delImage = delImage;
   mTD.saveFrames = saveFrames;
-  if (saveFrames && mTD.bAsyncSave) {
-    *arrSize = *width = *height = 0;
-    sHAcquireThread = CreateThread(NULL, 0, AcquireProc, &mTD, CREATE_SUSPENDED, 
-      &threadID);
-    if (!sHAcquireThread)
-      return THREAD_ERROR;
-    retval = ResumeThread(sHAcquireThread);
-    if (retval == (DWORD)(-1) || retval > 1)
-      return THREAD_ERROR;
-    DebugToResult("Started thread, going into wait loop\n");
-    while (1) {
-      GetExitCodeThread(sHAcquireThread, &retval);
-      if (retval != STILL_ACTIVE)
-        break;
-      if (!SleepMsg(10))
-        break;
-    }
-  } else {
+  mTD.iReadyToAcquire = 0;
+  mTD.iReadyToReturn = 0;
+  mTD.iDMquitting = 0;
+  mTD.iErrorFromSave = 0;
+
+  // A thread is needed if doing asynchronous saving, or even for synchronous save with
+  // an early return, but only for old version
+  if (!retval && saveFrames && 
+    (mTD.bAsyncSave || (mTD.bEarlyReturn && GMS2_SDK_VERSION < 31))) {
+      *arrSize = *width = *height = 0;
+      mTDcopy = mTD;
+      retTD = &mTDcopy;
+      m_HAcquireThread = CreateThread(NULL, 0, AcquireProc, &mTDcopy, CREATE_SUSPENDED, 
+        &threadID);
+      if (!m_HAcquireThread)
+        return THREAD_ERROR;
+      retval = ResumeThread(m_HAcquireThread);
+      if (retval == (DWORD)(-1) || retval > 1)
+        return THREAD_ERROR;
+      DebugToResult("Started thread, going into wait loop\n");
+      retval = WaitForAcquireThread(mTD.bEarlyReturn ? WAIT_FOR_RETURN : WAIT_FOR_THREAD);
+      mTD.iErrorFromSave = mTDcopy.iErrorFromSave;
+      mTD.iFramesSaved = mTDcopy.iFramesSaved;
+      sprintf(m_strTemp, "Back from thread, retval %d errfs %d  #saved %d w %d h %d\n",
+        retval, mTD.iErrorFromSave, mTD.iFramesSaved, retTD->width, retTD->height);
+      DebugToResult(m_strTemp);
+      if (!retval && !retTD->arrSize && retTD->iNumFramesToSum)
+        retTD->arrSize = retTD->width * retTD->height;
+  } else if (!retval) {
     retval = AcquireProc(&mTD);
   }
-  *arrSize = mTD.arrSize;
-  *width = mTD.width;
-  *height = mTD.height;
+  *width = retTD->width;
+  *height = retTD->height;
+  if (!retval && !retTD->arrSize)
+    *arrSize = B3DMIN(1024, sizeOrig);
+  else
+    *arrSize = retTD->arrSize;
   return (int)retval;
+}
+
+// Wait for either an acquire thread to be done, a sum to be done, or for DM to be ready
+// for a non-dose-frac shot
+DWORD TemplatePlugIn::WaitForAcquireThread(int waitType)
+{
+  double quitStart = -1.;
+  DWORD retval;
+  sprintf(m_strTemp, "Waiting for %s\n", waitType == WAIT_FOR_THREAD ? "thread to end" :
+    (waitType == WAIT_FOR_RETURN ? "exposure and frame sum to complete" : 
+    "ready for single-shot"));
+  DebugToResult(m_strTemp);
+  while (1) {
+    GetExitCodeThread(m_HAcquireThread, &retval);
+    if (retval != STILL_ACTIVE) {
+      m_HAcquireThread = NULL;
+      return retval;
+    }
+    if ((waitType == WAIT_FOR_RETURN && GetWatchedDataValue(mTDcopy.iReadyToReturn)) ||
+      (waitType == WAIT_FOR_NEW_SHOT && GetWatchedDataValue(mTDcopy.iReadyToAcquire)))
+      return 0;
+    if (!SleepMsg(10)) {
+      quitStart = GetTickCount();
+      SetWatchedDataValue(mTDcopy.iDMquitting, 1);
+    }
+    if (quitStart >= 0. && TickInterval(quitStart) > 5000.)
+      return QUIT_DURING_SAVE;
+  }
+  return 0;
 }
 
 // The actual procedure for acquiring and processing image
@@ -763,46 +881,55 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   ThreadData *td = (ThreadData *)pParam;
   long ID, imageID, stackID, frameDivide = td->divideBy2;
   void *array = td->array;
-  int dataSize = td->dataSize;
+  int outLimit = td->arrSize;
   long divideBy2 = td->divideBy2;
   long transpose = td->transpose;
   long delImage = td->delImage;
   long saveFrames = td->saveFrames;
   DM::Image image, sumImage;
-  long outLimit = td->arrSize;
-  int byteSize, i, j, numDim, loop, outByteSize, numLoop = 1;
-  unsigned short *usData;
-  unsigned char *bData, *packed;
-  unsigned char lowbyte;
+  int i, j, numDim, loop, numLoop = 1;
   GatanPlugIn::ImageDataLocker *imageLp = NULL;
 #if defined(GMS2) && GMS2_SDK_VERSION >= 30
   ImageDataPlugin::image_data_t fData;
 #else
   ImageData::image_data_t fData;
 #endif
+  std::string filter = td->bAlignFrames ? td->strFilterName : "";
   void *imageData;
-  short *outData, *outForRot, *rotBuf = NULL;
-  short *sData;
-  bool isInteger, isUnsignedInt, doingStack, isFloat, signedBytes, save4bit, needProc;
-  bool stackAllReady, doingAsyncSave;
-  double retval, procWall, saveWall, wallStart, wallNow;
-  FILE *fp = NULL;
-  MrcHeader hdata;
-  ImodImageFile *iifile = NULL;
-  int fileSlice, tmin, tmax, tsum, val, numSlices, fileMode, nxout, nyout, nxFile;
-  float tmean, meanSum, scaleSave = td->fFloatScaling, scaling = 1.;
+  short *outForRot;
+  short *procOut;
+  bool doingStack, needProc, needTemp, needSum, exposureDone;
+  bool stackAllReady, doingAsyncSave, frameNeedsDelete = false;
+  double retval, procWall, saveWall, getFrameWall, wallStart;
+  int fileSlice, tmin, tmax, numSlices, nxout, nyout, grabInd, grabSlice;
+  float meanSum, scaleSave = td->fFloatScaling;
+  int slice = 0;
   int errorRet = 0;
 #ifdef _WIN64
+  DM::ScriptObject dummyObj;
+#if GMS2_SDK_VERSION < 31
   K2_DoseFracAcquisition k2dfa;
+#else
+  CM::ImageStackPtr stack;
+  double expStart;
+#endif
 #endif
 
   // Set these values to zero in case of error returns
   td->width = 0;
   td->height = 0;
   td->arrSize = 0;
+  td->iNumSummed = 0;
   td->iFramesSaved = 0;
-  td->iErrorFromSave = 0;
   doingAsyncSave = saveFrames && td->bAsyncSave;
+  exposureDone = !doingAsyncSave;
+  needTemp = saveFrames && td->bEarlyReturn;
+  needSum = saveFrames && td->iNumFramesToSum != 0 && (GMS2_SDK_VERSION >= 31 ||
+    (GMS2_SDK_VERSION < 31 && td->bEarlyReturn)); 
+  td->iifile = NULL;
+  td->fp = NULL;
+  td->rotBuf = td->tempBuf = NULL;
+  td->sumBuf = NULL;
 
   // Execute the command string as developed
   if (td->strCommand.length() > 0)
@@ -811,12 +938,14 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     retval = td->iDSimageID;
   td->dLastReturnTime = GetTickCount();
   
-  // If error, zero out the return values and return error code
+  // If error, return error code
   if (retval == SCRIPT_ERROR_RETURN)
     return (int)retval;
 
-  // Get the image ID(s)
+  // Get the image ID for simple cases
   ID = imageID = (long)(retval + 0.01);
+
+  // Do asynchronous save by old and new API
   if (doingAsyncSave) {
 #ifdef _WIN64
     try {
@@ -825,45 +954,62 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       j = 0;
       CM::CameraPtr camera = CM::GetCurrentCamera();  j++;
       CM::CameraManagerPtr manager = CM::GetCameraManager();  j++;
+      CM::AcquisitionParametersPtr acqParams = CM::CreateAcquisitionParameters_FullCCD(camera,
+        (CM::AcquisitionProcessing)td->iK2Processing, td->dK2Exposure + 0.001, td->iK2Binning, 
+        td->iK2Binning);//, td->iK2Top, td->iK2Left, td->iK2Bottom, td->iK2Right);
+      j++;
+#if GMS2_SDK_VERSION < 31
       k2dfa.SetFrameExposure(td->dFrameTime);  j++;
       k2dfa.SetAlignOption(td->bAlignFrames);  j++;
       k2dfa.SetHardwareProcessing(td->iReadMode ? sK2HardProcs[td->iHardwareProc / 2] : 0);
       j++;
       k2dfa.SetAsyncOption(true);  j++;
-      if (td->bAlignFrames) {
-        std::string filter = td->strFilterName;  j++;
+      if (td->bAlignFrames)
         k2dfa.SetFilter(filter);
-      }
+#else
+      CM::SetHardwareCorrections(acqParams, CM::CCD::Corrections::from_bits(
+        td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0));  j++;
+      CM::SetAlignmentFilter(acqParams, filter);  j++;
+      CM::SetFrameExposure(acqParams, td->dFrameTime);  j++;
+      CM::SetDoAcquireStack(acqParams, 1);  j++;
+      CM::SetStackFormat(acqParams, CM::StackFormat::Series);  j++;
+      CM::SetDoAsyncReadout(acqParams, td->bAsyncToRAM ? 1 : 0);   j++;
+      i = sInverseTranspose[td->iRotationFlip];
+      CM::SetAcqTranspose(acqParams, (i & 1) != 0, (i & 2) != 0, (i & 256) != 0);  
+#endif
 
-      j = 8;
-      CM::AcquisitionParametersPtr acq_params = CM::CreateAcquisitionParameters_FullCCD(camera,
-        (CM::AcquisitionProcessing)td->iK2Processing, td->dK2Exposure + 0.001, td->iK2Binning, 
-        td->iK2Binning);//, td->iK2Top, td->iK2Left, td->iK2Bottom, td->iK2Right);
-      j++;
-      CM::SetSettling(acq_params, td->dK2Settling);  j++;
-      CM::SetShutterIndex(acq_params, td->iK2Shutter);  j++;
-      CM::SetReadMode(acq_params, sReadModes[td->iReadMode]);  j++;
-      if (GMS2_SDK_VERSION > 30) {
-        i = sInverseTranspose[td->iRotationFlip];
-        CM::SetAcqTranspose(acq_params, (i & 1) != 0, (i & 2) != 0, (i & 256) != 0);
-      }
-      j = 14;
-      CM::PrepareCameraForAcquire(manager, camera, acq_params,
-        k2dfa.m_DoseFracAcquisitionObj, retval);  j++;
+      j = 10;
+      CM::SetSettling(acqParams, td->dK2Settling);  j++;
+      CM::SetShutterIndex(acqParams, td->iK2Shutter);  j++;
+      CM::SetReadMode(acqParams, sReadModes[td->iReadMode]);  j++;
+      CM::PrepareCameraForAcquire(manager, camera, acqParams, dummyObj, retval);  j++;
       if (retval >= 0.001)
         Sleep((DWORD)(retval * 1000. + 0.5));
-      sumImage = k2dfa.AcquireImage(camera, acq_params, image);
+
+#if GMS2_SDK_VERSION < 31
+      sumImage = k2dfa.AcquireImage(camera, acqParams, image);
       numLoop = 2;
+#else
+      stack = CM::AcquireImageStack(camera, acqParams);   j++;
+      numSlices = stack->GetNumFrames();
+      stackAllReady = true;
+      expStart = GetTickCount();
+#endif
       DebugToResult("Returned from asynchronous start of acquire\n");
     }
     catch (exception exc) {
-      sprintf(td->strTemp, "Caught an exception from call %d to start dose frac exposure\n",
-        j);
+      sprintf(td->strTemp, "Caught an exception from call %d to start dose frac exposure:"
+        "\n  %s\n", j, exc.what());
       ErrorToResult(td->strTemp);
       try {
+#if GMS2_SDK_VERSION < 31
         k2dfa.Abort();
-        DM::DeleteImage(image.get());
         DM::DeleteImage(sumImage.get());
+        DM::DeleteImage(image.get());
+#else
+        stack->Abort();
+        // TODO: delete anything?
+#endif
       }
       catch (exception exc) {
       }
@@ -871,17 +1017,27 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     }
 #endif
   } else if (saveFrames) {
-    stackID = (int)((retval + 0.1) / ID_MULTIPLIER);
-    imageID = B3DNINT(retval - (double)stackID * ID_MULTIPLIER);
-    if (stackID) {
-      numLoop = 2;
-      ID = stackID;
+
+    // Synchronous dose-fractionation and saving: the stack is complete
+    if (GMS2_SDK_VERSION < 31) {
+
+      // Old way: stack and image exist
+      stackID = (int)((retval + 0.1) / ID_MULTIPLIER);
+      imageID = B3DNINT(retval - (double)stackID * ID_MULTIPLIER);
+      if (stackID) {
+        numLoop = 2;
+        ID = stackID;
+      } else {
+        saveFrames = 0;
+        td->iErrorFromSave = NO_STACK_ID;
+      }
+      sprintf(td->strTemp, "Image ID %d  stack ID %d\n", imageID, stackID);
+      DebugToResult(td->strTemp);
     } else {
-      saveFrames = 0;
-      td->iErrorFromSave = NO_STACK_ID;
+
+      // New way, just a stack is created, set up to use its ID first time
+      ID = imageID;
     }
-    sprintf(td->strTemp, "Image ID %d  stack ID %d\n", imageID, stackID);
-    DebugToResult(td->strTemp);
   }
 
   // Loop on stack then image if there are both
@@ -890,7 +1046,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     delete imageLp;
     imageLp = NULL;
 
-    // Second time through, substitute the sum image or its ID
+    // Second time through (old GMS), substitute the sum image or its ID
     if (loop) {
       if (doingAsyncSave) 
         image = sumImage;
@@ -905,389 +1061,298 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         SET_ERROR(IMAGE_NOT_FOUND);
       }
 
-      // Check the data type (may need to be fancier)
-      byteSize = DM::ImageGetDataElementByteSize(image.get());
-      isInteger = DM::ImageIsDataTypeInteger(image.get());
-      isUnsignedInt = DM::ImageIsDataTypeUnsignedInteger(image.get());
-      isFloat = DM::ImageIsDataTypeFloat(image.get());
-      signedBytes = byteSize == 1 && !isUnsignedInt;
-      if (byteSize != dataSize && !((dataSize == 2 && byteSize == 4 && 
-        (isInteger || isFloat)) ||
-        (dataSize == 2 && byteSize == 1 && doingStack))) {
-          sprintf(td->strTemp, "Image data are not of the expected type (bs %d  ds %d  int"
-             " %d  uint %d)\n", byteSize, dataSize, isInteger ? 1:0, isUnsignedInt?1:0);
-          ErrorToResult(td->strTemp);
+      if (!doingStack && !(saveFrames && (needSum || td->bEarlyReturn))) {
+        j = 20;
+
+       // REGULAR OLD IMAGE
+
+       // Sets byteSize, isInteger, isUnsignedInt, isFloat, signedBytes and width/height
+       if (GetTypeAndSizeInfo(td, image, loop, outLimit, doingStack))
           SET_ERROR(WRONG_DATA_TYPE);
-      }
 
-      // Get the size and adjust if necessary to fit output array
-      DM::GetSize( image.get(), &td->width, &td->height );
-      sprintf(td->strTemp, "loop %d width %d height %d  bs %d int %d uint %d\n", loop, 
-        td->width, td->height, byteSize, isInteger ? 1:0, isUnsignedInt?1:0);
-      DebugToResult(td->strTemp);
-      if (td->width * td->height > outLimit) {
-        ErrorToResult("Warning: image is larger than the supplied array\n",
-          "\nA problem occurred acquiring an image for SerialEM:\n");
-        td->height = outLimit / td->width;
-      }
-
-      // Get data pointer and transfer the data
-      imageLp = new GatanPlugIn::ImageDataLocker( image );
-      if (doingStack) {
-        numDim = DM::ImageGetNumDimensions(image.get());
-        if (numDim < 3) {
-          td->iErrorFromSave = STACK_NOT_3D;
-          continue;
+        // Get data pointer and transfer the data
+        j++;
+        imageLp = new GatanPlugIn::ImageDataLocker( image );   j++;
+        numDim = DM::ImageGetNumDimensions(image.get());   j++;
+        if (numDim != 2) {
+          sprintf(td->strTemp, "image with ID %d has %d dimensions!\n", ID, numDim);
+          DebugToResult(td->strTemp);
         }
-        stackAllReady = !td->bAsyncSave;
-        numSlices = td->bAsyncSave ? 0 : DM::ImageGetDimensionSize(image.get(), 2);
+        imageData = imageLp->get();   j++;
+        ProcessImage(imageData, array, td->dataSize, td->width, td->height, divideBy2, 
+          transpose, td->byteSize, td->isInteger, td->isUnsignedInt, td->fFloatScaling);
+        delete imageLp;
+        imageLp = NULL;
 
-        // Float super-res image is from software processing and needs special scaling
-        // into bytes, set divide -1 as flag for this
-        if (sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE && isFloat)
-          frameDivide = -1;
+      } else if (doingStack) {
+        j = 30;
 
-        // But if they are counting mode images in integer, they need to not be scaled
-        // or divided by 2 if placed into shorts, and they may be packed to bytes
-        if (sReadModes[td->iReadMode] == K2_COUNTING_READ_MODE && isInteger) {
-          td->fFloatScaling = 1.;
-          frameDivide = 0;
-          if(td->iSaveFlags & K2_SAVE_RAW_PACKED)
-            frameDivide = -2;
-        }
-        outByteSize = 2;
-        if (byteSize == 1 || frameDivide < 0) {
-          fileMode = MRC_MODE_BYTE;
-          outByteSize = 1;
-        } else if ((frameDivide > 0 && byteSize != 2) || 
-          (dataSize == byteSize && !isUnsignedInt))
-          fileMode = MRC_MODE_SHORT;
-        else
-          fileMode = MRC_MODE_USHORT;
-        save4bit = sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE && byteSize == 1 &&
-            (td->iSaveFlags & K2_SAVE_RAW_PACKED);
-        needProc = byteSize > 2 || signedBytes || frameDivide < 0;
+        // STACK PROCESSING : check dimensions for an image
 
-        // Allocate buffer for rotation/flip if processing needs to be done too
-        // Do a rotation/flip if needed or if writing MRC, to get flip for output
-        if (needProc && (td->iRotationFlip || !td->bWriteTiff)) {
-          try {
-            if (outByteSize == 1)
-              rotBuf = (short *)(new unsigned char [td->width * td->height]);
-            else
-              rotBuf = new short [td->width * td->height];
-          }
-          catch (...) {
-            td->iErrorFromSave = ROTBUF_MEMORY_ERROR;
-            rotBuf = NULL;
+        if (GMS2_SDK_VERSION < 31 || !td->bAsyncSave) {
+          numDim = DM::ImageGetNumDimensions(image.get());   j++;
+          if (numDim < 3) {
+            td->iErrorFromSave = STACK_NOT_3D;
             continue;
           }
+          stackAllReady = !td->bAsyncSave;
+          numSlices = td->bAsyncSave ? 0 : DM::ImageGetDimensionSize(image.get(), 2);   j++;
         }
 
-        if (((sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE ||
-          sReadModes[td->iReadMode] == K2_COUNTING_READ_MODE) && !isFloat && 
-          td->iK2Processing != NEWCM_GAIN_NORMALIZED) &&
-          (td->iSaveFlags & K2_COPY_GAIN_REF) && td->strGainRefToCopy)
-          CopyK2ReferenceIfNeeded(td);
-
-        // Set up Tiff output file structure
-        if (td->bWriteTiff) {
-          iifile = iiNew();
-          iifile->nz = (td->bFilePerImage || td->bAsyncSave) ? 1 : numSlices; // Has no effect
-          iifile->format = IIFORMAT_LUMINANCE;
-          iifile->file = IIFILE_TIFF;
-          iifile->type = IITYPE_UBYTE;
-          if (fileMode == MRC_MODE_SHORT)
-            iifile->type = IITYPE_SHORT;
-          if (fileMode == MRC_MODE_USHORT)
-            iifile->type = IITYPE_USHORT;
-        }
-
-        procWall = saveWall = 0.;
-        int slice = 0;
+        procWall = saveWall = getFrameWall = 0.;
         do {
 #ifdef _WIN64
 
           // If doing asynchronous save, wait until a slice is ready to process
           if (td->bAsyncSave) {
-            while (slice >= numSlices) {
-              stackAllReady = k2dfa.IsDone();
-              numSlices = k2dfa.GetNumFramesProcessed();
-              if (numSlices > slice || stackAllReady)
+            wallStart = wallTime();
+            while (1) {
+#if GMS2_SDK_VERSION < 31
+              stackAllReady = k2dfa.IsDone();   j++;
+              numSlices = k2dfa.GetNumFramesProcessed();   j++;
+              if (numSlices > slice || stackAllReady) {
+                exposureDone = true;
                 break;
+              }
+#else
+              image = stack->GetNextFrame(&exposureDone);   j++;
+              frameNeedsDelete = image.IsValid();
+              i = TickInterval(expStart) > 1000. * td->dK2Exposure ? 1 : 0;
+              double elapsed = 0.;
+              bool elapsedRet = stack->GetElapsedExposureTime(elapsed);
+              if (frameNeedsDelete) {
+                sprintf(td->strTemp, "Got frame %d of %d   exp done %d  time up %d  "
+                  "elapsed %s %.2f\n", slice + 1, numSlices, exposureDone ? 1:0, i, 
+                  elapsedRet ? "T" : "F", elapsed);
+                DebugToResult(td->strTemp);
+              }
+              if (!i)
+                exposureDone = false;
+              if (frameNeedsDelete || slice >= numSlices)
+                break;
+#endif
 
               // Sleep while processing events.  If it returns false, it is a quit,
               // so break and let the loop finish
-              if (!SleepMsg(10)) {
+              if (!SleepMsg(10) || GetWatchedDataValue(td->iDMquitting)) {
                 td->iErrorFromSave = QUIT_DURING_SAVE;
+                SetWatchedDataValue(td->iDMquitting, 1);
                 break;
               }
             }
             sprintf(td->strTemp, "numSlices %d  isStackDone %s\n", numSlices,
               stackAllReady ? "Y":"N");
-            DebugToResult(td->strTemp);
-            if (slice >= numSlices)
+            if (GMS2_SDK_VERSION < 31)
+              DebugToResult(td->strTemp);
+            if (slice >= numSlices || GetWatchedDataValue(td->iDMquitting) || 
+              td->iErrorFromSave == QUIT_DURING_SAVE || 
+              td->iErrorFromSave == DM_CALL_EXCEPTION)
               break;
           }
+          if (slice)
+            AccumulateWallTime(getFrameWall, wallStart);
+          if (exposureDone && !td->iReadyToReturn && 
+            td->iNumSummed >= td->iNumFramesToSum)       
+            SetWatchedDataValue(td->iReadyToReturn, 1);
 #endif
+
+          if (!slice) {
+
+            // First slice initialization and checks
+            // Sets byteSize, isInteger, isUnsignedInt, isFloat, signedBytes and width/height
+            if (GetTypeAndSizeInfo(td, image, loop, outLimit, doingStack)) {
+              td->iErrorFromSave = WRONG_DATA_TYPE;
+              break;
+            }
+            j++;
+
+            // Sets frameDivide, outByteSize, fileMode, save4bit and copies gain reference
+            if (InitOnFirstFrame(td, needTemp, needSum, frameDivide, needProc))
+              break;
+            if (!needTemp)
+              td->tempBuf = (short *)array;
+            if (GMS2_SDK_VERSION < 31)
+              SetWatchedDataValue(td->iReadyToAcquire, 1);
+          }
           wallStart = wallTime();
-          imageLp->GetImageData(2, slice, fData);
-          imageData = fData.get_data();
-          outData = (short *)imageData;
-          outForRot = (short *)array;
+
+          // Get data pointer
+          imageLp = new GatanPlugIn::ImageDataLocker( image );   j++;
+          if (GMS2_SDK_VERSION < 31 || !td->bAsyncSave) {
+            imageLp->GetImageData(2, slice, fData);   j++;
+            imageData = fData.get_data();   j++;
+          } else {
+            imageData = imageLp->get();   j++;
+          }
+          td->outData = (short *)imageData;
+          outForRot = (short *)td->tempBuf;
+
+          // Add to sum if needed in sum, and process it now if it is done
+          if (needSum && slice < td->iNumFramesToSum) {
+            AddToSum(td, imageData, td->sumBuf);
+            if (slice == td->iNumFramesToSum - 1) {
+                ProcessImage(td->sumBuf, array, td->dataSize, td->width, td->height,
+                  divideBy2, transpose, 4, !td->isFloat, false, scaleSave);
+                DebugToResult("Partial sum completed by thread\n");
+            }
+            td->iNumSummed++;
+            if (exposureDone && !td->iReadyToReturn && 
+              td->iNumSummed >= td->iNumFramesToSum)       
+                SetWatchedDataValue(td->iReadyToReturn, 1);
+          }
+
+          // If grabbing frames at this point, allocate the frame, copy over if not proc
+          procOut = td->tempBuf;
+          grabInd = slice - (numSlices - td->iNumGrabAndStack);
+          if (grabInd >= 0) {
+            try {
+              td->grabStack[grabInd] = new char[td->width * td->height * td->outByteSize];
+            }
+            catch (...) {
+              td->grabStack[grabInd] = NULL;
+              td->iErrorFromSave = ROTBUF_MEMORY_ERROR;
+              break;
+            }
+            procOut = (short *)td->grabStack[grabInd];
+            if (!needProc)
+              memcpy(procOut, imageData, td->width * td->height * td->outByteSize);
+          }
 
           // Process a float image (from software normalized frames)
-          // It goes from the DM array into the passed array
+          // It goes from the DM array into the passed or temp array or grab stack
           if (needProc) {
-            ProcessImage(imageData, array, dataSize, td->width, td->height, frameDivide,
-              transpose, byteSize, isInteger, isUnsignedInt, td->fFloatScaling);
-            outData = (short *)array;
-            outForRot = rotBuf;
-            if (byteSize > 2) {
-              scaling = td->fFloatScaling;
-              if (frameDivide > 0)
-                scaling /= 2.;
-              else if (frameDivide == -1)
-                scaling = SUPERRES_FRAME_SCALE;
-            }
+            ProcessImage(imageData, procOut, td->dataSize, td->width, td->height, 
+              frameDivide, transpose, td->byteSize, td->isInteger, td->isUnsignedInt,
+              td->fFloatScaling);
+            td->outData = (short *)td->tempBuf;
+            outForRot = td->rotBuf;
           }
 
-          // Rotate and flip if desired and change the array pointer to save to use the 
-          // passed array or the rotation array
-          if (td->iRotationFlip || !td->bWriteTiff) {
-            RotateFlip(outData, fileMode, td->width, td->height, td->iRotationFlip, !td->bWriteTiff,
-              outForRot, &nxout, &nyout);
-            outData = outForRot;
-          } else {
-            nxout = td->width;
-            nyout = td->height;
-          }
-          wallNow = wallTime();
-          procWall += wallNow - wallStart;
-          wallStart = wallNow;
-          nxFile = save4bit ? nxout / 2 : nxout;
-
-          // open file if needed
-          if (!slice || td->bFilePerImage) {
-            if (td->bFilePerImage)
-              sprintf(td->strTemp, "%s\\%s_%03d.%s", td->strSaveDir, td->strRootName, slice +1,
-              td->bWriteTiff ? "tif" : "mrc");
-            else
-              sprintf(td->strTemp, "%s\\%s.%s", td->strSaveDir, td->strRootName, 
-              td->bWriteTiff ? "tif" : "mrc");
-            if (td->bWriteTiff) {
-              iifile->nx = nxFile;
-              iifile->ny = nyout;
-              iifile->filename = _strdup(td->strTemp);
-              i = tiffOpenNew(iifile);
-            } else {
-              fp = fopen(td->strTemp, "wb");
-            }
-            if ((td->bWriteTiff && i) || (!td->bWriteTiff && !fp)) {
-              j = errno;
-              i = (int)strlen(td->strTemp);
-              td->strTemp[i] = '\n';
-              td->strTemp[i+1] = 0x00;
-              ErrorToResult(td->strTemp);
-              sprintf(td->strTemp, "Failed to open above file: %s\n", strerror(j));
-              ErrorToResult(td->strTemp);
-              td->iErrorFromSave = FILE_OPEN_ERROR;
-              break;
-            }
-
-            // Set up header for one slice
-            if (!td->bWriteTiff) {
-              mrc_head_new(&hdata, nxFile, nyout, 1, fileMode);
-              sprintf(td->strTemp, "SerialEMCCD: Dose fractionation image, scaled by %.2f", 
-                scaling);
-              if (save4bit)
-                sprintf(td->strTemp, "SerialEMCCD: Dose fractionation image, 4 bits packed"
-                ); 
-              mrc_head_label(&hdata, td->strTemp);
-            }
-            fileSlice = 0;
-            tmin = 1000000;
-            tmax = -tmin;
-            meanSum = 0.;
-          }
-
-          // Loop on the lines to compute mean accurately
-          tmean = 0.; 
-          for (i = 0; i < nyout; i++) {
-
-            // Get pointer to start of line
-            if (outByteSize == 1) {
-              bData = ((unsigned char *)outData) + i * nxout;
-              sData = (short *)bData;
-            } else
-              sData = &outData[i * nxout];
-            usData = (unsigned short *)sData;
-
-            // Get min/max/sum and add to mean
-            tsum = 0;
-            if (fileMode == MRC_MODE_USHORT) {
-              for (j = 0; j < nxout; j++) {
-                val = usData[j];
-                tmin = B3DMIN(tmin, val);
-                tmax = B3DMAX(tmax, val);
-                tsum += val;
-              }
-            } else if (fileMode == MRC_MODE_SHORT) {
-              for (j = 0; j < nxout; j++) {
-                val = sData[j];
-                tmin = B3DMIN(tmin, val);
-                tmax = B3DMAX(tmax, val);
-                tsum += val;
-              }
-            } else {
-              for (j = 0; j < nxout; j++) {
-                val = bData[j];
-                tmin = B3DMIN(tmin, val);
-                tmax = B3DMAX(tmax, val);
-                tsum += val;
-              }
-
-            }
-            tmean += tsum;
-          }
-
-          // Pack 4-bit data into bytes; move into array if not there yet
-          if (save4bit) {
-            /* if (!slice) {
-              Islice sl;
-              sliceInit(&sl, nxout, nyout, SLICE_MODE_BYTE, outData);
-              sprintf(td->strTemp, "%s\\firstFrameUnpacked.mrc", td->strSaveDir);
-              sliceWriteMRCfile(td->strTemp, &sl);
-            } */
-            bData = (unsigned char *)outData;
-            packed = (unsigned char *)array;
-            outData = (short *)array;
-            for (i = 0; i < nxFile * nyout; i++) {
-              lowbyte = *bData++ & 15;
-              *packed++ = lowbyte | ((*bData++ & 15) << 4);
-            }
-          }
-
-          if (td->bWriteTiff) {
-            iifile->amin = (float)tmin;
-            iifile->amax = (float)tmax;
-            iifile->amean = tmean / (float)(nxout * nyout);
-
-            i = tiffWriteSection(iifile, outData, td->iTiffCompression, 1, 
-              B3DNINT(2.54e8 / td->dPixelSize), td->iTiffQuality);
-            if (i) {
-              td->iErrorFromSave = WRITE_DATA_ERROR;
-              sprintf(td->strTemp, "Error (%d) writing section %d to TIFF file\n", i, 
-                slice);
-              ErrorToResult(td->strTemp);
-              break;
+          // If just grabbing, set slice number first time, skip other steps
+          if (grabInd >= 0) {
+            if (!grabInd) {
+              grabSlice = slice;
+              DebugToResult("Starting to grab frames from rest of stack\n");
             }
           } else {
 
-            // Seek to slice then write it
-            i = mrc_big_seek(fp, hdata.headerSize, nxFile * outByteSize, 
-              nyout * fileSlice, SEEK_SET);
-            if (i) {
-              sprintf(td->strTemp, "Error %d seeking for slice %d: %s\n", i, slice, 
-                strerror(errno));
-              ErrorToResult(td->strTemp);
-              td->iErrorFromSave = SEEK_ERROR;
-              break;
-            }
-
-            if ((i = (int)b3dFwrite(outData, outByteSize * nxFile, nyout, fp)) != nyout) {
-              sprintf(td->strTemp, "Failed to write data past line %d of slice %d: %s\n", i, 
-                slice, strerror(errno));
-              ErrorToResult(td->strTemp);
-              td->iErrorFromSave = WRITE_DATA_ERROR;
-              break;
-            }
-
-            // This can't have any effect; all errors broke the loop above
-            if (td->iErrorFromSave)
-              continue;
-
-            // Completely update and write the header regardless of whether one file/slice
-            fileSlice++;
-            hdata.nz = hdata.mz = fileSlice;
-            hdata.amin = (float)tmin;
-            hdata.amax = (float)tmax;
-            meanSum += tmean / B3DMAX(1.f, (float)(nxout * nyout));
-            hdata.amean = meanSum / hdata.nz;
-            mrc_set_scale(&hdata, td->dPixelSize, td->dPixelSize, td->dPixelSize);
-            if (mrc_head_write(fp, &hdata)) {
-              ErrorToResult("Failed to write header\n");
-              td->iErrorFromSave = HEADER_ERROR;
-              break;
-            }
-          }
-
-          // Finally, increment successful save count and close file if needed
-          td->iFramesSaved++;
-          if (td->bFilePerImage || (stackAllReady && slice == numSlices - 1)) {
-            if (td->bWriteTiff) {
-              iiClose(iifile);
-              free(iifile->filename);
-              iifile->filename = NULL;
+            // Rotate and flip if desired and change the array pointer to save to use the 
+            // passed array or the rotation array
+            if (td->iRotationFlip || !td->bWriteTiff) {
+              RotateFlip(td->outData, td->fileMode, td->width, td->height, 
+                td->iRotationFlip, !td->bWriteTiff, outForRot, &nxout, &nyout);
+              td->outData = outForRot;
             } else {
-              fclose(fp);
-              fp = NULL;
+              nxout = td->width;
+              nyout = td->height;
             }
+            AccumulateWallTime(procWall, wallStart);
+
+            // Save the image to file; keep going on error if need a sum
+            i = PackAndSaveImage(td, td->tempBuf, nxout, nyout, slice, 
+              stackAllReady && slice == numSlices - 1, fileSlice, tmin, tmax, meanSum);
+            if (i && !(needSum && slice < td->iNumFramesToSum))
+              break;
+
+            AccumulateWallTime(saveWall, wallStart);
           }
-          wallNow = wallTime();
-          saveWall += wallNow - wallStart;
-          wallStart = wallNow;
+
+          // Increment slice, clean up image at end of slice loop
           slice++;
-        } while (slice < numSlices || !stackAllReady);
-        td->fFloatScaling = scaleSave;
+          delete imageLp;
+          imageLp = NULL;
+          DeleteImageIfNeeded(td, image, &frameNeedsDelete);
+        } while (slice < numSlices || !stackAllReady);  // End of slice loop
 
-        if (td->iErrorFromSave)
-          continue;
-        sprintf(td->strTemp, "Processing time %.3f   saving time %.3f sec\n", procWall,
-          saveWall);
-        DebugToResult(td->strTemp);
-      } else {
+        DeleteImageIfNeeded(td, image, &frameNeedsDelete);
 
-        // Regular old image
-        numDim = DM::ImageGetNumDimensions(image.get());
-        if (numDim != 2) {
-          sprintf(td->strTemp, "image with ID %d has %d dimensions!\n", ID, numDim);
-          DebugToResult(td->strTemp);
+        // If there are stacked frames, rotate/flip and save them
+        if (!td->iErrorFromSave && td->iNumGrabAndStack) {
+
+          // Signal that we are done with the DM stack and then process
+          DebugToResult("Done with stack, processing grabbed frames\n");
+          SetWatchedDataValue(td->iReadyToAcquire, 1);
+          for (grabInd = 0; grabInd < td->iNumGrabAndStack; grabInd++) {
+            td->outData = (short *)td->grabStack[grabInd];
+            if (td->iRotationFlip || !td->bWriteTiff) {
+              RotateFlip(td->outData, td->fileMode, td->width, td->height, 
+                td->iRotationFlip, !td->bWriteTiff, td->tempBuf, &nxout, &nyout);
+              td->outData = (short *)td->tempBuf;
+              AccumulateWallTime(procWall, wallStart);
+            } else {
+              nxout = td->width;
+              nyout = td->height;
+            }
+            i = PackAndSaveImage(td, td->tempBuf, nxout, nyout, grabSlice + grabInd, 
+               grabInd == td->iNumGrabAndStack - 1, fileSlice, tmin, tmax, meanSum);
+            if (i)
+              break;
+            delete [] td->grabStack[grabInd];
+            td->grabStack[grabInd] = NULL;
+            AccumulateWallTime(saveWall, wallStart);
+          }
         }
-        imageData = imageLp->get();
-        ProcessImage(imageData, array, dataSize, td->width, td->height, divideBy2, transpose, 
-          byteSize, isInteger, isUnsignedInt, td->fFloatScaling);
-      }
 
+        sprintf(td->strTemp, "Processing %.3f   saving %.3f   getting frame  %.3f sec\n",
+          procWall, saveWall, getFrameWall);
+        if (!td->iErrorFromSave)
+          DebugToResult(td->strTemp);
+      }
     }
     catch (exception exc) {
-      ErrorToResult("Caught an exception from a call to a DM:: function\n");
+      sprintf(td->strTemp, "Caught an exception from call %d to a DM:: function:\n  %s\n", 
+        j, exc.what());
+      ErrorToResult(td->strTemp);
       SET_ERROR(DM_CALL_EXCEPTION);
     }
+    delete imageLp;
+    imageLp = NULL;
+    DeleteImageIfNeeded(td, image, &frameNeedsDelete);
+    td->fFloatScaling = scaleSave;
+
+    // Return the full sum here after all temporary use of array is over
+    if (needSum && !td->bEarlyReturn)
+      ProcessImage(td->sumBuf, array, td->dataSize, td->width, td->height,
+        divideBy2, transpose, 4, !td->isFloat, false, scaleSave);
 
 #ifdef _WIN64
     // Delete image here in asynchronous case
     if (doingAsyncSave) {
       try {
+#if GMS2_SDK_VERSION < 31
         if (doingStack && !stackAllReady)
           k2dfa.Abort();
         DM::DeleteImage(image.get());
-      }
+#else
+        if (slice < numSlices)
+          stack->Abort();
+#endif
+     }
       catch (exception exc) {
       }
     }
 #endif
   }  // End of loop on stack and sum or single image
-  delete imageLp;
 
   // Clean up files now in case an exception got us to here
-  if (iifile)
-    iiDelete(iifile);
-  iifile = NULL;
-  if (fp)
-    fclose(fp);
-  fp = NULL;
-  delete [] rotBuf;
+  if (td->iifile)
+    iiDelete(td->iifile);
+  td->iifile = NULL;
+  if (td->fp)
+    fclose(td->fp);
+  td->fp = NULL;
+
+  // Clean up all buffers
+  delete [] td->rotBuf;
+  delete [] td->sumBuf;
+  if (needTemp)
+    delete [] td->tempBuf;
+  if (td->iNumGrabAndStack) {
+    if (td->grabStack)
+      for (grabInd = 0; grabInd < td->iNumGrabAndStack; grabInd++)
+        delete [] td->grabStack[grabInd];
+    delete [] td->grabStack;
+  }
 
   // Delete image(s) before return if they can be found
   if (delImage && !doingAsyncSave) {
@@ -1295,15 +1360,393 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       DM::DeleteImage(image.get());
     else 
       DebugToResult("Cannot find image for deleting it\n");
-    if (saveFrames && DM::GetImageFromID(image, stackID))
-      DM::DeleteImage(image.get());
-    else if (saveFrames)
-      DebugToResult("Cannot find stack for deleting it\n");
-
+    if (saveFrames && GMS2_SDK_VERSION < 31) {
+      if (DM::GetImageFromID(image, stackID))
+        DM::DeleteImage(image.get());
+      else
+        DebugToResult("Cannot find stack for deleting it\n");
+    }
   }
   td->arrSize = td->width * td->height;
-
+  sprintf(td->strTemp, "Leaving thread with return value %d\n", errorRet); 
+  DebugToResult(td->strTemp);
   return errorRet;
+}
+
+/////////////////////////////////////////////
+// SUPPORT FUNCTIONS FOR AcquireProc
+/////////////////////////////////////////////
+
+// Accumulate time since last start and reset the start time
+static void AccumulateWallTime(double &cumTime, double &wallStart)
+{
+  double wallNow = wallTime();
+  cumTime += wallNow - wallStart;
+  wallStart = wallNow;
+}
+
+// Get millisecond interval from tick counts accounting for wraparound
+static double TickInterval(double start)
+{
+  double interval = GetTickCount() - start;
+  if (interval < 0)
+    interval += 4294967296.;
+  return interval;
+}
+
+// Delete the passed-in image if there is no needsDelete argument or if it is still true,
+// and in latter case, sets it false.  Sets frame state so get frame thread knows it can
+// pass on the next image
+static void DeleteImageIfNeeded(ThreadData *td, DM::Image &image, bool *needsDelete)
+{
+  if (needsDelete && !(*needsDelete))
+    return;
+  try {
+    DM::DeleteImage(image.get());
+  }
+  catch (exception exc) {
+  }
+  if (needsDelete)
+    *needsDelete = false;
+}
+
+// Acquire the data mutex for setting or getting values accessed by multiple threads
+static void SetWatchedDataValue(int &member, int value)
+{
+  WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
+  member = value;
+  ReleaseMutex(sDataMutexHandle);
+}
+
+static int GetWatchedDataValue(int &member)
+{
+  WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
+  return member;
+  ReleaseMutex(sDataMutexHandle);
+}
+
+// Given the single image or first stack frame, get all the parameters about it and check
+// array size
+static int GetTypeAndSizeInfo(ThreadData *td, DM::Image &image, int loop,  int outLimit,
+                              bool doingStack)
+{
+  // Check the data type (getting the Gatan data type directly might have been easier)
+  td->byteSize = DM::ImageGetDataElementByteSize(image.get());
+  td->isInteger = DM::ImageIsDataTypeInteger(image.get());
+  td->isUnsignedInt = DM::ImageIsDataTypeUnsignedInteger(image.get());
+  td->isFloat = DM::ImageIsDataTypeFloat(image.get());
+  td->signedBytes = td->byteSize == 1 && !td->isUnsignedInt;
+  if (td->byteSize != td->dataSize && !((td->dataSize == 2 && td->byteSize == 4 && 
+    (td->isInteger || td->isFloat)) ||
+    (td->dataSize == 2 && td->byteSize == 1 && doingStack))) {
+      sprintf(td->strTemp, "Image data are not of the expected type (bs %d  ds %d  int"
+        " %d  uint %d)\n", td->byteSize, td->dataSize, td->isInteger ? 1:0, td->isUnsignedInt?1:0);
+      ErrorToResult(td->strTemp);
+      return 1;
+  }
+
+  // Get the size and adjust if necessary to fit output array
+  DM::GetSize( image.get(), &td->width, &td->height );
+  sprintf(td->strTemp, "loop %d stack %d width %d height %d  bs %d int %d uint %d\n", loop, 
+    doingStack?1:0, td->width, td->height, td->byteSize, td->isInteger ? 1:0, td->isUnsignedInt?1:0);
+  DebugToResult(td->strTemp);
+  if (td->width * td->height > outLimit) {
+    ErrorToResult("Warning: image is larger than the supplied array\n",
+      "\nA problem occurred acquiring an image for SerialEM:\n");
+    td->height = outLimit / td->width;
+  }
+  return 0;
+}
+
+// Does many initializations for file saving on a first frame, including getting buffers
+static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum, 
+                            long &frameDivide, bool &needProc)
+{
+  // Float super-res image is from software processing and needs special scaling
+  // into bytes, set divide -1 as flag for this
+  if (sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE && td->isFloat)
+    frameDivide = -1;
+
+  // But if they are counting mode images in integer, they need to not be scaled
+  // or divided by 2 if placed into shorts, and they may be packed to bytes
+  if (sReadModes[td->iReadMode] == K2_COUNTING_READ_MODE && td->isInteger) {
+    td->fFloatScaling = 1.;
+    frameDivide = 0;
+    if(td->iSaveFlags & K2_SAVE_RAW_PACKED)
+      frameDivide = -2;
+  }
+  td->outByteSize = 2;
+  if (td->byteSize == 1 || frameDivide < 0) {
+    td->fileMode = MRC_MODE_BYTE;
+    td->outByteSize = 1;
+  } else if ((frameDivide > 0 && td->byteSize != 2) || 
+    (td->dataSize == td->byteSize && !td->isUnsignedInt))
+    td->fileMode = MRC_MODE_SHORT;
+  else
+    td->fileMode = MRC_MODE_USHORT;
+  td->save4bit = sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE && td->byteSize == 1 &&
+    (td->iSaveFlags & K2_SAVE_RAW_PACKED);
+  needProc = td->byteSize > 2 || td->signedBytes || frameDivide < 0;
+
+  td->writeScaling = 1.;
+  if (needProc && td->byteSize > 2) {
+    td->writeScaling = td->fFloatScaling;
+    if (frameDivide > 0)
+      td->writeScaling /= 2.;
+    else if (frameDivide == -1)
+      td->writeScaling = SUPERRES_FRAME_SCALE;
+  }
+
+  td->iErrorFromSave = ROTBUF_MEMORY_ERROR;
+
+  // Allocate buffer for rotation/flip if processing needs to be done too
+  // Do a rotation/flip if needed or if writing MRC, to get flip for output
+  if (needProc && (td->iRotationFlip || !td->bWriteTiff)) {
+    try {
+      if (td->outByteSize == 1)
+        td->rotBuf = (short *)(new unsigned char [td->width * td->height]);
+      else
+        td->rotBuf = new short [td->width * td->height];
+    }
+    catch (...) {
+      td->rotBuf = NULL;
+      return 1;
+    }
+  }
+  if (needTemp) {
+    try {
+      td->tempBuf = new short [td->width * td->height];
+    }
+    catch (...) {
+      td->tempBuf = NULL;
+      return 1;
+    }
+  }
+  if (needSum) {
+    try {
+      td->sumBuf = new int [td->width * td->height];
+      memset(td->sumBuf, 0, 4 * td->width * td->height);
+    }
+    catch (...) {
+      td->sumBuf = NULL;
+      return 1;
+    }
+  }
+
+  // Allocate the pointer array for stack of grabbed frames
+  if (td->iNumGrabAndStack) {
+    try {
+      td->grabStack = new void * [td->iNumGrabAndStack];
+      for (int i = 0; i < td->iNumGrabAndStack; i++)
+        td->grabStack[i] = NULL;
+    }
+    catch (...) {
+      td->grabStack = NULL;
+      return 1;
+    }
+  }
+
+  td->iErrorFromSave = 0;
+
+  if (((sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE ||
+    sReadModes[td->iReadMode] == K2_COUNTING_READ_MODE) && !td->isFloat && 
+    td->iK2Processing != NEWCM_GAIN_NORMALIZED) &&
+    (td->iSaveFlags & K2_COPY_GAIN_REF) && td->strGainRefToCopy.length())
+    CopyK2ReferenceIfNeeded(td);
+  return 0;
+}
+
+// Opens file if needed, gets min/max/mean, packs image if needed, saves image to file
+static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, int slice, 
+                            bool finalFrame, int &fileSlice, int &tmin, 
+                            int &tmax, float &meanSum)
+{
+#ifdef _WIN64
+  float tmean;
+  int i, j, tsum, val;
+  int nxFile = td->save4bit ? nxout / 2 : nxout;
+  short *sData;
+  unsigned short *usData;
+  unsigned char *bData, *packed;
+  unsigned char lowbyte;
+
+  // open file if needed
+  if (!slice || td->bFilePerImage) {
+    if (td->bFilePerImage)
+      sprintf(td->strTemp, "%s\\%s_%03d.%s", td->strSaveDir.c_str(),
+      td->strRootName.c_str(), slice +1, td->bWriteTiff ? "tif" : "mrc");
+    else
+      sprintf(td->strTemp, "%s\\%s.%s", td->strSaveDir.c_str(), td->strRootName.c_str(), 
+      td->bWriteTiff ? "tif" : "mrc");
+    if (td->bWriteTiff) {
+
+      // Set up Tiff output file structure first time
+      if (!slice) {
+        td->iifile = iiNew();
+        td->iifile->nz = 1; // Has no effect to set it higher
+        td->iifile->format = IIFORMAT_LUMINANCE;
+        td->iifile->file = IIFILE_TIFF;
+        td->iifile->type = IITYPE_UBYTE;
+        if (td->fileMode == MRC_MODE_SHORT)
+          td->iifile->type = IITYPE_SHORT;
+        if (td->fileMode == MRC_MODE_USHORT)
+          td->iifile->type = IITYPE_USHORT;
+      }
+      td->iifile->nx = nxFile;
+      td->iifile->ny = nyout;
+      td->iifile->filename = _strdup(td->strTemp);
+      i = tiffOpenNew(td->iifile);
+    } else {
+      td->fp = fopen(td->strTemp, "wb");
+    }
+    if ((td->bWriteTiff && i) || (!td->bWriteTiff && !td->fp)) {
+      j = errno;
+      i = (int)strlen(td->strTemp);
+      td->strTemp[i] = '\n';
+      td->strTemp[i+1] = 0x00;
+      ErrorToResult(td->strTemp);
+      sprintf(td->strTemp, "Failed to open above file: %s\n", strerror(j));
+      ErrorToResult(td->strTemp);
+      td->iErrorFromSave = FILE_OPEN_ERROR;
+      return 1;
+    }
+
+    // Set up header for one slice
+    if (!td->bWriteTiff) {
+      mrc_head_new(&td->hdata, nxFile, nyout, 1, td->fileMode);
+      sprintf(td->strTemp, "SerialEMCCD: Dose fractionation image, scaled by %.2f", 
+        td->writeScaling);
+      if (td->save4bit)
+        sprintf(td->strTemp, "SerialEMCCD: Dose fractionation image, 4 bits packed"); 
+      mrc_head_label(&td->hdata, td->strTemp);
+    }
+    fileSlice = 0;
+    tmin = 1000000;
+    tmax = -tmin;
+    meanSum = 0.;
+  }
+
+  // Loop on the lines to compute mean accurately
+  tmean = 0.; 
+  for (i = 0; i < nyout; i++) {
+
+    // Get pointer to start of line
+    if (td->outByteSize == 1) {
+      bData = ((unsigned char *)td->outData) + i * nxout;
+      sData = (short *)bData;
+    } else
+      sData = &td->outData[i * nxout];
+    usData = (unsigned short *)sData;
+
+    // Get min/max/sum and add to mean
+    tsum = 0;
+    if (td->fileMode == MRC_MODE_USHORT) {
+      for (j = 0; j < nxout; j++) {
+        val = usData[j];
+        tmin = B3DMIN(tmin, val);
+        tmax = B3DMAX(tmax, val);
+        tsum += val;
+      }
+    } else if (td->fileMode == MRC_MODE_SHORT) {
+      for (j = 0; j < nxout; j++) {
+        val = sData[j];
+        tmin = B3DMIN(tmin, val);
+        tmax = B3DMAX(tmax, val);
+        tsum += val;
+      }
+    } else {
+      for (j = 0; j < nxout; j++) {
+        val = bData[j];
+        tmin = B3DMIN(tmin, val);
+        tmax = B3DMAX(tmax, val);
+        tsum += val;
+      }
+
+    }
+    tmean += tsum;
+  }
+
+  // Pack 4-bit data into bytes; move into array if not there yet
+  if (td->save4bit) {
+    /* if (!slice) {
+    Islice sl;
+    sliceInit(&sl, nxout, nyout, SLICE_MODE_BYTE, td->outData);
+    sprintf(td->strTemp, "%s\\firstFrameUnpacked.mrc", td->strSaveDir);
+    sliceWriteMRCfile(td->strTemp, &sl);
+    } */
+    bData = (unsigned char *)td->outData;
+    packed = (unsigned char *)array;
+    td->outData = (short *)array;
+    for (i = 0; i < nxFile * nyout; i++) {
+      lowbyte = *bData++ & 15;
+      *packed++ = lowbyte | ((*bData++ & 15) << 4);
+    }
+  }
+
+  if (td->bWriteTiff) {
+    td->iifile->amin = (float)tmin;
+    td->iifile->amax = (float)tmax;
+    td->iifile->amean = tmean / (float)(nxout * nyout);
+
+    i = tiffWriteSection(td->iifile, td->outData, td->iTiffCompression, 1, 
+      B3DNINT(2.54e8 / td->dPixelSize), td->iTiffQuality);
+    if (i) {
+      td->iErrorFromSave = WRITE_DATA_ERROR;
+      sprintf(td->strTemp, "Error (%d) writing section %d to TIFF file\n", i, 
+        slice);
+      ErrorToResult(td->strTemp);
+      return 1;
+    }
+  } else {
+
+    // Seek to slice then write it
+    i = mrc_big_seek(td->fp, td->hdata.headerSize, nxFile * td->outByteSize, 
+      nyout * fileSlice, SEEK_SET);
+    if (i) {
+      sprintf(td->strTemp, "Error %d seeking for slice %d: %s\n", i, slice, 
+        strerror(errno));
+      ErrorToResult(td->strTemp);
+      td->iErrorFromSave = SEEK_ERROR;
+      return 1;
+    }
+
+    if ((i = (int)b3dFwrite(td->outData, td->outByteSize * nxFile, nyout, td->fp)) != nyout) {
+      sprintf(td->strTemp, "Failed to write data past line %d of slice %d: %s\n", i, 
+        slice, strerror(errno));
+      ErrorToResult(td->strTemp);
+      td->iErrorFromSave = WRITE_DATA_ERROR;
+      return 1;
+    }
+
+    // Completely update and write the header regardless of whether one file/slice
+    fileSlice++;
+    td->hdata.nz = td->hdata.mz = fileSlice;
+    td->hdata.amin = (float)tmin;
+    td->hdata.amax = (float)tmax;
+    meanSum += tmean / B3DMAX(1.f, (float)(nxout * nyout));
+    td->hdata.amean = meanSum / td->hdata.nz;
+    mrc_set_scale(&td->hdata, td->dPixelSize, td->dPixelSize, td->dPixelSize);
+    if (mrc_head_write(td->fp, &td->hdata)) {
+      ErrorToResult("Failed to write header\n");
+      td->iErrorFromSave = HEADER_ERROR;
+      return 1;
+    }
+  }
+      
+  // Increment successful save count and close file if needed
+  td->iFramesSaved++;
+  if (td->bFilePerImage || finalFrame) {
+    if (td->bWriteTiff) {
+      iiClose(td->iifile);
+      free(td->iifile->filename);
+      td->iifile->filename = NULL;
+    } else {
+      fclose(td->fp);
+      td->fp = NULL;
+    }
+  }
+#endif
+  return 0;
 }
 
 /*
@@ -1838,6 +2281,46 @@ static void RotateFlip(short int *array, int mode, int nx, int ny, int operation
   }
 }
 
+// Add a frame of data of any given type to an integer or float sum image
+static void AddToSum(ThreadData *td, void *data, void *sumArray) 
+{
+  int i;
+  int *outData = (int *)sumArray;
+  float *flIn, *flOut;
+  int numPix = td->width * td->height;
+  if (td->isFloat) {                    // FLOAT
+    flIn = (float *)data;
+    flOut = (float *)sumArray;
+    for (i = 0; i < numPix; i++)
+      *flOut++ += *flIn++;
+  } else if (td->signedBytes) {         // SIGNED BYTES
+    char *inData = (char *)data;
+    for (i = 0; i < numPix; i++)
+      *outData++ += *inData++;
+  } else if (td->byteSize == 1) {       // UNSIGNED BYTES
+    unsigned char *inData = (unsigned char *)data;
+    for (i = 0; i < numPix; i++)
+      *outData++ += *inData++;
+  } else if (td->byteSize == 2 && td->isUnsignedInt) {  // UNSIGNED SHORT
+    unsigned short *inData = (unsigned short *)data;
+    for (i = 0; i < numPix; i++)
+      *outData++ += *inData++;
+  } else if (td->byteSize == 2) {      // SIGNED SHORT
+    short *inData = (short *)data;
+    for (i = 0; i < numPix; i++)
+      *outData++ += *inData++;
+  } else if (td->isUnsignedInt) {      // UNSIGNED INT
+    unsigned int *inData = (unsigned int *)data;
+    for (i = 0; i < numPix; i++)
+      *outData++ += *inData++;
+  } else {                             // SIGNED INT
+    int *inData = (int *)data;
+    for (i = 0; i < numPix; i++)
+      *outData++ += *inData++;
+  }
+}
+ 
+
 // Copy a gain reference file to the directory if there is not a newer one
 static int CopyK2ReferenceIfNeeded(ThreadData *td)
 {
@@ -1861,10 +2344,10 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
 
 
   // Get the reference file first
-  hFindRef = FindFirstFile(td->strGainRefToCopy, &findRefData);
+  hFindRef = FindFirstFile(td->strGainRefToCopy.c_str(), &findRefData);
   if (hFindRef == INVALID_HANDLE_VALUE) {
     sprintf(td->strTemp, "Cannot find K2 gain reference file: %s\n", 
-      td->strGainRefToCopy);
+      td->strGainRefToCopy.c_str());
     ErrorToResult(td->strTemp);
     return 1;
   } 
@@ -1872,13 +2355,13 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
 
   // If there is an existing copy and the mode and the directory match, find the copy
   // Otherwise look for all matching files in directory
-  if (td->strLastRefName && strstr(td->strLastRefName, prefix[prefInd]) && 
-    !strcmp(td->strLastRefDir, saveDir.data())) {
+  if (td->strLastRefName.length() && strstr(td->strLastRefName.c_str(), prefix[prefInd])
+    && !td->strLastRefDir.compare(saveDir)) {
     //sprintf(td->strTemp, "Finding %s\n", td->strLastRefName);
-    hFindCopy = FindFirstFile(td->strLastRefName, &findCopyData);
+    hFindCopy = FindFirstFile(td->strLastRefName.c_str(), &findCopyData);
     namesOK = true;
   } else {
-    sprintf(td->strTemp, "%s\\%sRef_*.dm4", saveDir.data(), prefix[prefInd]);
+    sprintf(td->strTemp, "%s\\%sRef_*.dm4", saveDir.c_str(), prefix[prefInd]);
     hFindCopy = FindFirstFile(td->strTemp, &findCopyData);
     //sprintf(td->strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefix[prefInd]);
   }
@@ -1911,32 +2394,60 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
 
   // Fix up the directory and reference name if they are changed, whether it is an old
   // reference or a new copy
-  B3DFREE(td->strLastRefDir);
-  B3DFREE(td->strLastRefName);
-  td->strLastRefDir = strdup(saveDir.data());
+  td->strLastRefDir = saveDir;
   if (!needCopy) {
-    sprintf(td->strTemp, "%s\\%s", saveDir.data(), findCopyData.cFileName);
-    td->strLastRefName = strdup(td->strTemp);
+    td->strLastRefName = saveDir + "\\";
+    td->strLastRefName += findCopyData.cFileName;
     return 0;
   }
-  sprintf(td->strTemp, "%s\\%sRef_%s.dm4", saveDir.data(), prefix[prefInd],
-    rootName.data());
-  td->strLastRefName = strdup(td->strTemp);
+  sprintf(td->strTemp, "%s\\%sRef_%s.dm4", saveDir.c_str(), prefix[prefInd],
+    rootName.c_str());
+  td->strLastRefName = td->strTemp;
 
   // Copy the reference
   DebugToResult("Making new copy of gain reference\n");
-  if (!CopyFile(td->strGainRefToCopy, td->strTemp, false)) {
-    sprintf(td->strTemp, "An error occurred copying %s to %s\n", td->strGainRefToCopy,
-      td->strTemp);
+  if (!CopyFile(td->strGainRefToCopy.c_str(), td->strTemp, false)) {
+    sprintf(td->strTemp, "An error occurred copying %s to %s\n", 
+      td->strGainRefToCopy.c_str(), td->strTemp);
     ErrorToResult(td->strTemp);
-    B3DFREE(td->strLastRefName);
+    td->strLastRefName = "";
     return 1;
   }
 
   return 0;
 }
 
+// sleeps for the given amount of time while pumping messages
+// returns TRUE if successful, FALSE otherwise
+static BOOL SleepMsg(DWORD dwTime_ms)
+{
+  DWORD dwStart = GetTickCount();
+  DWORD dwElapsed;
+  while ((dwElapsed = GetTickCount() - dwStart) < dwTime_ms) {
+    DWORD dwStatus = MsgWaitForMultipleObjects(0, NULL, FALSE,
+                                               dwTime_ms - dwElapsed, QS_ALLINPUT);
+    
+    if (dwStatus == WAIT_OBJECT_0) {
+      MSG msg;
+      while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+        if (msg.message == WM_QUIT) {
+          PostQuitMessage((int)msg.wParam);
+          return FALSE; // abandoned due to WM_QUIT
+        }
 
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+      }
+    }
+  }
+
+  return TRUE;
+}
+
+//////////////////////////////////////////////////
+// DONE WITH AcquireProc SUPPORT
+// REMAINING CALLS TO THE PLUGIN BELOW
+//////////////////////////////////////////////////
 
 // Add commands for selecting a camera to the command string
 void TemplatePlugIn::AddCameraSelection(int camera)
@@ -1997,12 +2508,11 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
   m_bSaveFrames = saveFrames;
   sprintf(m_strTemp, "SetK2Parameters called with save %s\n", m_bSaveFrames ? "Y":"N");
   DebugToResult(m_strTemp);
-
 }
 
-// Setup properties for saving frames in files
+// Setup properties for saving frames in files.  See DMCamera.cpp for call documentation
 void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage, 
-                                     double pixelSize, long flags, double dummy1, 
+                                     double pixelSize, long flags, double nSumAndGrab, 
                                      double dummy2, double dummy3, double dummy4, 
                                      char *dirName, char *rootName, char *refName,
                                      char *defects, char *command, long *error)
@@ -2010,44 +2520,61 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   struct _stat statbuf;
   FILE *fp;
   int newDir, dummy, newDefects = 0;
-  char *fend, *tmpDef;
+  unsigned int uiSumAndGrab = (unsigned int)(nSumAndGrab + 0.1);
   mTD.iRotationFlip = rotationFlip;
   B3DCLAMP(mTD.iRotationFlip, 0, 7);
   mTD.bFilePerImage = filePerImage;
   mTD.dPixelSize = pixelSize;
   mTD.iSaveFlags = flags;
-  mTD.bWriteTiff = flags & (K2_SAVE_LZW_TIFF | K2_SAVE_ZIP_TIFF);
+  mTD.bWriteTiff = (flags & (K2_SAVE_LZW_TIFF | K2_SAVE_ZIP_TIFF)) != 0;
   mTD.iTiffCompression = (flags & K2_SAVE_ZIP_TIFF) ? 8 : 5;
   mTD.bAsyncSave = (flags & K2_SAVE_SYNCHRO) == 0;
+  mTD.bEarlyReturn = (flags & K2_EARLY_RETURN) != 0;
+  mTD.bAsyncToRAM = (flags & K2_ASYNC_IN_RAM) != 0;
 
   // Copy all the strings if they are changed
-  if (CopyStringIfChanged(dirName, &mTD.strSaveDir, newDir, error))
+  if (CopyStringIfChanged(dirName, mTD.strSaveDir, newDir, error))
     return;
-  if (CopyStringIfChanged(rootName, &mTD.strRootName, dummy, error))
+  if (CopyStringIfChanged(rootName, mTD.strRootName, dummy, error))
     return;
   if (refName && (flags & K2_COPY_GAIN_REF)) {
-    if (CopyStringIfChanged(refName, &mTD.strGainRefToCopy, dummy, error))
+    if (CopyStringIfChanged(refName, mTD.strGainRefToCopy, dummy, error))
       return;
   }
   if (defects && (flags & K2_SAVE_DEFECTS)) {
-    if (CopyStringIfChanged(defects, &m_strDefectsToSave, newDefects, error))
+    if (CopyStringIfChanged(defects, m_strDefectsToSave, newDefects, error))
       return;
   }
   if (command && (flags & K2_RUN_COMMAND)) {
-    if (CopyStringIfChanged(command, &m_strPostSaveCom, dummy, error))
+    if (CopyStringIfChanged(command, m_strPostSaveCom, dummy, error))
       return;
   }
 
-  sprintf(m_strTemp, "SetupFileSaving called with rf %d %s fpi %s pix %f copy %s dir %s "
-    "root %s\n", rotationFlip, mTD.bWriteTiff ? "TIFF" : "MRC", filePerImage ? "Y":"N", 
-    pixelSize, (flags & K2_COPY_GAIN_REF) ? mTD.strGainRefToCopy : "NO",
-    mTD.strSaveDir, mTD.strRootName);
+  // Get number of frames to sum from low 16 bits and number to stack fast from high
+  mTD.iNumFramesToSum = 65535;
+  mTD.iNumGrabAndStack = 0;
+  if (mTD.bEarlyReturn) {
+    mTD.iNumFramesToSum = uiSumAndGrab & 65535;
+    mTD.iNumGrabAndStack = GMS2_SDK_VERSION > 30 ? (uiSumAndGrab >> 16) : 0;
+  }
+
+  sprintf(m_strTemp, "SetupFileSaving called with flags %x rf %d %s fpi %s pix %f ER %s "
+    "A2R %s sum %d grab %d\n  copy %s \n  dir %s root %s\n", flags, rotationFlip, 
+    mTD.bWriteTiff ? "TIFF" : "MRC", filePerImage ? "Y":"N", pixelSize, 
+    mTD.bEarlyReturn ? "Y":"N", mTD.bAsyncToRAM ? "Y":"N", mTD.iNumFramesToSum,
+    mTD.iNumGrabAndStack, (flags & K2_COPY_GAIN_REF) ? mTD.strGainRefToCopy.c_str() :"NO",
+    mTD.strSaveDir.c_str(), mTD.strRootName.c_str());
   DebugToResult(m_strTemp);
+
+  if (mTD.bEarlyReturn && !mTD.bAsyncSave && GMS2_SDK_VERSION > 30) {
+    *error = EARLY_RET_WITH_SYNC;
+    return;
+  }
 
   // For one file per image, create the directory, which must not exist
   *error = 0;
   if (filePerImage) {
-    if (_mkdir(mTD.strSaveDir)) {
+    if (_mkdir(mTD.strSaveDir.c_str())) {
       if (errno == EEXIST)
         *error = DIR_ALREADY_EXISTS;
       else
@@ -2056,13 +2583,13 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   } else {
 
     // Otherwise, make sure directory exists and is a directory
-    if (_stat(mTD.strSaveDir, &statbuf))
+    if (_stat(mTD.strSaveDir.c_str(), &statbuf))
       *error = DIR_NOT_EXIST;
     if (! *error && !(statbuf.st_mode & _S_IFDIR))
       *error = SAVEDIR_IS_FILE;
 
     // Check whether the file exists
-    sprintf(m_strTemp, "%s\\%s.mrc", mTD.strSaveDir, mTD.strRootName);
+    sprintf(m_strTemp, "%s\\%s.mrc", mTD.strSaveDir.c_str(), mTD.strRootName.c_str());
     if (! *error && !_stat(m_strTemp, &statbuf))
       *error = FILE_ALREADY_EXISTS;
 
@@ -2082,27 +2609,18 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     // Extract or make up a filename
     m_strTemp[0] = 0x00;
     if (m_strDefectsToSave[0] == '#') {
-      fend = strchr(&m_strDefectsToSave[1], '\n');
-      if (fend) {
-        if (*(fend - 1) == '\r')
-          fend--;
-        dummy = (int)(fend - &m_strDefectsToSave[1]);
-        if (dummy > 3 && dummy < MAX_TEMP_STRING - 2) {
-          tmpDef = (char *)malloc(dummy + 2);
-          if (tmpDef) {
-            strncpy(tmpDef, &m_strDefectsToSave[1], dummy);
-            tmpDef[dummy] = 0x00;
-            sprintf(m_strTemp, "%s\\%s", mTD.strSaveDir, tmpDef);
-            free(tmpDef);
-          }
-        }
+      dummy = (int)m_strDefectsToSave.find('\n') - 1;
+      if (dummy > 0 && m_strDefectsToSave[dummy] == '\r')
+        dummy--;
+      if (dummy > 3 && dummy < MAX_TEMP_STRING - 3 - (int)mTD.strSaveDir.length()) {
+        string tmpDef = m_strDefectsToSave.substr(1, dummy);
+        sprintf(m_strTemp, "%s\\%s", mTD.strSaveDir.c_str(), tmpDef.c_str());
       }
     }
 
     if (!m_strTemp[0])
-      sprintf(m_strTemp, "%s\\defects%d.txt", mTD.strSaveDir,
+      sprintf(m_strTemp, "%s\\defects%d.txt", mTD.strSaveDir.c_str(),
       (GetTickCount() / 1000) % 10000);
-    DebugToResult(m_strTemp);
 
     // If the string is new, one file per image, new directory, or the file doesn't
     // exist, write the text
@@ -2111,8 +2629,8 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
       if (!fp) {
         *error = OPEN_DEFECTS_ERROR;
       } else {
-        dummy = (int)strlen(m_strDefectsToSave);
-        if (fwrite(m_strDefectsToSave, 1, dummy, fp) != dummy)
+        dummy = (int)m_strDefectsToSave.length();
+        if (fwrite(m_strDefectsToSave.c_str(), 1, dummy, fp) != dummy)
           *error = WRITE_DEFECTS_ERROR;
         fclose(fp);
       }
@@ -2125,48 +2643,22 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 }
 
 // Duplicate a string into the given member variable if it has changed
-int TemplatePlugIn::CopyStringIfChanged(char *newStr, char **memberStr, int &changed,
+int TemplatePlugIn::CopyStringIfChanged(char *newStr, string &memberStr, int &changed,
                                         long *error)
 {
   changed = 1;
-  if (*memberStr)
-    changed = strcmp(*memberStr, newStr);
+  if (memberStr.length())
+    changed = memberStr.compare(newStr);
   if (changed) {
-    B3DFREE(*memberStr);
-    *memberStr = strdup(newStr);
-    if (!*memberStr) {
+    try {
+      memberStr = newStr;
+    }
+    catch (...) {
       *error = ROTBUF_MEMORY_ERROR;
       return 1;
     }
   }
   return 0;
-}
-
-// sleeps for the given amount of time while pumping messages
-// returns TRUE if successful, FALSE otherwise
-static BOOL SleepMsg(DWORD dwTime_ms)
-{
-  DWORD dwStart = GetTickCount();
-  DWORD dwElapsed;
-  while ((dwElapsed = GetTickCount() - dwStart) < dwTime_ms) {
-    DWORD dwStatus = MsgWaitForMultipleObjects(0, NULL, FALSE,
-                                               dwTime_ms - dwElapsed, QS_ALLINPUT);
-    
-    if (dwStatus == WAIT_OBJECT_0) {
-      MSG msg;
-      while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-        if (msg.message == WM_QUIT) {
-          PostQuitMessage((int)msg.wParam);
-          return FALSE; // abandoned due to WM_QUIT
-        }
-
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-      }
-    }
-  }
-
-  return TRUE;
 }
 
 // Get results of last frame saving operation
@@ -2734,24 +3226,9 @@ int PlugInWrapper::GetDebugVal()
   return gTemplatePlugIn.m_iDebugVal;
 }
 
-// Dummy functions for 32-bit.  Ultimately we would like code needed library functions
-// to be in a different module
+// Dummy functions for 32-bit.
 #ifndef _WIN64
-void mrc_set_scale(MrcHeader *h, double x, double y, double z){}
-int mrc_head_new(MrcHeader *hdata, int x, int y, int z, int mode){ return 0;}
-int mrc_head_label(MrcHeader *hdata, const char *label) {  return 0;}
-int mrc_head_write(FILE *fout, MrcHeader *hdata) { return 0;}
-int mrc_big_seek(FILE *fp, int base, int size1, int size2, int flag) { return 0;}
-size_t b3dFwrite(void *buf, size_t size, size_t count, FILE *fp) { return 0;}
 double wallTime(void) { return 0.;}
-ImodImageFile *iiNew(void) {
-  ImodImageFile *dummy = NULL;
-  return dummy;
-}
-void iiClose(ImodImageFile *inFile) {}
+void overrideWriteBytes(int inVal) {}
 void iiDelete(ImodImageFile *inFile) {}
-int tiffOpenNew(ImodImageFile *inFile) {return 0;}
-int tiffWriteSection(ImodImageFile *inFile, void *buf, int compression, 
-                     int inverted, int resolution, int quality) {return 0;}
-
 #endif

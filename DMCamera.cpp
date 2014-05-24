@@ -171,13 +171,44 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   return S_OK;
 }
 
-// To call this, nameSize should be the number of longs passed in names, which should
-// contain concatenated null-terminated strings.  The directory name is the first string,
-// the root name for files is the second string.  If K2_COPY_GAIN_REF is set in flags,
-// the full name of the gani reference is the next string.  If K2_RUN_COMMAND is set in 
-// flags, a command to run is the next string (not yet supported).
+// Sets up file saving for the next acquisition.
+//   rotationFlip is the operation (4 for flip around Y BEFORE plus CCW rotation / 90)
+//      that needs to be applied to unrotated dose frac images
+//   filePerImage is a flag for one file per image
+//   pixelSize should be in Angstroms
+//   flags are as defined in TemplatePlugin.h:
+//      K2_SAVE_RAW_PACKED - save non-normalized frames as 4/8 bit for super-res/counting
+//      K2_COPY_GAIN_REF   - Copy gain reference as needed if saving non-normalized frames
+//      K2_RUN_COMMAND     - Not suppported yet
+//      K2_SAVE_LZW_TIFF   - Save in TIFF with LZW compression
+//      K2_SAVE_ZIP_TIFF   - Save in TIFF with ZIP compression
+//      K2_SAVE_SYNCHRO    - Acquire stack synchronously with script calls
+//      K2_SAVE_DEFECTS    - Save a defect list as needed
+//      K2_EARLY_RETURN    - Return early, with no sum, or sum of subset of frames
+//      K2_ASYNC_IN_RAM    - Acquire stack in DM asynchronously into RAM
+//   numGrabSum is relevant when doing an early return; it should be set from an unsigned
+//      int with the number of frames to sum in the low 16 bits and, for GMS >= 2.3.1,
+//      the number of frames to grab into a local stack in the high 16 bits.  The local
+//      stack is needed because a single-shot cannot be done in GMS 2.3.1 until the stack
+//      in DM has been fully accessed. 
+//   nameSize should contain the number of longs passed in names
+//   names should contain concatenated null-terminated strings as follows:
+//      directory name
+//      root name for files
+//      full name of the gain reference, if K2_COPY_GAIN_REF is set in flags
+//      full defect string, if K2_SAVE_DEFECTS is set
+//      command to run, if K2_RUN_COMMAND is set
+//   
+// The caller is responsible for knowing how much memory is available and for choosing
+// whether to set K2_ASYNC_IN_RAM (with or without an early return) and for setting the
+// number of frames to grab with an early return (with or without a RAM stack in DM).  
+// The RAM stack in DM is stored in native chip sizeX * sizeY * 2 bytes per frame 
+// regardless of mode; the grabbed stack is stored in twice that space for super-res; 
+// memory is freed from the RAM stack in DM as soon as the frame is accessed.  See
+// SerialEM code for handling of this.
+//
 STDMETHODIMP CDMCamera::SetupFileSaving2(long rotationFlip, BOOL filePerImage, 
-                                        double pixelSize, long flags, double dummy1,
+                                        double pixelSize, long flags, double numGrabSum,
                                         double dummy2, double dummy3, double dummy4,
                                         long nameSize, long names[], long *error)
 {
@@ -199,7 +230,7 @@ STDMETHODIMP CDMCamera::SetupFileSaving2(long rotationFlip, BOOL filePerImage,
     nextInd += (int)strlen(&cnames[nextInd]) + 1;
     command = &cnames[nextInd];
   }
-  gPlugInWrapper.SetupFileSaving(rotationFlip, filePerImage, pixelSize, flags, dummy1,
+  gPlugInWrapper.SetupFileSaving(rotationFlip, filePerImage, pixelSize, flags, numGrabSum,
     dummy2, dummy3, dummy4, cnames, &cnames[rootind], refName, defects, command, error);
   return S_OK;
 }
