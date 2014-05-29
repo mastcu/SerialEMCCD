@@ -911,7 +911,6 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   K2_DoseFracAcquisition k2dfa;
 #else
   CM::ImageStackPtr stack;
-  double expStart;
 #endif
 #endif
 
@@ -993,7 +992,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       stack = CM::AcquireImageStack(camera, acqParams);   j++;
       numSlices = stack->GetNumFrames();
       stackAllReady = true;
-      expStart = GetTickCount();
+      td->iNumFramesToSum = B3DMIN(td->iNumFramesToSum, numSlices);
 #endif
       DebugToResult("Returned from asynchronous start of acquire\n");
     }
@@ -1117,17 +1116,14 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 #else
               image = stack->GetNextFrame(&exposureDone);   j++;
               frameNeedsDelete = image.IsValid();
-              i = TickInterval(expStart) > 1000. * td->dK2Exposure ? 1 : 0;
-              double elapsed = 0.;
-              bool elapsedRet = stack->GetElapsedExposureTime(elapsed);
               if (frameNeedsDelete) {
-                sprintf(td->strTemp, "Got frame %d of %d   exp done %d  time up %d  "
-                  "elapsed %s %.2f\n", slice + 1, numSlices, exposureDone ? 1:0, i, 
+                double elapsed = 0.;
+                bool elapsedRet = stack->GetElapsedExposureTime(elapsed);
+                sprintf(td->strTemp, "Got frame %d of %d   exp done %d  "
+                  "elapsed %s %.2f\n", slice + 1, numSlices, exposureDone ? 1:0, 
                   elapsedRet ? "T" : "F", elapsed);
                 DebugToResult(td->strTemp);
               }
-              if (!i)
-                exposureDone = false;
               if (frameNeedsDelete || slice >= numSlices)
                 break;
 #endif
@@ -1190,14 +1186,14 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           // Add to sum if needed in sum, and process it now if it is done
           if (needSum && slice < td->iNumFramesToSum) {
             AddToSum(td, imageData, td->sumBuf);
-            if (slice == td->iNumFramesToSum - 1) {
+            if (td->bEarlyReturn && slice == td->iNumFramesToSum - 1) {
                 ProcessImage(td->sumBuf, array, td->dataSize, td->width, td->height,
                   divideBy2, transpose, 4, !td->isFloat, false, scaleSave);
                 DebugToResult("Partial sum completed by thread\n");
             }
             td->iNumSummed++;
             if (exposureDone && !td->iReadyToReturn && 
-              td->iNumSummed >= td->iNumFramesToSum)       
+              td->iNumSummed >= td->iNumFramesToSum)
                 SetWatchedDataValue(td->iReadyToReturn, 1);
           }
 
