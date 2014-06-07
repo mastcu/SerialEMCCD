@@ -26,6 +26,7 @@ THREAD_ERROR, EARLY_RET_WITH_SYNC};
 #define K2_SAVE_DEFECTS    (1 << 6)
 #define K2_EARLY_RETURN    (1 << 7)
 #define K2_ASYNC_IN_RAM    (1 << 8)
+#define K2_SKIP_FRAME_ROTFLIP  (1 << 9)
 
 #define OLD_OPEN_SHUTTER_BROKEN    360
 #define OLD_SELECT_SHUTTER_BROKEN    360
@@ -51,7 +52,8 @@ public:
 	int SelectCamera(long camera);
 	void SetReadMode(long mode, double scaling);
   void SetK2Parameters(long readMode, double scaling, long hardwareProc, BOOL doseFrac, 
-    double frameTime, BOOL alignFrames, BOOL saveFrames, char *filter);
+    double frameTime, BOOL alignFrames, BOOL saveFrames, long rotationFlip, long flags, 
+    double dummy1, double dummy2, double dummy3, double dummy4, char *filter);
   void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, long flags,
     double dummy1, double dummy2, double dummy3, double dummy4, char *dirName, 
     char *rootName, char *refName, char *defects, char *command, long *error);

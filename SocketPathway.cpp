@@ -43,7 +43,7 @@ enum {GS_ExecuteScript = 1, GS_SetDebugMode, GS_SetDMVersion, GS_SetCurrentCamer
       GS_SetShutterNormallyClosed, GS_SetNoDMSettling, GS_GetDSProperties,
       GS_AcquireDSImage, GS_ReturnDSChannel, GS_StopDSAcquisition, GS_CheckReferenceTime,
       GS_SetK2Parameters, GS_ChunkHandshake, GS_SetupFileSaving, GS_GetFileSaveResult,
-      GS_SetupFileSaving2, GS_GetDefectList};
+      GS_SetupFileSaving2, GS_GetDefectList, GS_SetK2Parameters2};
 
 static int sNumLongSend;
 static int sNumBoolSend;
@@ -104,6 +104,7 @@ static ArgDescriptor sFuncTable[] = {
   {GS_GetFileSaveResult,    0, 0, 0,   2, 0, 0,   FALSE},
   {GS_SetupFileSaving2,     3, 1, 5,   1, 0, 0,   TRUE},
   {GS_GetDefectList,        1, 0, 0,   4, 0, 0,   FALSE},
+  {GS_SetK2Parameters2,     5, 3, 6,   0, 0, 0,   TRUE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -595,7 +596,16 @@ static int ProcessCommand(int numBytes)
 
     case GS_SetK2Parameters:
       gPlugInWrapper.SetK2Parameters(sLongArgs[1], sDoubleArgs[0], sLongArgs[2], 
-        sBoolArgs[0], sDoubleArgs[1], sBoolArgs[1], sBoolArgs[2], (char *)sLongArray);
+        sBoolArgs[0], sDoubleArgs[1], sBoolArgs[1], sBoolArgs[2], -1, 0, 0., 0., 0., 0., 
+        (char *)sLongArray);
+      SendArgsBack(0);
+      break;
+
+    case GS_SetK2Parameters2:
+      gPlugInWrapper.SetK2Parameters(sLongArgs[1], sDoubleArgs[0], sLongArgs[2], 
+        sBoolArgs[0], sDoubleArgs[1], sBoolArgs[1], sBoolArgs[2], sLongArgs[3],
+        sLongArgs[4], sDoubleArgs[2], sDoubleArgs[3], sDoubleArgs[4], sDoubleArgs[5], 
+        (char *)sLongArray);
       SendArgsBack(0);
       break;
 

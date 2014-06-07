@@ -115,6 +115,7 @@ struct ThreadData
   int iReadyToAcquire;
   int iReadyToReturn;
   int iDMquitting;
+  int iFrameRotFlip;
 
   // Items needed internally in save routine and its functions
   FILE *fp;
@@ -174,7 +175,8 @@ public:
   int SelectCamera(long camera);
   void SetReadMode(long mode, double scaling);
   void SetK2Parameters(long readMode, double scaling, long hardwareProc, BOOL doseFrac, 
-    double frameTime, BOOL alignFrames, BOOL saveFrames, char *filter);
+    double frameTime, BOOL alignFrames, BOOL saveFrames, long rotationFlip, long flags, 
+    double dummy1, double dummy2, double dummy3, double dummy4, char *filter);
   void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, long flags,
     double dummy1, double dummy2, double dummy3, double dummy4, char *dirName, 
     char *rootName, char *refName, char *defects, char *command, long *error);
@@ -276,6 +278,7 @@ TemplatePlugIn::TemplatePlugIn()
   mTD.iTiffQuality = -1;
   mTD.bAsyncSave = true;
   mTD.iRotationFlip = 0;
+  mTD.iFrameRotFlip = 0;
   mTD.dPixelSize = 5.;
   const char *temp = getenv("SERIALEMCCD_ROOTNAME");
   if (temp)
@@ -1234,9 +1237,9 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
             // Rotate and flip if desired and change the array pointer to save to use the 
             // passed array or the rotation array
-            if (td->iRotationFlip || !td->bWriteTiff) {
+            if (td->iFrameRotFlip || !td->bWriteTiff) {
               RotateFlip(td->outData, td->fileMode, td->width, td->height, 
-                td->iRotationFlip, !td->bWriteTiff, outForRot, &nxout, &nyout);
+                td->iFrameRotFlip, !td->bWriteTiff, outForRot, &nxout, &nyout);
               td->outData = outForRot;
             } else {
               nxout = td->width;
@@ -1270,9 +1273,9 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           SetWatchedDataValue(td->iReadyToAcquire, 1);
           for (grabInd = 0; grabInd < td->iNumGrabAndStack; grabInd++) {
             td->outData = (short *)td->grabStack[grabInd];
-            if (td->iRotationFlip || !td->bWriteTiff) {
+            if (td->iFrameRotFlip || !td->bWriteTiff) {
               RotateFlip(td->outData, td->fileMode, td->width, td->height, 
-                td->iRotationFlip, !td->bWriteTiff, td->tempBuf, &nxout, &nyout);
+                td->iFrameRotFlip, !td->bWriteTiff, td->tempBuf, &nxout, &nyout);
               td->outData = (short *)td->tempBuf;
               AccumulateWallTime(procWall, wallStart);
             } else {
@@ -1471,6 +1474,15 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
     if(td->iSaveFlags & K2_SAVE_RAW_PACKED)
       frameDivide = -2;
   }
+
+  // For 2.3.1 simulator (so far) super-res nonGN frames come through as shorts
+  // so they need to be truncated to bytes also
+  if (sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE && td->isInteger && 
+    td->byteSize == 2) {
+      td->fFloatScaling = 1.;
+      frameDivide = -2;
+  }
+
   td->outByteSize = 2;
   if (td->byteSize == 1 || frameDivide < 0) {
     td->fileMode = MRC_MODE_BYTE;
@@ -1480,8 +1492,8 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
     td->fileMode = MRC_MODE_SHORT;
   else
     td->fileMode = MRC_MODE_USHORT;
-  td->save4bit = sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE && td->byteSize == 1 &&
-    (td->iSaveFlags & K2_SAVE_RAW_PACKED);
+  td->save4bit = sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE && td->byteSize <= 2
+    && (td->iSaveFlags & K2_SAVE_RAW_PACKED);
   needProc = td->byteSize > 2 || td->signedBytes || frameDivide < 0;
 
   td->writeScaling = 1.;
@@ -1497,7 +1509,7 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
 
   // Allocate buffer for rotation/flip if processing needs to be done too
   // Do a rotation/flip if needed or if writing MRC, to get flip for output
-  if (needProc && (td->iRotationFlip || !td->bWriteTiff)) {
+  if (needProc && (td->iFrameRotFlip || !td->bWriteTiff)) {
     try {
       if (td->outByteSize == 1)
         td->rotBuf = (short *)(new unsigned char [td->width * td->height]);
@@ -1610,10 +1622,11 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
     // Set up header for one slice
     if (!td->bWriteTiff) {
       mrc_head_new(&td->hdata, nxFile, nyout, 1, td->fileMode);
-      sprintf(td->strTemp, "SerialEMCCD: Dose fractionation image, scaled by %.2f", 
-        td->writeScaling);
+      sprintf(td->strTemp, "SerialEMCCD: Dose frac. image, scaled by %.2f  r/f %d", 
+        td->writeScaling, td->iFrameRotFlip);
       if (td->save4bit)
-        sprintf(td->strTemp, "SerialEMCCD: Dose fractionation image, 4 bits packed"); 
+        sprintf(td->strTemp, "SerialEMCCD: Dose frac. image, 4 bits packed  r/f %d",
+        td->iFrameRotFlip); 
       mrc_head_label(&td->hdata, td->strTemp);
     }
     fileSlice = 0;
@@ -2489,7 +2502,9 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
 // Set the parameters for the next K2 acquisition
 void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwareProc, 
                                      BOOL doseFrac, double frameTime, BOOL alignFrames, 
-                                     BOOL saveFrames, char *filter)
+                                     BOOL saveFrames, long rotationFlip, long flags, 
+                                     double dummy1, double dummy2, double dummy3, 
+                                     double dummy4, char *filter)
 {
   SetReadMode(mode, scaling);
   mTD.iHardwareProc = hardwareProc;
@@ -2497,6 +2512,8 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
   m_bDoseFrac = doseFrac;
   mTD.dFrameTime = frameTime;
   mTD.bAlignFrames = alignFrames;
+  if (rotationFlip >= 0)
+    mTD.iRotationFlip = rotationFlip;
   if (alignFrames) {
     strncpy(mTD.strFilterName, filter, MAX_FILTER_NAME - 1);
     mTD.strFilterName[MAX_FILTER_NAME - 1] = 0x00;
@@ -2518,6 +2535,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   int newDir, dummy, newDefects = 0;
   unsigned int uiSumAndGrab = (unsigned int)(nSumAndGrab + 0.1);
   mTD.iRotationFlip = rotationFlip;
+  mTD.iFrameRotFlip = (flags & K2_SKIP_FRAME_ROTFLIP) ? 0 : rotationFlip;
   B3DCLAMP(mTD.iRotationFlip, 0, 7);
   mTD.bFilePerImage = filePerImage;
   mTD.dPixelSize = pixelSize;
@@ -2554,9 +2572,9 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     mTD.iNumGrabAndStack = GMS2_SDK_VERSION > 30 ? (uiSumAndGrab >> 16) : 0;
   }
 
-  sprintf(m_strTemp, "SetupFileSaving called with flags %x rf %d %s fpi %s pix %f ER %s "
-    "A2R %s sum %d grab %d\n  copy %s \n  dir %s root %s\n", flags, rotationFlip, 
-    mTD.bWriteTiff ? "TIFF" : "MRC", filePerImage ? "Y":"N", pixelSize, 
+  sprintf(m_strTemp, "SetupFileSaving called with flags %x rf %d frf %d %s fpi %s pix %f"
+    " ER %s A2R %s sum %d grab %d\n  copy %s \n  dir %s root %s\n", flags, rotationFlip,
+    mTD.iFrameRotFlip, mTD.bWriteTiff ? "TIFF" : "MRC", filePerImage ? "Y":"N", pixelSize, 
     mTD.bEarlyReturn ? "Y":"N", mTD.bAsyncToRAM ? "Y":"N", mTD.iNumFramesToSum,
     mTD.iNumGrabAndStack, (flags & K2_COPY_GAIN_REF) ? mTD.strGainRefToCopy.c_str() :"NO",
     mTD.strSaveDir.c_str(), mTD.strRootName.c_str());
@@ -3124,10 +3142,12 @@ void PlugInWrapper::SetReadMode(long mode, double scaling)
 
 void PlugInWrapper::SetK2Parameters(long readMode, double scaling, long hardwareProc, 
                                     BOOL doseFrac, double frameTime, BOOL alignFrames, 
-                                    BOOL saveFrames, char *filter)
+                                    BOOL saveFrames, long rotationFlip, long flags, 
+                                    double dummy1, double dummy2, double dummy3, 
+                                    double dummy4, char *filter)
 {
   gTemplatePlugIn.SetK2Parameters(readMode, scaling, hardwareProc, doseFrac, frameTime, 
-    alignFrames, saveFrames, filter);
+    alignFrames, saveFrames, rotationFlip, flags, dummy1, dummy2, dummy3, dummy4, filter);
 }
 void PlugInWrapper::SetupFileSaving(long rotationFlip, BOOL filePerImage, 
                                     double pixelSize, long flags, double dummy1, 

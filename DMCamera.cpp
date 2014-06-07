@@ -158,7 +158,22 @@ STDMETHODIMP CDMCamera::SetK2Parameters(long readMode, double scaling, long hard
                                         BOOL saveFrames, long filtSize, long filter[])
 {
 	gPlugInWrapper.SetK2Parameters(readMode, scaling, hardwareProc, doseFrac, frameTime,
-    alignFrames, saveFrames, (char *)filter);
+    alignFrames, saveFrames, -1, 0, 0., 0., 0., 0., (char *)filter);
+	return S_OK;
+}
+
+// This new version was added to set rotation/flip for dose fractionation shots that
+// are NOT saving frames, so that DM can be kept from doing the operation for GMS >= 2.3.1
+STDMETHODIMP CDMCamera::SetK2Parameters2(long readMode, double scaling, long hardwareProc,
+                                         BOOL doseFrac, double frameTime, 
+                                         BOOL alignFrames, BOOL saveFrames, 
+                                         long rotationFlip, long flags, double dummy1, 
+                                         double dummy2, double dummy3, double dummy4, 
+                                         long filtSize, long filter[])
+{
+	gPlugInWrapper.SetK2Parameters(readMode, scaling, hardwareProc, doseFrac, frameTime,
+    alignFrames, saveFrames, rotationFlip, flags, dummy1, dummy2, dummy3, dummy4, 
+    (char *)filter);
 	return S_OK;
 }
 
@@ -173,7 +188,9 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 
 // Sets up file saving for the next acquisition.
 //   rotationFlip is the operation (4 for flip around Y BEFORE plus CCW rotation / 90)
-//      that needs to be applied to unrotated dose frac images
+//      that needs to be applied to unrotated dose frac images (unless 
+//      K2_SKIP_FRAME_ROTFLIP is set) and whose inverse needs to be applied to keep 
+//      DM from doing rotation/flip for GMS >= 2.3.1
 //   filePerImage is a flag for one file per image
 //   pixelSize should be in Angstroms
 //   flags are as defined in TemplatePlugin.h:
@@ -186,6 +203,7 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 //      K2_SAVE_DEFECTS    - Save a defect list as needed
 //      K2_EARLY_RETURN    - Return early, with no sum, or sum of subset of frames
 //      K2_ASYNC_IN_RAM    - Acquire stack in DM asynchronously into RAM
+//      K2_SKIP_FRAME_ROTFLIP - Save frames in native orientation, skipping rotation/flip
 //   numGrabSum is relevant when doing an early return; it should be set from an unsigned
 //      int with the number of frames to sum in the low 16 bits and, for GMS >= 2.3.1,
 //      the number of frames to grab into a local stack in the high 16 bits.  The local
