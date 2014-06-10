@@ -530,8 +530,12 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     m_strQueue.resize(0);
   }
 
-  // Intercept K2 asynchronous saving here
+  // Intercept K2 asynchronous saving here; single frame doesn't work in older GMS
+  // but don't know about newer
   mTD.iK2Processing = newProc;
+  if (saveFrames == SAVE_FRAMES && B3DNINT(exposure / mTD.dFrameTime) == 1 && 
+    GMS2_SDK_VERSION < 31)
+    mTD.bAsyncSave = false;
   if (saveFrames == SAVE_FRAMES && mTD.bAsyncSave) {
       sprintf(m_strTemp, "Exit(0)");
       mTD.strCommand += m_strTemp;
@@ -2497,6 +2501,10 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
     scaling = 1.;
   mTD.iReadMode = mode;
   mTD.fFloatScaling = (float)scaling;
+  if (mode < 0) {
+    m_bSaveFrames = false;
+    m_bDoseFrac = false;
+  }
 }
 
 // Set the parameters for the next K2 acquisition
