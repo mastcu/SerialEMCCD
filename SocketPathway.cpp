@@ -496,7 +496,8 @@ static int ProcessCommand(int numBytes)
   while (sFuncTable[ind].funcCode >= 0 && sFuncTable[ind].funcCode != funcCode)
     ind++;
   if (sFuncTable[ind].funcCode < 0) {
-    sprintf(sMessageBuf, "Function code not found: %d\n", funcCode);
+    sprintf(sMessageBuf, "Function code not found: %d.\n  MOST LIKELY THIS PLUGIN NEEDS"
+      " TO BE UPGRADED TO MATCH THE SERIALEM VERSION\n", funcCode);
     gPlugInWrapper.ErrorToResult(sMessageBuf, "SerialEMSocket: ");
     SendArgsBack(-1);
     return 1;
