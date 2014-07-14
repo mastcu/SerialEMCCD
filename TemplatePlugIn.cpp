@@ -915,7 +915,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 #ifdef _WIN64
   DM::ScriptObject dummyObj;
 #if GMS2_SDK_VERSION < 31
-  K2_DoseFracAcquisition k2dfa;
+  K2_DoseFracAcquisition *k2dfaP = NULL;
 #else
   CM::ImageStackPtr stack;
 #endif
@@ -965,13 +965,13 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         td->iK2Binning);//, td->iK2Top, td->iK2Left, td->iK2Bottom, td->iK2Right);
       j++;
 #if GMS2_SDK_VERSION < 31
-      k2dfa.SetFrameExposure(td->dFrameTime);  j++;
-      k2dfa.SetAlignOption(td->bAlignFrames);  j++;
-      k2dfa.SetHardwareProcessing(td->iReadMode ? sK2HardProcs[td->iHardwareProc / 2] : 0);
+      k2dfaP->SetFrameExposure(td->dFrameTime);  j++;
+      k2dfaP->SetAlignOption(td->bAlignFrames);  j++;
+      k2dfaP->SetHardwareProcessing(td->iReadMode ? sK2HardProcs[td->iHardwareProc / 2] : 0);
       j++;
-      k2dfa.SetAsyncOption(true);  j++;
+      k2dfaP->SetAsyncOption(true);  j++;
       if (td->bAlignFrames)
-        k2dfa.SetFilter(filter);
+        k2dfaP->SetFilter(filter);
 #else
       CM::SetHardwareCorrections(acqParams, CM::CCD::Corrections::from_bits(
         td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0));  j++;
@@ -993,7 +993,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         Sleep((DWORD)(retval * 1000. + 0.5));
 
 #if GMS2_SDK_VERSION < 31
-      sumImage = k2dfa.AcquireImage(camera, acqParams, image);
+      sumImage = k2dfaP->AcquireImage(camera, acqParams, image);
       numLoop = 2;
 #else
       stack = CM::AcquireImageStack(camera, acqParams);   j++;
@@ -1009,9 +1009,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       ErrorToResult(td->strTemp);
       try {
 #if GMS2_SDK_VERSION < 31
-        k2dfa.Abort();
+        k2dfaP->Abort();
         DM::DeleteImage(sumImage.get());
         DM::DeleteImage(image.get());
+        delete k2dfaP;
 #else
         stack->Abort();
         // TODO: delete anything?
@@ -1114,8 +1115,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             wallStart = wallTime();
             while (1) {
 #if GMS2_SDK_VERSION < 31
-              stackAllReady = k2dfa.IsDone();   j++;
-              numSlices = k2dfa.GetNumFramesProcessed();   j++;
+              stackAllReady = k2dfaP->IsDone();   j++;
+              numSlices = k2dfaP->GetNumFramesProcessed();   j++;
               if (numSlices > slice || stackAllReady) {
                 exposureDone = true;
                 break;
@@ -1324,13 +1325,13 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       try {
 #if GMS2_SDK_VERSION < 31
         if (doingStack && !stackAllReady)
-          k2dfa.Abort();
+          k2dfaP->Abort();
         DM::DeleteImage(image.get());
 #else
         if (slice < numSlices)
           stack->Abort();
 #endif
-     }
+      }
       catch (exception exc) {
       }
     }
@@ -1370,6 +1371,9 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         DebugToResult("Cannot find stack for deleting it\n");
     }
   }
+#if defined(_WIN64) && GMS2_SDK_VERSION < 31
+  delete k2dfaP;
+#endif
   td->arrSize = td->width * td->height;
   sprintf(td->strTemp, "Leaving thread with return value %d\n", errorRet); 
   DebugToResult(td->strTemp);
