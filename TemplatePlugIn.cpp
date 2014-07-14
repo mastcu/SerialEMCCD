@@ -965,6 +965,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         td->iK2Binning);//, td->iK2Top, td->iK2Left, td->iK2Bottom, td->iK2Right);
       j++;
 #if GMS2_SDK_VERSION < 31
+      k2dfaP = new K2_DoseFracAcquisition;
       k2dfaP->SetFrameExposure(td->dFrameTime);  j++;
       k2dfaP->SetAlignOption(td->bAlignFrames);  j++;
       k2dfaP->SetHardwareProcessing(td->iReadMode ? sK2HardProcs[td->iHardwareProc / 2] : 0);
