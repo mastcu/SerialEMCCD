@@ -39,10 +39,12 @@ using namespace std ;
 #define ID_MULTIPLIER 10000000
 #define SUPERRES_FRAME_SCALE 16
 #define DATA_MUTEX_WAIT  100
+#define IMAGE_MUTEX_WAIT  1000
+#define IMAGE_MUTEX_CLEAN_WAIT  5000
 enum {CHAN_UNUSED = 0, CHAN_ACQUIRED, CHAN_RETURNED};
 enum {NO_SAVE = 0, SAVE_FRAMES};
 enum {NO_DEL_IM = 0, DEL_IMAGE};
-enum {WAIT_FOR_THREAD, WAIT_FOR_RETURN, WAIT_FOR_NEW_SHOT};
+enum {WAIT_FOR_THREAD = 0, WAIT_FOR_RETURN, WAIT_FOR_NEW_SHOT, WAIT_FOR_CONTINUOUS};
 
 // Mapping from program read modes (0-2) to values for K2
 static int sReadModes[3] = {K2_LINEAR_READ_MODE, K2_COUNTING_READ_MODE, 
@@ -59,8 +61,14 @@ static int sInverseTranspose[8] = {0, 258, 3, 257, 1, 256, 2, 259};
 // THE debug mode flag
 static BOOL sDebug;
 
-// Handle for mutex for writing critical components of thread data
+// Handle for mutexes for writing critical components of thread data and continuous image
 static HANDLE sDataMutexHandle;
+static HANDLE sImageMutexHandle;
+
+// Array for storing continuously acquired images to pass from thread to caller
+static short *sContinuousArray = NULL;
+
+#define DELETE_CONTINUOUS {delete [] sContinuousArray; sContinuousArray = NULL;}
 
 // Structure to hold data to pass to acquire proc/thread
 struct ThreadData 
@@ -87,10 +95,10 @@ struct ThreadData
   int iK2Binning;
   int iK2Shutter;
   int iK2Processing;
-  int iK2Left;
-  int iK2Right;
-  int iK2Top;
-  int iK2Bottom;
+  int iLeft;
+  int iRight;
+  int iTop;
+  int iBottom;
   string strCommand;
   char strTemp[MAX_TEMP_STRING];   // Give it its own temp string separate from class
   int iDSimageID;
@@ -116,6 +124,12 @@ struct ThreadData
   int iReadyToReturn;
   int iDMquitting;
   int iFrameRotFlip;
+  bool bDoContinuous;
+  bool bSetContinuousMode;
+  bool bUseAcquisitionObj;
+  int iContinuousQuality;
+  int iCorrections;
+  int iEndContinuous;
 
   // Items needed internally in save routine and its functions
   FILE *fp;
@@ -154,6 +168,7 @@ static void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
 static void ErrorToResult(const char *strMessage, const char *strPrefix = NULL);
 static BOOL SleepMsg(DWORD dwTime_ms);
 static double ExecuteScript(char *strScript);
+static int RunContinuousAcquire(ThreadData *td);
 
 // Declarations of global functions called from here
 void TerminateModuleUninitializeCOM();
@@ -204,7 +219,9 @@ public:
     long lineSync, long continuous, long numChan, long channels[], long divideBy2);
   int ReturnDSChannel(short array[], long *arrSize, long *width, 
     long *height, long channel, long divideBy2);
+  int GetContinuousFrame(short array[], long *arrSize, long *width, long *height);
   int StopDSAcquisition();
+  int StopContinuousCamera();
   void SetDebugMode(BOOL inVal) {sDebug = inVal;};
   virtual void Start();
   virtual void Run();
@@ -246,6 +263,7 @@ TemplatePlugIn::TemplatePlugIn()
     m_iDebugVal = atoi(getenv("SERIALEMCCD_DEBUG"));
 
   sDataMutexHandle = CreateMutex(0, 0, 0);
+  sImageMutexHandle = CreateMutex(0, 0, 0);
   m_HAcquireThread = NULL;
   m_iDMVersion = 340;
   m_iCurrentCamera = 0;
@@ -383,6 +401,9 @@ void TemplatePlugIn::End()
 }
 
 
+/*
+ * Outputs messages to results window when debig flag is set
+ */
 static void DebugToResult(const char *strMessage, const char *strPrefix)
 {
   if (!sDebug) 
@@ -405,8 +426,10 @@ static void DebugToResult(const char *strMessage, const char *strPrefix)
   DM::Result(strMessage );
 }
 
-// Outputs messages to the results window upon error; just the message itself if in 
-// debug mode, or a supplied or defulat prefix first if not in debug mode
+/*
+ * Outputs messages to the results window upon error; just the message itself if in 
+ * debug mode, or a supplied or defulat prefix first if not in debug mode
+ */
 static void ErrorToResult(const char *strMessage, const char *strPrefix)
 {
   if (sDebug) {
@@ -458,8 +481,10 @@ static double ExecuteScript(char *strScript)
   return retval;
 }
 
-// The external call to execute a script, optionally placing commands to select the
-// camera first
+/*
+ * The external call to execute a script, optionally placing commands to select the
+ * camera first
+ */
 double TemplatePlugIn::ExecuteClientScript(char *strScript, BOOL selectCamera)
 {
   mTD.strCommand.resize(0);
@@ -472,7 +497,9 @@ double TemplatePlugIn::ExecuteClientScript(char *strScript, BOOL selectCamera)
   return ExecuteScript((char *)mTD.strCommand.c_str());
 }
 
-// Add a command to a script to be executed in the future
+/*
+ * Add a command to a script to be executed in the future
+ */
 void TemplatePlugIn::QueueScript(char *strScript)
 {
   m_strQueue += strScript;
@@ -494,10 +521,28 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
               long divideBy2, long corrections)
 {
   int saveFrames = NO_SAVE;
-  int newProc;
+  int newProc, err, procIn;
   if (m_bSaveFrames && mTD.iReadMode >= 0 && m_bDoseFrac && mTD.strSaveDir.length() && 
     mTD.strRootName.length())
       saveFrames = SAVE_FRAMES;
+
+  // Strip continuous mode information from processing, set flag to do it if no conflict
+  mTD.bDoContinuous = false;
+  if (processing > 7) {
+    procIn = processing;
+    processing &= 7;
+    if (saveFrames == NO_SAVE) {
+      mTD.bDoContinuous = true;
+      if (sContinuousArray) {
+        return GetContinuousFrame(array, arrSize, width, height);
+      }
+      mTD.iContinuousQuality = (procIn >> QUALITY_BITS_SHIFT) & QUALITY_BITS_MASK;
+      mTD.bUseAcquisitionObj = (procIn & CONTINUOUS_ACQUIS_OBJ) != 0;
+      mTD.bSetContinuousMode = (procIn & CONTINUOUS_SET_MODE) != 0;
+    }
+  }
+  if (!mTD.bDoContinuous && sContinuousArray)
+    StopContinuousCamera();
 
   if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
     
@@ -530,24 +575,35 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     m_strQueue.resize(0);
   }
 
-  // Intercept K2 asynchronous saving here; single frame doesn't work in older GMS
-  // but don't know about newer
+  // single frame doesn't work in older GMS for async saving; but don't know about newer
   mTD.iK2Processing = newProc;
   if (saveFrames == SAVE_FRAMES && B3DNINT(exposure / mTD.dFrameTime) == 1 && 
     GMS2_SDK_VERSION < 31)
     mTD.bAsyncSave = false;
-  if (saveFrames == SAVE_FRAMES && mTD.bAsyncSave) {
+
+  // Intercept K2 asynchronous saving and continuous mode here
+  if ((saveFrames == SAVE_FRAMES && mTD.bAsyncSave) || mTD.bDoContinuous) {
       sprintf(m_strTemp, "Exit(0)");
       mTD.strCommand += m_strTemp;
-      mTD.iK2Top = top;
-      mTD.iK2Bottom = bottom;
-      mTD.iK2Left = left;
-      mTD.iK2Right = right;
+      mTD.iTop = top;
+      mTD.iBottom = bottom;
+      mTD.iLeft = left;
+      mTD.iRight = right;
       mTD.dK2Exposure = exposure;
       mTD.dK2Settling = settling;
       mTD.iK2Shutter = shutter;
-      return AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
+      mTD.iCorrections = corrections;
+
+      // Make call to acquire image or start continuous acquires
+      err = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
         divideBy2, 0, DEL_IMAGE, SAVE_FRAMES);
+
+      // Then fetch the first continuous frame if that was OK
+      if (!err && mTD.bDoContinuous) {
+        DebugToResult("Making first call to GetContinuousFrame\n");
+        return GetContinuousFrame(array, arrSize, width, height);
+      }
+      return err;
   }
 
   // Set up acquisition parameters
@@ -792,7 +848,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
                       long *width, long *height, long divideBy2, long transpose, 
                       long delImage, long saveFrames)
 {
-  DWORD retval = 0, threadID;
+  DWORD retval = 0, resret, threadID;
   ThreadData *retTD = &mTD;
 
   // If there was an acquire thread started, wait until it is done for any dose frac
@@ -817,22 +873,46 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   mTD.iReadyToReturn = 0;
   mTD.iDMquitting = 0;
   mTD.iErrorFromSave = 0;
+  mTD.iEndContinuous = 0;
+
+  // Get the array for storing continuous images 
+  if (mTD.bDoContinuous) {
+    try {
+      sContinuousArray = new short [sizeOrig];
+    }
+    catch (...) {
+      sContinuousArray = NULL;
+      DebugToResult("AcquireAndTransferImage: error making sContinuousArray\n");
+      return ROTBUF_MEMORY_ERROR;
+    }
+  }
 
   // A thread is needed if doing asynchronous saving, or even for synchronous save with
   // an early return, but only for old version
-  if (!retval && saveFrames && 
-    (mTD.bAsyncSave || (mTD.bEarlyReturn && GMS2_SDK_VERSION < 31))) {
+  if (!retval && (mTD.bDoContinuous || 
+    (saveFrames && (mTD.bAsyncSave || (mTD.bEarlyReturn && GMS2_SDK_VERSION < 31))))) {
       *arrSize = *width = *height = 0;
       mTDcopy = mTD;
       retTD = &mTDcopy;
       m_HAcquireThread = CreateThread(NULL, 0, AcquireProc, &mTDcopy, CREATE_SUSPENDED, 
         &threadID);
-      if (!m_HAcquireThread)
-        return THREAD_ERROR;
-      retval = ResumeThread(m_HAcquireThread);
-      if (retval == (DWORD)(-1) || retval > 1)
-        return THREAD_ERROR;
-      DebugToResult("Started thread, going into wait loop\n");
+      if (!m_HAcquireThread) {
+        retval = THREAD_ERROR;
+        DebugToResult("AcquireAndTransferImage: error starting thread\n");
+      }
+      if (!retval) {
+        resret = ResumeThread(m_HAcquireThread);
+        if (resret == (DWORD)(-1) || resret > 1)
+          retval = THREAD_ERROR;
+      }
+      if (retval) {
+        DELETE_CONTINUOUS;
+        return retval;
+      }
+      DebugToResult(mTD.bDoContinuous ? "Started continuous thread, returning\n" : 
+        "Started thread, going into wait loop\n");
+      if (mTD.bDoContinuous)
+        return 0;
       retval = WaitForAcquireThread(mTD.bEarlyReturn ? WAIT_FOR_RETURN : WAIT_FOR_THREAD);
       mTD.iErrorFromSave = mTDcopy.iErrorFromSave;
       mTD.iFramesSaved = mTDcopy.iFramesSaved;
@@ -853,15 +933,18 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   return (int)retval;
 }
 
-// Wait for either an acquire thread to be done, a sum to be done, or for DM to be ready
-// for a non-dose-frac shot
+/*
+ * Wait for either an acquire thread to be done, a sum to be done, or for DM to be ready
+ * for a non-dose-frac shot
+ */
 DWORD TemplatePlugIn::WaitForAcquireThread(int waitType)
 {
+  const char *messages[] = {"thread to end", "exposure and frame sum to complete",
+    "ready for single-shot", "continuous exposure to end"};
   double quitStart = -1.;
+  double waitStart = GetTickCount();
   DWORD retval;
-  sprintf(m_strTemp, "Waiting for %s\n", waitType == WAIT_FOR_THREAD ? "thread to end" :
-    (waitType == WAIT_FOR_RETURN ? "exposure and frame sum to complete" : 
-    "ready for single-shot"));
+  sprintf(m_strTemp, "Waiting for %s\n", messages[waitType]);
   DebugToResult(m_strTemp);
   while (1) {
     GetExitCodeThread(m_HAcquireThread, &retval);
@@ -870,7 +953,8 @@ DWORD TemplatePlugIn::WaitForAcquireThread(int waitType)
       return retval;
     }
     if ((waitType == WAIT_FOR_RETURN && GetWatchedDataValue(mTDcopy.iReadyToReturn)) ||
-      (waitType == WAIT_FOR_NEW_SHOT && GetWatchedDataValue(mTDcopy.iReadyToAcquire)))
+      (waitType == WAIT_FOR_NEW_SHOT && GetWatchedDataValue(mTDcopy.iReadyToAcquire)) ||
+      waitType == WAIT_FOR_CONTINUOUS && TickInterval(waitStart) > 5000.)
       return 0;
     if (!SleepMsg(10)) {
       quitStart = GetTickCount();
@@ -882,7 +966,9 @@ DWORD TemplatePlugIn::WaitForAcquireThread(int waitType)
   return 0;
 }
 
-// The actual procedure for acquiring and processing image
+/*
+ * The actual procedure for acquiring and processing image
+ */
 static DWORD WINAPI AcquireProc(LPVOID pParam)
 {
   ThreadData *td = (ThreadData *)pParam;
@@ -924,7 +1010,6 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   // Set these values to zero in case of error returns
   td->width = 0;
   td->height = 0;
-  td->arrSize = 0;
   td->iNumSummed = 0;
   td->iFramesSaved = 0;
   doingAsyncSave = saveFrames && td->bAsyncSave;
@@ -945,8 +1030,14 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   td->dLastReturnTime = GetTickCount();
   
   // If error, return error code
-  if (retval == SCRIPT_ERROR_RETURN)
+  if (retval == SCRIPT_ERROR_RETURN) {
+    td->arrSize = 0;
     return (int)retval;
+  }
+  if (td->bDoContinuous)
+    return RunContinuousAcquire(td);
+
+  td->arrSize = 0;
 
   // Get the image ID for simple cases
   ID = imageID = (long)(retval + 0.01);
@@ -1381,11 +1472,276 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   return errorRet;
 }
 
-/////////////////////////////////////////////
-// SUPPORT FUNCTIONS FOR AcquireProc
-/////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////
+//  CONTINUOUS ACQUIRE ROUTINES
+//////////////////////////////////////////////////////////////////
 
-// Accumulate time since last start and reset the start time
+/*
+ * Start continuous acquire from thread and process images into static buffer
+ */
+static int RunContinuousAcquire(ThreadData *td)
+{
+  bool K2type = td->iReadMode >= 0;
+  bool startedAcquire = false, madeImage = false;
+  int outLimit = td->arrSize;
+  int j, transpose, nxout, nyout, retval = 0, rotationFlip = 0;
+  double delay;
+  short *procOutArray = sContinuousArray;
+  DM::Image image;
+  DM::ScriptObject acqListen, dummyObj;
+  GatanPlugIn::ImageDataLocker *imageLp = NULL;
+#ifdef GMS2
+  CM::AcquisitionPtr acqObj;
+  ::Gatan::Camera::FrameSetInfoPtr frameInfo;
+  Gatan::Imaging::Transpose2d dfltTrans2d;
+  Gatan::Imaging::Transpose2d zeroTrans2d = 
+    Gatan::Imaging::Transpose2d::RotateNoneFlipNone;
+#else
+  ImageData::Transform2D dfltTrans2d;
+  ImageData::Transform2D zeroTrans2d = ImageData::Transform2D::trans_NONE;
+#endif
+  void *imageData;
+  td->arrSize = 0;
+
+  try {
+
+    // Set up the acquisition parameters
+    j = 0;
+    CM::CameraPtr camera = CM::GetCurrentCamera();  j++;
+    CM::CameraManagerPtr manager = CM::GetCameraManager();  j++;
+    CM::AcquisitionParametersPtr acqParams = CM::CreateAcquisitionParameters_FullCCD(
+      camera, (CM::AcquisitionProcessing)td->iK2Processing, 
+      td->dK2Exposure + (K2type ? 0.001 : 0.), td->iK2Binning,  td->iK2Binning); j++;
+    CM::SetBinnedReadArea(camera, acqParams, td->iTop, td->iLeft, td->iBottom,td->iRight);
+    j++;
+    CM::SetSettling(acqParams, td->dK2Settling);  j++;
+    CM::SetShutterIndex(acqParams, td->iK2Shutter);  j++;
+    if (td->iCorrections >= 0)
+      CM::SetCorrections(acqParams, 49, td->iCorrections); 
+    j++;
+    CM::SetDoContinuousReadout(acqParams, td->bSetContinuousMode); j++;
+
+    // Find out if there is a transpose; cancel it and set up for rotation/flip
+    dfltTrans2d = CM::Config_GetDefaultTranspose(camera); j++;
+#ifdef GMS2
+    transpose = dfltTrans2d.ToBits();
+#else
+    transpose = (int)dfltTrans2d;
+#endif
+    if (transpose) {
+      
+      // The inverse is the same except for 257/258, which are inverses of each other
+      if ((transpose + 1) / 2 == 129)
+        transpose = 515 - transpose;
+#ifdef GMS2
+      //zeroTrans2d = Gatan::Imaging::Transpose2d::FromBits(transpose);
+#else
+      //zeroTrans2d = (ImageData::Transform2D)transpose;
+#endif
+
+      // Set the inverse transpose and look up needed rotation/flip
+      CM::SetTotalTranspose(camera, acqParams, zeroTrans2d);
+      //CM::SetAcqTranspose(acqParams, zeroTrans2d);
+      for (rotationFlip = 0; rotationFlip < 8; rotationFlip++)
+        if (sInverseTranspose[rotationFlip] == transpose)
+          break;
+
+      try {
+        procOutArray = new short[outLimit];
+      }
+      catch (...) {
+        DELETE_CONTINUOUS;
+        return ROTBUF_MEMORY_ERROR;
+      }
+    }
+    sprintf(td->strTemp, "Default transpose %d  rotationFlip %d\n", 
+      transpose, rotationFlip);
+    DebugToResult(td->strTemp);
+    j++;
+
+    // Subtract 1 here; they are numbered from 0 in the script call
+    if (td->iContinuousQuality > 0)
+      CM::SetQualityLevel(acqParams, td->iContinuousQuality - 1);
+    j++;
+
+    // Set K2 parameters
+    // Seems to be no way to set hardware correction in software for older GMS
+    if (K2type) {
+#ifdef _WIN64
+#if GMS2_SDK_VERSION < 31
+#else
+      CM::SetHardwareCorrections(acqParams, CM::CCD::Corrections::from_bits(
+        td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0));
+#endif
+      j++;
+      CM::SetReadMode(acqParams, sReadModes[td->iReadMode]);
+#endif
+    }
+
+    // Get the DM image for this acquisition
+    j = 13;
+    image = CM::CreateImageForAcquire(camera, acqParams, "dummy"); j++;
+    madeImage = true;
+
+#ifdef GMS2
+    // Get the acquisition object if using one
+    if (td->bUseAcquisitionObj)
+      acqObj = CM::CreateAcquisition(camera, acqParams);
+#endif
+
+    // Prepare K2 at least
+    j++;
+    if (K2type) {
+      CM::PrepareCameraForAcquire(manager, camera, acqParams, dummyObj, delay);
+      if (delay >= 0.001)
+        Sleep((DWORD)(delay * 1000. + 0.5));
+    }
+
+    j++;
+#ifdef GMS2
+    if (td->bUseAcquisitionObj)
+      CM::ACQ_StartAcquire(acqObj); 
+#endif
+    DebugToResult("Initiated continuous acquisition\n");
+
+    // Start the loop
+    startedAcquire = true;
+    while (1) {
+      j = 17;
+#ifdef GMS2
+      if (td->bUseAcquisitionObj)
+        CM::DoAcquire_LL(acqObj, acqListen, image, frameInfo);
+      else
+#endif
+        CM::AcquireImage(camera, acqParams, image);
+      j++;
+      if (GetTypeAndSizeInfo(td, image, 0, outLimit, false)) {
+        retval = WRONG_DATA_TYPE;
+        break;
+      }
+
+      // Get data pointer and transfer the data
+      imageLp = new GatanPlugIn::ImageDataLocker( image ); j++;
+      imageData = imageLp->get(); j++;
+      if (!rotationFlip)
+        WaitForSingleObject(sImageMutexHandle, IMAGE_MUTEX_WAIT);
+      ProcessImage(imageData, procOutArray, td->dataSize, td->width, td->height, 
+        td->divideBy2, td->transpose, td->byteSize, td->isInteger, td->isUnsignedInt, 
+        td->fFloatScaling);
+      delete imageLp;
+      imageLp = NULL;
+      if (rotationFlip) {
+        WaitForSingleObject(sImageMutexHandle, IMAGE_MUTEX_WAIT);
+        RotateFlip(procOutArray, MRC_MODE_SHORT, td->width, td->height, rotationFlip, 
+          false, sContinuousArray, &nxout, &nyout);
+        td->width = nxout;
+        td->height = nyout;
+      }
+      ReleaseMutex(sImageMutexHandle);
+      td->arrSize = td->width * td->height;
+
+      // Signal that an image is ready; check for quitting
+      //DebugToResult("RunContinuousAcquire: Setting frame done\n");
+      SetWatchedDataValue(td->iReadyToReturn, 1);
+
+      if (GetWatchedDataValue(td->iEndContinuous) || GetWatchedDataValue(td->iDMquitting))
+        break;
+      if (!SleepMsg(10)) {
+        DebugToResult("GetContinuousFrame: Interrupted by quit\n");
+        SetWatchedDataValue(td->iDMquitting, 1);
+        break;
+      }
+    }
+  }
+  catch (exception exc) {
+    sprintf(td->strTemp, "Caught an exception from call %d in continuous acquire:"
+      "\n  %s\n", j, exc.what());
+    ErrorToResult(td->strTemp);
+    retval = DM_CALL_EXCEPTION;
+  }
+
+  // Shut down and clean up
+  DebugToResult(retval == WRONG_DATA_TYPE ? "Ending thread due to wrong data type\n" :
+    "Ending thread due to end or quit or exception\n");
+  try {
+    if (madeImage)
+      DM::DeleteImage(image.get());
+#ifdef GMS2
+    if (td->bUseAcquisitionObj && startedAcquire)
+      CM::ACQ_StopAcquire(acqObj);
+#endif
+    WaitForSingleObject(sImageMutexHandle, IMAGE_MUTEX_CLEAN_WAIT);
+    DELETE_CONTINUOUS;
+    ReleaseMutex(sImageMutexHandle);
+  }
+  catch (...) {
+  }
+  return retval;
+}
+
+/*
+ * Get the next available frame from continuous acquisition
+ */
+int TemplatePlugIn::GetContinuousFrame(short array[], long *arrSize, long *width, 
+                                       long *height)
+{
+  while (1) {
+    if (!sContinuousArray) {
+      DebugToResult("GetContinuousFrame: no array!\n");
+      return CONTINUOUS_ENDED;
+    }
+    if (GetWatchedDataValue(mTDcopy.iReadyToReturn)) {
+      //DebugToResult("GetContinuousFrame: A frame is ready\n");
+      WaitForSingleObject(sImageMutexHandle, IMAGE_MUTEX_WAIT);
+      if (!sContinuousArray) {
+        DebugToResult("GetContinuousFrame: no array after getting image mutex\n");
+        ReleaseMutex(sImageMutexHandle);
+        return CONTINUOUS_ENDED;
+      }
+      WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
+      *width = mTDcopy.width;
+      *height = mTDcopy.height;
+      *arrSize = mTDcopy.arrSize;
+      mTDcopy.iReadyToReturn = 0;
+      ReleaseMutex(sDataMutexHandle);
+      if (!*arrSize || !(*width * *height)) {
+        ReleaseMutex(sImageMutexHandle);
+        sprintf(m_strTemp, "GetContinuousFrame:  lousy size %d or w/h %d %d\n", 
+          *arrSize, *width, *height);
+        DebugToResult(m_strTemp);
+        return CONTINUOUS_ENDED;
+      }
+      memcpy(array, sContinuousArray, *arrSize * sizeof(short));
+      ReleaseMutex(sImageMutexHandle);
+      //DebugToResult("GetContinuousFrame: Copied frame, returning 0\n");
+      return 0;
+    }
+    if (!SleepMsg(10)) {
+      DebugToResult("GetContinuousFrame: Looks like a quit\n");
+      SetWatchedDataValue(mTDcopy.iDMquitting, 1);
+      return QUIT_DURING_SAVE;
+    }
+  }
+  return CONTINUOUS_ENDED;
+}
+
+/*
+ * Stop continuous acquires: just set the flag and wait until done.  But this can be
+ * call from the main thread of SerialEM, so wait with a time-out
+ */
+int TemplatePlugIn::StopContinuousCamera()
+{
+  SetWatchedDataValue(mTDcopy.iEndContinuous, 1);
+  return WaitForAcquireThread(WAIT_FOR_CONTINUOUS);
+}
+
+///////////////////////////////////////////////////////////////
+// SUPPORT FUNCTIONS FOR AcquireProc and RunContinuousAcquire
+///////////////////////////////////////////////////////////////
+
+/* 
+ * Accumulate time since last start and reset the start time
+ */
 static void AccumulateWallTime(double &cumTime, double &wallStart)
 {
   double wallNow = wallTime();
@@ -1393,7 +1749,9 @@ static void AccumulateWallTime(double &cumTime, double &wallStart)
   wallStart = wallNow;
 }
 
-// Get millisecond interval from tick counts accounting for wraparound
+/*
+ * Get millisecond interval from tick counts accounting for wraparound
+ */
 static double TickInterval(double start)
 {
   double interval = GetTickCount() - start;
@@ -1402,9 +1760,11 @@ static double TickInterval(double start)
   return interval;
 }
 
-// Delete the passed-in image if there is no needsDelete argument or if it is still true,
-// and in latter case, sets it false.  Sets frame state so get frame thread knows it can
-// pass on the next image
+/*
+ * Delete the passed-in image if there is no needsDelete argument or if it is still true,
+ * and in latter case, sets it false.  Sets frame state so get frame thread knows it can
+ * pass on the next image
+ */
 static void DeleteImageIfNeeded(ThreadData *td, DM::Image &image, bool *needsDelete)
 {
   if (needsDelete && !(*needsDelete))
@@ -1418,7 +1778,9 @@ static void DeleteImageIfNeeded(ThreadData *td, DM::Image &image, bool *needsDel
     *needsDelete = false;
 }
 
-// Acquire the data mutex for setting or getting values accessed by multiple threads
+/*
+ * Acquire the data mutex for setting or getting values accessed by multiple threads
+ */
 static void SetWatchedDataValue(int &member, int value)
 {
   WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
@@ -1429,12 +1791,15 @@ static void SetWatchedDataValue(int &member, int value)
 static int GetWatchedDataValue(int &member)
 {
   WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
-  return member;
+  int retval = member;
   ReleaseMutex(sDataMutexHandle);
+  return retval;
 }
 
-// Given the single image or first stack frame, get all the parameters about it and check
-// array size
+/*
+ * Given the single image or first stack frame, get all the parameters about it and check
+ * array size
+ */
 static int GetTypeAndSizeInfo(ThreadData *td, DM::Image &image, int loop,  int outLimit,
                               bool doingStack)
 {
@@ -1466,7 +1831,9 @@ static int GetTypeAndSizeInfo(ThreadData *td, DM::Image &image, int loop,  int o
   return 0;
 }
 
-// Does many initializations for file saving on a first frame, including getting buffers
+/*
+ * Does many initializations for file saving on a first frame, including getting buffers
+ */
 static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum, 
                             long &frameDivide, bool &needProc)
 {
@@ -1573,7 +1940,9 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
   return 0;
 }
 
-// Opens file if needed, gets min/max/mean, packs image if needed, saves image to file
+/*
+ * Opens file if needed, gets min/max/mean, packs image if needed, saves image to file
+ */
 static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, int slice, 
                             bool finalFrame, int &fileSlice, int &tmin, 
                             int &tmax, float &meanSum)
@@ -2078,10 +2447,12 @@ static void  ProcessImage(void *imageData, void *array, int dataSize, long width
   }
 }
 
-// Perform any combination of rotation and Y flipping for a short array: 
-// operation = 0-3 for rotation by 90 * operation, plus 4 for flipping around Y axis 
-// before rotation or 8 for flipping around Y after.  THIS IS COPY OF ProcRotateFlip
-// with the type and invertCon arguments removed and invert contrast code also
+/*
+ * Perform any combination of rotation and Y flipping for a short array: 
+ * operation = 0-3 for rotation by 90 * operation, plus 4 for flipping around Y axis 
+ * before rotation or 8 for flipping around Y after.  THIS IS COPY OF ProcRotateFlip
+ * with the type and invertCon arguments removed and invert contrast code also
+ */
 static void RotateFlip(short int *array, int mode, int nx, int ny, int operation, 
                        bool invert, short int *brray, int *nxout, int *nyout)
 {
@@ -2299,7 +2670,9 @@ static void RotateFlip(short int *array, int mode, int nx, int ny, int operation
   }
 }
 
-// Add a frame of data of any given type to an integer or float sum image
+/*
+ * Add a frame of data of any given type to an integer or float sum image
+ */
 static void AddToSum(ThreadData *td, void *data, void *sumArray) 
 {
   int i;
@@ -2339,7 +2712,9 @@ static void AddToSum(ThreadData *td, void *data, void *sumArray)
 }
  
 
-// Copy a gain reference file to the directory if there is not a newer one
+/*
+ * Copy a gain reference file to the directory if there is not a newer one
+ */
 static int CopyK2ReferenceIfNeeded(ThreadData *td)
 {
   WIN32_FIND_DATA findRefData, findCopyData;
@@ -2435,8 +2810,10 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   return 0;
 }
 
-// sleeps for the given amount of time while pumping messages
-// returns TRUE if successful, FALSE otherwise
+/*
+ * sleeps for the given amount of time while pumping messages
+ * returns TRUE if successful, FALSE otherwise
+ */
 static BOOL SleepMsg(DWORD dwTime_ms)
 {
   DWORD dwStart = GetTickCount();
@@ -2462,12 +2839,15 @@ static BOOL SleepMsg(DWORD dwTime_ms)
   return TRUE;
 }
 
+
 //////////////////////////////////////////////////
 // DONE WITH AcquireProc SUPPORT
 // REMAINING CALLS TO THE PLUGIN BELOW
 //////////////////////////////////////////////////
 
-// Add commands for selecting a camera to the command string
+/*
+ * Add commands for selecting a camera to the command string
+ */ 
 void TemplatePlugIn::AddCameraSelection(int camera)
 {
   if (camera < 0)
@@ -2482,7 +2862,9 @@ void TemplatePlugIn::AddCameraSelection(int camera)
   mTD.strCommand += m_strTemp;
 }
 
-// Make camera be the current camera and execute selection script
+/*
+ * Make camera be the current camera and execute selection script
+ */
 int TemplatePlugIn::SelectCamera(long camera)
 {
   m_iCurrentCamera = camera;
@@ -2494,7 +2876,9 @@ int TemplatePlugIn::SelectCamera(long camera)
   return 0;
 }
 
-// Set the read mode and the scaling factor
+/*
+ * Set the read mode and the scaling factor
+ */
 void TemplatePlugIn::SetReadMode(long mode, double scaling)
 {
   if (mode > 2)
@@ -2512,7 +2896,9 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
   }
 }
 
-// Set the parameters for the next K2 acquisition
+/*
+ * Set the parameters for the next K2 acquisition
+ */
 void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwareProc, 
                                      BOOL doseFrac, double frameTime, BOOL alignFrames, 
                                      BOOL saveFrames, long rotationFlip, long flags, 
@@ -2536,7 +2922,9 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
   DebugToResult(m_strTemp);
 }
 
-// Setup properties for saving frames in files.  See DMCamera.cpp for call documentation
+/*
+ * Setup properties for saving frames in files.  See DMCamera.cpp for call documentation
+ */
 void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage, 
                                      double pixelSize, long flags, double nSumAndGrab, 
                                      double dummy2, double dummy3, double dummy4, 
@@ -2669,7 +3057,9 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   }
 }
 
-// Duplicate a string into the given member variable if it has changed
+/*
+ * Duplicate a string into the given member variable if it has changed
+ */
 int TemplatePlugIn::CopyStringIfChanged(char *newStr, string &memberStr, int &changed,
                                         long *error)
 {
@@ -2688,14 +3078,18 @@ int TemplatePlugIn::CopyStringIfChanged(char *newStr, string &memberStr, int &ch
   return 0;
 }
 
-// Get results of last frame saving operation
+/*
+ * Get results of last frame saving operation
+ */
 void TemplatePlugIn::GetFileSaveResult(long *numSaved, long *error)
 {
   *numSaved = mTD.iFramesSaved;
   *error = mTD.iErrorFromSave;
 }
 
-// Get the defect list from DM for the current camera
+/*
+ * Get the defect list from DM for the current camera
+ */
 int TemplatePlugIn::GetDefectList(short xyPairs[], long *arrSize, 
                                   long *numPoints, long *numTotal)
 {
@@ -2725,7 +3119,9 @@ int TemplatePlugIn::GetDefectList(short xyPairs[], long *arrSize,
 #endif
 }
 
-// Return number of cameras or -1 for error
+/*
+ * Return number of cameras or -1 for error
+ */
 int TemplatePlugIn::GetNumberOfCameras()
 {
   mTD.strCommand.resize(0);
@@ -2743,7 +3139,9 @@ int TemplatePlugIn::GetNumberOfCameras()
   return (int)(retval + 0.1);
 }
 
-// Determine insertion state of given camera: return -1 for error, 0 if out, 1 if in
+/*
+ * Determine insertion state of given camera: return -1 for error, 0 if out, 1 if in
+ */
 int TemplatePlugIn::IsCameraInserted(long camera)
 {
   mTD.strCommand.resize(0);
@@ -2764,7 +3162,9 @@ int TemplatePlugIn::IsCameraInserted(long camera)
   return (int)(retval + 0.1);
 }
 
-// Set the insertion state of the given camera
+/*
+ * Set the insertion state of the given camera
+ */
 int TemplatePlugIn::InsertCamera(long camera, BOOL state)
 {
   mTD.strCommand.resize(0);
@@ -2783,9 +3183,11 @@ int TemplatePlugIn::InsertCamera(long camera, BOOL state)
   return 0;
 }
 
-// Get version from DM, return it and set internal version number
-// HERE IS WHERE IT MATTERS HOW GMS2_SDK_VERSION IS DEFINED
-// IT MUST BE 0, 1, 2, then 30, 31, etc above 2.
+/*
+ * Get version from DM, return it and set internal version number
+ * HERE IS WHERE IT MATTERS HOW GMS2_SDK_VERSION IS DEFINED
+ * IT MUST BE 0, 1, 2, then 30, 31, etc above 2.
+ */
 long TemplatePlugIn::GetDMVersion()
 {
   unsigned int code;
@@ -2826,7 +3228,9 @@ long TemplatePlugIn::GetDMVersion()
   return m_iDMVersion;
 }
 
-// Set selected shutter normally closed - also set other shutter normally open
+/*
+ * Set selected shutter normally closed - also set other shutter normally open
+ */
 int TemplatePlugIn::SetShutterNormallyClosed(long camera, long shutter)
 {
   if (m_iDMVersion < SET_IDLE_STATE_OK)
@@ -3240,6 +3644,11 @@ int PlugInWrapper::ReturnDSChannel(short array[], long *arrSize, long *width,
 int PlugInWrapper::StopDSAcquisition()
 {
   return gTemplatePlugIn.StopDSAcquisition();
+}
+
+int PlugInWrapper::StopContinuousCamera()
+{
+  return gTemplatePlugIn.StopContinuousCamera();
 }
 
 void PlugInWrapper::ErrorToResult(const char *strMessage, const char *strPrefix)

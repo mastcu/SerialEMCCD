@@ -43,7 +43,7 @@ enum {GS_ExecuteScript = 1, GS_SetDebugMode, GS_SetDMVersion, GS_SetCurrentCamer
       GS_SetShutterNormallyClosed, GS_SetNoDMSettling, GS_GetDSProperties,
       GS_AcquireDSImage, GS_ReturnDSChannel, GS_StopDSAcquisition, GS_CheckReferenceTime,
       GS_SetK2Parameters, GS_ChunkHandshake, GS_SetupFileSaving, GS_GetFileSaveResult,
-      GS_SetupFileSaving2, GS_GetDefectList, GS_SetK2Parameters2};
+      GS_SetupFileSaving2, GS_GetDefectList, GS_SetK2Parameters2,GS_StopContinuousCamera};
 
 static int sNumLongSend;
 static int sNumBoolSend;
@@ -105,6 +105,7 @@ static ArgDescriptor sFuncTable[] = {
   {GS_SetupFileSaving2,     3, 1, 5,   1, 0, 0,   TRUE},
   {GS_GetDefectList,        1, 0, 0,   4, 0, 0,   FALSE},
   {GS_SetK2Parameters2,     5, 3, 6,   0, 0, 0,   TRUE},
+  {GS_StopContinuousCamera, 0, 0, 0,   0, 0, 0,   FALSE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -717,6 +718,10 @@ static int ProcessCommand(int numBytes)
 
     case GS_StopDSAcquisition:
       SendArgsBack(gPlugInWrapper.StopDSAcquisition());
+      break;
+
+    case GS_StopContinuousCamera:
+      SendArgsBack(gPlugInWrapper.StopContinuousCamera());
       break;
 
     case GS_CheckReferenceTime:

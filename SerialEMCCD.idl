@@ -44,6 +44,7 @@ import "ocidl.idl";
     [id(29), helpstring("method SetupFileSaving2")] HRESULT SetupFileSaving2([in]long rotationFlip, [in]BOOL filePerImage, [in]double pixelSize, [in]long flags, [in]double dummy1, [in]double dummy2, [in]double dummy3, [in]double dummy4, [in]long nameSize, [in, size_is(nameSize)]long names[], [out]long *error);
 		[id(30), helpstring("method GetDefectList")] HRESULT GetDefectList([out, size_is(*arrSize)]short xyPairs[], [in, out]long *arrSize, [out]long *numPoints, [out]long *numTotal);
 		[id(31), helpstring("method SetK2Parameters2")] HRESULT SetK2Parameters2([in]long mode, [in]double scaling, [in]long hardwareProc, [in]BOOL doseFrac, [in]double frameTime, [in]BOOL alignFrames, [in]BOOL saveFrames, [in]long rotationFlip, [in]long flags, [in]double dummy1, [in]double dummy2, [in]double dummy3, [in]double dummy4, [in]long filtSize, [in, size_is(filtSize)]long filter[]);
+	  [id(32), helpstring("method StopContinuousCamera")] HRESULT StopContinuousCamera();
 
   };
 	

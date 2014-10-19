@@ -368,3 +368,11 @@ STDMETHODIMP CDMCamera::StopDSAcquisition()
 		return E_FAIL;
 	return S_OK;
 }
+
+STDMETHODIMP CDMCamera::StopContinuousCamera()
+{
+  int retval = gPlugInWrapper.StopContinuousCamera();
+	if (retval)
+		return E_FAIL;
+	return S_OK;
+}
