@@ -258,3 +258,17 @@ bool K2_DoseFracAcquisition::IsDone()
 
 	return params[0].v_binary8;
 }
+
+void K2_SetHardwareProcessing(const CM::CameraPtr &camera, long processing)
+{
+  static DM::Function __sFunction = (DM_FunctionToken) NULL;
+  static const char *__sSignature = 
+    "void K2_SetHardwareProcessing(ScriptObject, long)";
+
+  Gatan::PlugIn::DM_Variant params[2];
+  params[0].v_object = (DM_ObjectToken) camera.get();
+  params[1].v_sint32 = processing;
+  
+  GatanPlugIn::gDigitalMicrographInterface.CallFunction
+    (__sFunction.get_ptr(), 2, params, __sSignature );
+}
