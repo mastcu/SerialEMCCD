@@ -40,6 +40,7 @@ using namespace std ;
 #define ID_MULTIPLIER 10000000
 #define SUPERRES_FRAME_SCALE 16
 #define DATA_MUTEX_WAIT  100
+#define FRAME_EVENT_WAIT  200
 #define IMAGE_MUTEX_WAIT  1000
 #define IMAGE_MUTEX_CLEAN_WAIT  5000
 enum {CHAN_UNUSED = 0, CHAN_ACQUIRED, CHAN_RETURNED};
@@ -65,6 +66,7 @@ static BOOL sDebug;
 // Handle for mutexes for writing critical components of thread data and continuous image
 static HANDLE sDataMutexHandle;
 static HANDLE sImageMutexHandle;
+static HANDLE sFrameReadyEvent;
 static int sJ;
 
 // Array for storing continuously acquired images to pass from thread to caller
@@ -132,6 +134,8 @@ struct ThreadData
   int iContinuousQuality;
   int iCorrections;
   int iEndContinuous;
+  int iContWidth, iContHeight;
+  int iWaitingForFrame;
 
   // Items needed internally in save routine and its functions
   FILE *fp;
@@ -267,6 +271,7 @@ TemplatePlugIn::TemplatePlugIn()
 
   sDataMutexHandle = CreateMutex(0, 0, 0);
   sImageMutexHandle = CreateMutex(0, 0, 0);
+  sFrameReadyEvent = CreateEvent(NULL, TRUE, FALSE, TEXT("SEMCCDFrameEvent"));
   m_HAcquireThread = NULL;
   m_iDMVersion = 340;
   m_iCurrentCamera = 0;
@@ -879,6 +884,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   mTD.iDMquitting = 0;
   mTD.iErrorFromSave = 0;
   mTD.iEndContinuous = 0;
+  mTD.iWaitingForFrame = 0;
 
   // Get the array for storing continuous images 
   if (!retval && mTD.bDoContinuous) {
@@ -966,9 +972,12 @@ DWORD TemplatePlugIn::WaitForAcquireThread(int waitType)
       (waitType == WAIT_FOR_NEW_SHOT && GetWatchedDataValue(mTDcopy.iReadyToAcquire)))
       return 0;
     if (waitType == WAIT_FOR_CONTINUOUS && TickInterval(waitStart) > 5000.) {
-      sprintf(m_strTemp, "Giving up on thread ending, counter %d  time %.3f\n", sJ,
+      /*sprintf(m_strTemp, "Giving up on thread ending, counter %d  time %.3f\n", sJ,
         (GetTickCount() % (DWORD)3600000) / 1000.);
-      ErrorToResult(m_strTemp, "INfo:");
+      ErrorToResult(m_strTemp, "INfo: ");*/
+      ErrorToResult("The SerialEM continuous acquire thread did not end yet.  "
+        "This may be OK,\n  or you may have to restart DigitalMicrograph if you can't "
+        "take any more images", "Warning: ");
       return 1;
     }
     if (!SleepMsg(10)) {
@@ -1491,6 +1500,11 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 //  CONTINUOUS ACQUIRE ROUTINES
 //////////////////////////////////////////////////////////////////
 
+// NOTE: to debug continuous acquire, it is essential to avoid chronic debug output 
+// because each output takes ~80 msec, at least on a slow system.  Thus, uncomment some of
+// ErrorToResult calls to debug this without having debug mode on.  Another alternative
+// is to suppress all the debug output from ProcessImage
+
 /*
  * Start continuous acquire from thread and process images into static buffer
  */
@@ -1500,7 +1514,6 @@ static int RunContinuousAcquire(ThreadData *td)
   bool startedAcquire = false, madeImage = false;
   int outLimit = td->arrSize;
   int j, transpose, nxout, nyout, maxTime = 0, retval = 0, rotationFlip = 0;
-  uint32 nxbin, nybin;
   double delay;
   short *procOutArray = sContinuousArray;
   DM::Image image;
@@ -1591,6 +1604,7 @@ static int RunContinuousAcquire(ThreadData *td)
     if (K2type) {
 #ifdef _WIN64
 #if GMS2_SDK_VERSION < 31
+      K2_SetHardwareProcessing(td->iReadMode ? sK2HardProcs[td->iHardwareProc / 2] : 0);
 #else
       CM::SetHardwareCorrections(acqParams, CM::CCD::Corrections::from_bits(
         td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0));
@@ -1624,7 +1638,7 @@ static int RunContinuousAcquire(ThreadData *td)
     if (td->bUseAcquisitionObj)
       CM::ACQ_StartAcquire(acqObj); 
 #endif
-    DebugToResult("Initiated continuous acquisition\n");
+    //ErrorToResult("Initiated continuous acquisition\n", "INfo: ");
 
     // Start the loop
     startedAcquire = true;
@@ -1657,8 +1671,7 @@ static int RunContinuousAcquire(ThreadData *td)
       delete imageLp; sJ++;
       imageLp = NULL; sJ++;
       if (rotationFlip) {
-        if (WaitForSingleObject(sImageMutexHandle, IMAGE_MUTEX_WAIT))
-          ErrorToResult("RCA: Wait for image mutex expired\n", "INfo:");
+        WaitForSingleObject(sImageMutexHandle, IMAGE_MUTEX_WAIT);
         sJ++;
         RotateFlip(procOutArray, MRC_MODE_SHORT, td->width, td->height, rotationFlip, 
           false, sContinuousArray, &nxout, &nyout);
@@ -1667,20 +1680,36 @@ static int RunContinuousAcquire(ThreadData *td)
       }
       sJ++;
       ReleaseMutex(sImageMutexHandle); sJ++;
+      WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT); sJ++;
       td->arrSize = td->width * td->height;
+      td->iContWidth = td->width;
+      td->iContHeight = td->height;
 
       // Signal that an image is ready; check for quitting
       //DebugToResult("RunContinuousAcquire: Setting frame done\n");
-      SetWatchedDataValue(td->iReadyToReturn, 1); sJ++;
+      td->iReadyToReturn = 1;
       nxout = GetTickCount() - startTime;
       maxTime = B3DMAX(maxTime, nxout);
-
-      if (GetWatchedDataValue(td->iEndContinuous) || GetWatchedDataValue(td->iDMquitting)) {
-        sprintf(td->strTemp, "RunContinuousAcquire: Ending thread, time %.3f; last acquire %d"
-          "  max %d\n", (GetTickCount() % (DWORD)3600000) / 1000., nxout, maxTime);
-        ErrorToResult(td->strTemp, "INfo: ");
+      if (td->iEndContinuous || td->iDMquitting) {
+        ReleaseMutex(sDataMutexHandle);
+        sprintf(td->strTemp, "RunContinuousAcquire: Ending thread, time %.3f; last "
+          "acquire %d  max %d\n", (GetTickCount() % (DWORD)3600000) / 1000., nxout, 
+          maxTime);
+        DebugToResult(td->strTemp);
+        //ErrorToResult(td->strTemp, "INfo: ");
         break;
       }
+
+      // Set the event if the other routine is waiting for a frame
+      if (sFrameReadyEvent) {
+        if (td->iWaitingForFrame) {
+          //ErrorToResult("RunContinuousAcquire signalling frame event\n", "INfo: ");
+          td->iWaitingForFrame = 0;
+          SetEvent(sFrameReadyEvent);
+        }
+      }
+
+      ReleaseMutex(sDataMutexHandle);
       sJ++;
       if (!SleepMsg(10)) {
         DebugToResult("RunContinuousAcquire: Interrupted by quit\n");
@@ -1723,27 +1752,35 @@ int TemplatePlugIn::GetContinuousFrame(short array[], long *arrSize, long *width
 {
   double startTime = GetTickCount();
   double kickTime = startTime;
+  SetWatchedDataValue(mTDcopy.iWaitingForFrame, 1);
+  //ErrorToResult("GetContinuousFrame setting waitingForFrame\n", "INfo: ");
   while (1) {
     if (!sContinuousArray) {
       DebugToResult("GetContinuousFrame: no array!\n");
       return CONTINUOUS_ENDED;
     }
+
+    // It looks like the thread gets stuck in the image acquisition sometimes when coming
+    // in through COM.  Thus simply return the existing frame if enough time has passed.
+    // NONE of the actions below will get the thread going again, but it looks like the
+    // return from the COM call then releases it and it finishes a frame soon thereafter
+    // Such delays did not show up when coming in through socket.
+    // This was on a single-processor system.
     if (GetWatchedDataValue(mTDcopy.iReadyToReturn) || 
-      (!firstCall && TickInterval(startTime) > 2000.)) {
-        //DebugToResult("GetContinuousFrame: A frame is ready\n");
-        if (WaitForSingleObject(sImageMutexHandle, IMAGE_MUTEX_WAIT))
-          ErrorToResult("GetContinuousFrame: Wait for image mutex failed\n", "INfo:");
+      (!firstCall && TickInterval(startTime) > CONTINUOUS_RETURN_TIMEOUT)) {
+        WaitForSingleObject(sImageMutexHandle, IMAGE_MUTEX_WAIT);
         if (!sContinuousArray) {
           DebugToResult("GetContinuousFrame: no array after getting image mutex\n");
           ReleaseMutex(sImageMutexHandle);
+          mTDcopy.iWaitingForFrame = 0;
           return CONTINUOUS_ENDED;
         }
-        if (WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT))
-          ErrorToResult("GetContinuousFrame: Wait for data mutex failed\n", "INfo:");
-        *width = mTDcopy.width;
-        *height = mTDcopy.height;
+        WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
+        *width = mTDcopy.iContWidth;
+        *height = mTDcopy.iContHeight;
         *arrSize = mTDcopy.arrSize;
         mTDcopy.iReadyToReturn = 0;
+        mTDcopy.iWaitingForFrame = 0;
         ReleaseMutex(sDataMutexHandle);
         if (!*arrSize || !(*width * *height)) {
           ReleaseMutex(sImageMutexHandle);
@@ -1754,14 +1791,31 @@ int TemplatePlugIn::GetContinuousFrame(short array[], long *arrSize, long *width
         }
         memcpy(array, sContinuousArray, *arrSize * sizeof(short));
         ReleaseMutex(sImageMutexHandle);
-        //DebugToResult("GetContinuousFrame: Copied frame, returning 0\n");
+        //ErrorToResult("GetContinuousFrame returning frame\n", "INfo: ");
         return 0;
+    }
+
+    // And sometimes this routine goes to sleep and won't wake up with all the acquire
+    // activity, so if possible, wait on an event signalling that a frame is ready
+    if (sFrameReadyEvent) {
+      if (!WaitForSingleObject(sFrameReadyEvent, FRAME_EVENT_WAIT)) {
+        //ErrorToResult("GetContinuousFrame woke from frame event\n", "INfo: ");
+        WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
+        mTDcopy.iWaitingForFrame = 0;
+        ResetEvent(sFrameReadyEvent);
+        ReleaseMutex(sDataMutexHandle);
       }
+      if (mTDcopy.iDMquitting)
+        return QUIT_DURING_SAVE;
+    } else {
+
+      // Otherwise (with failure to create event) do regular sleep
       if (!SleepMsg(10)) {
         DebugToResult("GetContinuousFrame: Looks like a quit\n");
         SetWatchedDataValue(mTDcopy.iDMquitting, 1);
         return QUIT_DURING_SAVE;
       }
+    }
   }
   return CONTINUOUS_ENDED;
 }
@@ -1774,7 +1828,8 @@ int TemplatePlugIn::StopContinuousCamera()
 {
   sprintf(m_strTemp, "StopContinuousCamera called, counter %d  time %.3f\n", sJ,
     (GetTickCount() % (DWORD)3600000) / 1000.);
-  ErrorToResult(m_strTemp, "INfo:");
+  DebugToResult(m_strTemp);
+  //ErrorToResult(m_strTemp, "INfo:");
   SetWatchedDataValue(mTDcopy.iEndContinuous, 1);
   return WaitForAcquireThread(WAIT_FOR_CONTINUOUS);
 }
@@ -1827,16 +1882,14 @@ static void DeleteImageIfNeeded(ThreadData *td, DM::Image &image, bool *needsDel
  */
 static void SetWatchedDataValue(int &member, int value)
 {
-  if (WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT))
-    ErrorToResult("SetWatchedDataValue: getting mutex failed\n", "INfo: ");   
+  WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
   member = value;
   ReleaseMutex(sDataMutexHandle);
 }
 
 static int GetWatchedDataValue(int &member)
 {
-  if (WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT))
-    ErrorToResult("GetWatchedDataValue: getting mutex failed\n", "Info: ");
+  WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
   int retval = member;
   ReleaseMutex(sDataMutexHandle);
   return retval;
@@ -2990,7 +3043,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   mTD.iSaveFlags = flags;
   mTD.bWriteTiff = (flags & (K2_SAVE_LZW_TIFF | K2_SAVE_ZIP_TIFF)) != 0;
   mTD.iTiffCompression = (flags & K2_SAVE_ZIP_TIFF) ? 8 : 5;
-  mTD.bAsyncSave = (flags & K2_SAVE_SYNCHRO) == 0;
+  mTD.bAsyncSave = (flags & K2_SAVE_SYNCHRON) == 0;
   mTD.bEarlyReturn = (flags & K2_EARLY_RETURN) != 0;
   mTD.bAsyncToRAM = (flags & K2_ASYNC_IN_RAM) != 0;
 

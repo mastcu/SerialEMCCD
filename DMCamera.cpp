@@ -199,7 +199,7 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 //      K2_RUN_COMMAND     - Not suppported yet
 //      K2_SAVE_LZW_TIFF   - Save in TIFF with LZW compression
 //      K2_SAVE_ZIP_TIFF   - Save in TIFF with ZIP compression
-//      K2_SAVE_SYNCHRO    - Acquire stack synchronously with script calls
+//      K2_SAVE_SYNCHRON   - Acquire stack synchronously with script calls
 //      K2_SAVE_DEFECTS    - Save a defect list as needed
 //      K2_EARLY_RETURN    - Return early, with no sum, or sum of subset of frames
 //      K2_ASYNC_IN_RAM    - Acquire stack in DM asynchronously into RAM

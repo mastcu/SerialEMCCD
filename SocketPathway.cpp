@@ -36,14 +36,6 @@ static FILE *sFPdebug = NULL;
 #define MAX_LONG_ARGS 16
 #define MAX_DBL_ARGS 8
 #define MAX_BOOL_ARGS 8
-enum {GS_ExecuteScript = 1, GS_SetDebugMode, GS_SetDMVersion, GS_SetCurrentCamera,
-      GS_QueueScript, GS_GetAcquiredImage, GS_GetDarkReference, GS_GetGainReference,
-      GS_SelectCamera, GS_SetReadMode, GS_GetNumberOfCameras, GS_IsCameraInserted,
-      GS_InsertCamera, GS_GetDMVersion, GS_GetDMCapabilities,
-      GS_SetShutterNormallyClosed, GS_SetNoDMSettling, GS_GetDSProperties,
-      GS_AcquireDSImage, GS_ReturnDSChannel, GS_StopDSAcquisition, GS_CheckReferenceTime,
-      GS_SetK2Parameters, GS_ChunkHandshake, GS_SetupFileSaving, GS_GetFileSaveResult,
-      GS_SetupFileSaving2, GS_GetDefectList, GS_SetK2Parameters2,GS_StopContinuousCamera};
 
 static int sNumLongSend;
 static int sNumBoolSend;
