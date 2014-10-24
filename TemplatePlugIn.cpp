@@ -136,6 +136,7 @@ struct ThreadData
   int iEndContinuous;
   int iContWidth, iContHeight;
   int iWaitingForFrame;
+  bool bUseOldAPI;
 
   // Items needed internally in save routine and its functions
   FILE *fp;
@@ -589,6 +590,13 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     GMS2_SDK_VERSION < 31)
     mTD.bAsyncSave = false;
 
+  // Also cancel asynchronous save if aligning and saving frames since we need to use
+  // the old API, and that is set up to happen only through script calls
+  mTD.bUseOldAPI = saveFrames == SAVE_FRAMES && mTD.bAlignFrames && 
+    GMS2_SDK_VERSION >= 31;
+  if (mTD.bUseOldAPI)
+    mTD.bAsyncSave = false;
+
   // Intercept K2 asynchronous saving and continuous mode here
   if ((saveFrames == SAVE_FRAMES && mTD.bAsyncSave) || mTD.bDoContinuous) {
       sprintf(m_strTemp, "Exit(0)");
@@ -677,7 +685,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
     if (m_bDoseFrac) {
 
-      if (GMS2_SDK_VERSION < 31) {
+      if (GMS2_SDK_VERSION < 31 || mTD.bUseOldAPI) {
 
         // WORKAROUND to bug in frame time, save & set the global frame time, restore after
         sprintf(m_strTemp, "Object k2dfa = alloc(K2_DoseFracAcquisition)\n"
@@ -694,17 +702,21 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
           mTD.strCommand += m_strTemp;
         }
       } else {
+
+        // NEW API
         sprintf(m_strTemp, "CM_SetAlignmentFilter(acqParams, \"%s\")\n"
           "CM_SetFrameExposure(acqParams, %f)\n"
           "CM_SetStackFormat(acqParams, %d)\n",
           mTD.bAlignFrames ? mTD.strFilterName : "", mTD.dFrameTime,
           saveFrames == SAVE_FRAMES ? 0 : 1);
         mTD.strCommand += m_strTemp;
-        if (mTD.iRotationFlip) {
-          sprintf(m_strTemp, "CM_SetAcqTranspose(acqParams, %d)\n", 
-            sInverseTranspose[mTD.iRotationFlip]);
-          mTD.strCommand += m_strTemp;
-        }
+      }
+
+      // Cancel the rotation/flip done by DM in GMS 2.3.1 rgardless of API
+      if (mTD.iRotationFlip && GMS2_SDK_VERSION >= 31) {
+        sprintf(m_strTemp, "CM_SetAcqTranspose(acqParams, %d)\n", 
+          sInverseTranspose[mTD.iRotationFlip]);
+        mTD.strCommand += m_strTemp;
       }
     }
 
@@ -767,7 +779,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
           "Image img := CM_AcquireImage(camera, acqParams)\n";
 //      "Image img := CM_CreateImageForAcquire(camera, acqParams, \"temp\")\n"
 //            "CM_AcquireDarkReference(camera, acqParams, img, NULL)\n";
-    } else if (mTD.iReadMode >= 0 && m_bDoseFrac && GMS2_SDK_VERSION < 31) {
+    } else if (mTD.iReadMode >= 0 && m_bDoseFrac && 
+      (GMS2_SDK_VERSION < 31 || mTD.bUseOldAPI)) {
       mTD.strCommand += "Image stack\n"
         "Image img := k2dfa.DoseFrac_AcquireImage(camera, acqParams, stack)\n"
         "K2_DoseFrac_SetFrameExposure(camera, savedFrameTime)\n";
@@ -784,7 +797,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   sprintf(m_strTemp, "KeepImage(img)\n"
     "number retval = GetImageID(img)\n");
   mTD.strCommand += m_strTemp;
-  if (saveFrames == SAVE_FRAMES && GMS2_SDK_VERSION < 31) {
+  if (saveFrames == SAVE_FRAMES && (GMS2_SDK_VERSION < 31 || mTD.bUseOldAPI)) {
     sprintf(m_strTemp, "KeepImage(stack)\n"
       "number stackID = GetImageID(stack)\n"
       //"Result(retval + \"  \" + stackID + \"\\n\")\n"
@@ -1039,8 +1052,9 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   doingAsyncSave = saveFrames && td->bAsyncSave;
   exposureDone = !doingAsyncSave;
   needTemp = saveFrames && td->bEarlyReturn;
-  needSum = saveFrames && td->iNumFramesToSum != 0 && (GMS2_SDK_VERSION >= 31 ||
-    (GMS2_SDK_VERSION < 31 && td->bEarlyReturn)); 
+  needSum = saveFrames && td->iNumFramesToSum != 0 && 
+    ((GMS2_SDK_VERSION >= 31 && !td->bUseOldAPI) ||
+    ((GMS2_SDK_VERSION < 31 || td->bUseOldAPI) && td->bEarlyReturn)); 
   td->iifile = NULL;
   td->fp = NULL;
   td->rotBuf = td->tempBuf = NULL;
@@ -1142,7 +1156,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   } else if (saveFrames) {
 
     // Synchronous dose-fractionation and saving: the stack is complete
-    if (GMS2_SDK_VERSION < 31) {
+    if (GMS2_SDK_VERSION < 31 || td->bUseOldAPI) {
 
       // Old way: stack and image exist
       stackID = (int)((retval + 0.1) / ID_MULTIPLIER);
@@ -3294,7 +3308,8 @@ long TemplatePlugIn::GetDMVersion()
   mTD.strCommand.resize(0);
   if (m_bGMS2) {
     if (GMS2_SDK_VERSION < 2) {
-      DebugToResult("GMS2 version < 2, just returning 40000");
+      DebugToResult("GMS2 version < 2, just returning 40000\n");
+      m_iDMVersion = 40000;
       return 40000;
     }
     mTD.strCommand += "number major, minor, build\n"
