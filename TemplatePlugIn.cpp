@@ -66,7 +66,7 @@ static BOOL sDebug;
 // Handle for mutexes for writing critical components of thread data and continuous image
 static HANDLE sDataMutexHandle;
 static HANDLE sImageMutexHandle;
-static HANDLE sFrameReadyEvent;
+static HANDLE sFrameReadyEvent = NULL;
 static int sJ;
 
 // Array for storing continuously acquired images to pass from thread to caller
@@ -272,7 +272,6 @@ TemplatePlugIn::TemplatePlugIn()
 
   sDataMutexHandle = CreateMutex(0, 0, 0);
   sImageMutexHandle = CreateMutex(0, 0, 0);
-  sFrameReadyEvent = CreateEvent(NULL, TRUE, FALSE, TEXT("SEMCCDFrameEvent"));
   m_HAcquireThread = NULL;
   m_iDMVersion = 340;
   m_iCurrentCamera = 0;
@@ -283,6 +282,7 @@ TemplatePlugIn::TemplatePlugIn()
     m_iDSAcquired[j] = CHAN_UNUSED;
 #ifdef GMS2
   m_bGMS2 = true;
+  sFrameReadyEvent = CreateEvent(NULL, TRUE, FALSE, TEXT("SEMCCDFrameEvent"));
 #else
   m_bGMS2 = false;
 #endif
@@ -1582,11 +1582,6 @@ static int RunContinuousAcquire(ThreadData *td)
       // The inverse is the same except for 257/258, which are inverses of each other
       if ((transpose + 1) / 2 == 129)
         transpose = 515 - transpose;
-#ifdef GMS2
-      //zeroTrans2d = Gatan::Imaging::Transpose2d::FromBits(transpose);
-#else
-      //zeroTrans2d = (ImageData::Transform2D)transpose;
-#endif
 
       // Set the inverse transpose and look up needed rotation/flip
       CM::SetTotalTranspose(camera, acqParams, zeroTrans2d);
@@ -1768,7 +1763,7 @@ int TemplatePlugIn::GetContinuousFrame(short array[], long *arrSize, long *width
   double kickTime = startTime;
   SetWatchedDataValue(mTDcopy.iWaitingForFrame, 1);
   //ErrorToResult("GetContinuousFrame setting waitingForFrame\n", "INfo: ");
-  for (unsigned int loop = 0; ; loop++) {
+  for (; ;) {
     if (!sContinuousArray) {
       DebugToResult("GetContinuousFrame: no array!\n");
       return CONTINUOUS_ENDED;
@@ -1811,8 +1806,9 @@ int TemplatePlugIn::GetContinuousFrame(short array[], long *arrSize, long *width
 
     // And sometimes this routine goes to sleep and won't wake up with all the acquire
     // activity, so if possible, wait on an event signalling that a frame is ready
-    // BUT it needs a standard sleep the first time, to make sure the thread started
-    if (sFrameReadyEvent && loop) {
+    // BUT in GMS1 the thread never woke up with waiting for an event.  So we just use
+    // this GMS2
+    if (sFrameReadyEvent) {
       if (!WaitForSingleObject(sFrameReadyEvent, FRAME_EVENT_WAIT)) {
         //ErrorToResult("GetContinuousFrame woke from frame event\n", "INfo: ");
         WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
