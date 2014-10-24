@@ -1768,7 +1768,7 @@ int TemplatePlugIn::GetContinuousFrame(short array[], long *arrSize, long *width
   double kickTime = startTime;
   SetWatchedDataValue(mTDcopy.iWaitingForFrame, 1);
   //ErrorToResult("GetContinuousFrame setting waitingForFrame\n", "INfo: ");
-  while (1) {
+  for (unsigned int loop = 0; ; loop++) {
     if (!sContinuousArray) {
       DebugToResult("GetContinuousFrame: no array!\n");
       return CONTINUOUS_ENDED;
@@ -1811,7 +1811,8 @@ int TemplatePlugIn::GetContinuousFrame(short array[], long *arrSize, long *width
 
     // And sometimes this routine goes to sleep and won't wake up with all the acquire
     // activity, so if possible, wait on an event signalling that a frame is ready
-    if (sFrameReadyEvent) {
+    // BUT it needs a standard sleep the first time, to make sure the thread started
+    if (sFrameReadyEvent && loop) {
       if (!WaitForSingleObject(sFrameReadyEvent, FRAME_EVENT_WAIT)) {
         //ErrorToResult("GetContinuousFrame woke from frame event\n", "INfo: ");
         WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
