@@ -191,6 +191,11 @@ void ShutdownSocket(void)
   Cleanup();
 }
 
+BOOL IsSocketConnected(void)
+{
+  return sHClient != INVALID_SOCKET;
+}
+
 
 // The main socket thread routine, starts a listener, loops on getting connections and
 // commands

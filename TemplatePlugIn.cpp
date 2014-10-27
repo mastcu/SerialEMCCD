@@ -183,6 +183,7 @@ BOOL WasCOMInitialized();
 int GetSocketInitialization(int &wsaError);
 int StartSocket(int &wsaError);
 void ShutdownSocket(void);
+BOOL IsSocketConnected(void);
 
 // The plugin class
 class TemplatePlugIn :  public Gatan::PlugIn::PlugInMain
@@ -280,9 +281,9 @@ TemplatePlugIn::TemplatePlugIn()
     m_iDMSettlingOK[i] = 1;
   for (int j = 0; j < MAX_DS_CHANNELS; j++)
     m_iDSAcquired[j] = CHAN_UNUSED;
+  sFrameReadyEvent = CreateEvent(NULL, TRUE, FALSE, TEXT("SEMCCDFrameEvent"));
 #ifdef GMS2
   m_bGMS2 = true;
-  sFrameReadyEvent = CreateEvent(NULL, TRUE, FALSE, TEXT("SEMCCDFrameEvent"));
 #else
   m_bGMS2 = false;
 #endif
@@ -1710,7 +1711,7 @@ static int RunContinuousAcquire(ThreadData *td)
       }
 
       // Set the event if the other routine is waiting for a frame
-      if (sFrameReadyEvent) {
+      if (sFrameReadyEvent && IsSocketConnected()) {
         if (td->iWaitingForFrame) {
           //ErrorToResult("RunContinuousAcquire signalling frame event\n", "INfo: ");
           td->iWaitingForFrame = 0;
@@ -1805,10 +1806,11 @@ int TemplatePlugIn::GetContinuousFrame(short array[], long *arrSize, long *width
     }
 
     // And sometimes this routine goes to sleep and won't wake up with all the acquire
-    // activity, so if possible, wait on an event signalling that a frame is ready
-    // BUT in GMS1 the thread never woke up with waiting for an event.  So we just use
-    // this GMS2
-    if (sFrameReadyEvent) {
+    // activity when this is run from the socket thread, so if possible, wait on an event
+    // signalling that a frame is ready.  But with a COM connection the thread has trouble
+    // putting out debug output and getting the acquisition going, so use the regular
+    // sleep with message-pumping there
+    if (sFrameReadyEvent && IsSocketConnected()) {
       if (!WaitForSingleObject(sFrameReadyEvent, FRAME_EVENT_WAIT)) {
         //ErrorToResult("GetContinuousFrame woke from frame event\n", "INfo: ");
         WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
@@ -1820,7 +1822,7 @@ int TemplatePlugIn::GetContinuousFrame(short array[], long *arrSize, long *width
         return QUIT_DURING_SAVE;
     } else {
 
-      // Otherwise (with failure to create event) do regular sleep
+      // For COM connection do regular sleep
       if (!SleepMsg(10)) {
         DebugToResult("GetContinuousFrame: Looks like a quit\n");
         SetWatchedDataValue(mTDcopy.iDMquitting, 1);
