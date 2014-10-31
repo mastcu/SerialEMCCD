@@ -30,6 +30,7 @@ static int sChunkSize = 16777216;     // Tests indicated this size was optimal
 // This is exactly 4K x 2K x 2, failures occurred above twice this size
 static int sSuperChunkSize = 33554432;  
 static FILE *sFPdebug = NULL;
+static bool sProcessingCommand = false;
 
 // Declarations needed on both sides
 #define ARGS_BUFFER_CHUNK 1024
@@ -191,9 +192,9 @@ void ShutdownSocket(void)
   Cleanup();
 }
 
-BOOL IsSocketConnected(void)
+bool CallIsFromSocket(void)
 {
-  return sHClient != INVALID_SOCKET;
+  return sProcessingCommand;
 }
 
 
@@ -321,7 +322,9 @@ static DWORD WINAPI SocketProc(LPVOID pParam)
             numExpected, sHClient);
           if (gPlugInWrapper.GetDebugVal() > 1)
             gPlugInWrapper.DebugToResult(sMessageBuf);
+          sProcessingCommand = true;
           ProcessCommand(numExpected);
+          sProcessingCommand = false;
         }
       }
     }

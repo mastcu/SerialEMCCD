@@ -183,7 +183,8 @@ BOOL WasCOMInitialized();
 int GetSocketInitialization(int &wsaError);
 int StartSocket(int &wsaError);
 void ShutdownSocket(void);
-BOOL IsSocketConnected(void);
+bool CallIsFromSocket(void);
+void K2_SetHardwareProcessing(const CM::CameraPtr &camera, long processing);
 
 // The plugin class
 class TemplatePlugIn :  public Gatan::PlugIn::PlugInMain
@@ -1495,7 +1496,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       DM::DeleteImage(image.get());
     else 
       DebugToResult("Cannot find image for deleting it\n");
-    if (saveFrames && GMS2_SDK_VERSION < 31) {
+    if (saveFrames && (GMS2_SDK_VERSION < 31 || td->bUseOldAPI)) {
       if (DM::GetImageFromID(image, stackID))
         DM::DeleteImage(image.get());
       else
@@ -1614,7 +1615,8 @@ static int RunContinuousAcquire(ThreadData *td)
     if (K2type) {
 #ifdef _WIN64
 #if GMS2_SDK_VERSION < 31
-      K2_SetHardwareProcessing(td->iReadMode ? sK2HardProcs[td->iHardwareProc / 2] : 0);
+      K2_SetHardwareProcessing(camera, 
+        td->iReadMode ? sK2HardProcs[td->iHardwareProc / 2] : 0);
 #else
       CM::SetHardwareCorrections(acqParams, CM::CCD::Corrections::from_bits(
         td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0));
@@ -1711,7 +1713,7 @@ static int RunContinuousAcquire(ThreadData *td)
       }
 
       // Set the event if the other routine is waiting for a frame
-      if (sFrameReadyEvent && IsSocketConnected()) {
+      if (sFrameReadyEvent && CallIsFromSocket()) {
         if (td->iWaitingForFrame) {
           //ErrorToResult("RunContinuousAcquire signalling frame event\n", "INfo: ");
           td->iWaitingForFrame = 0;
@@ -1810,7 +1812,7 @@ int TemplatePlugIn::GetContinuousFrame(short array[], long *arrSize, long *width
     // signalling that a frame is ready.  But with a COM connection the thread has trouble
     // putting out debug output and getting the acquisition going, so use the regular
     // sleep with message-pumping there
-    if (sFrameReadyEvent && IsSocketConnected()) {
+    if (sFrameReadyEvent && CallIsFromSocket()) {
       if (!WaitForSingleObject(sFrameReadyEvent, FRAME_EVENT_WAIT)) {
         //ErrorToResult("GetContinuousFrame woke from frame event\n", "INfo: ");
         WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
