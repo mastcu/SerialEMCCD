@@ -184,7 +184,9 @@ int GetSocketInitialization(int &wsaError);
 int StartSocket(int &wsaError);
 void ShutdownSocket(void);
 bool CallIsFromSocket(void);
+#ifdef _WIN64
 void K2_SetHardwareProcessing(const CM::CameraPtr &camera, long processing);
+#endif
 
 // The plugin class
 class TemplatePlugIn :  public Gatan::PlugIn::PlugInMain
