@@ -29,6 +29,11 @@ using namespace std ;
 
 // For GMS2, this must be defined to a single digit below 3 (0, 1, 2) or to double digits
 // for 3 onwards (30, 31, etc)
+// To build all versions starting with 31 - x64:
+// Define to 30, build 30 - x64 then switch to GMS2-32bit - Win32, build 30 - Win32
+// Define to 0, build 0 - Win32
+// Define to 2, switch to GMS2-64bit - x64, build 2 - x64
+// Return to 31
 #ifndef GMS2_SDK_VERSION
 #define GMS2_SDK_VERSION -1
 #endif
@@ -850,6 +855,7 @@ int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width,
     "number retval = GetImageID(img)\n"
     "Exit(retval)", binning);
   mTD.strCommand += m_strTemp;
+  mTD.bDoContinuous = false;
   retval = AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0, transpose, 
     DEL_IMAGE, NO_SAVE);
   if (transpose & 256) {
@@ -1848,6 +1854,7 @@ int TemplatePlugIn::StopContinuousCamera()
   DebugToResult(m_strTemp);
   //ErrorToResult(m_strTemp, "INfo:");
   SetWatchedDataValue(mTDcopy.iEndContinuous, 1);
+  mTD.bDoContinuous = false;
   return WaitForAcquireThread(WAIT_FOR_CONTINUOUS);
 }
 
@@ -2956,7 +2963,6 @@ static BOOL SleepMsg(DWORD dwTime_ms)
   return TRUE;
 }
 
-
 //////////////////////////////////////////////////
 // DONE WITH AcquireProc SUPPORT
 // REMAINING CALLS TO THE PLUGIN BELOW
@@ -3537,6 +3543,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
     mTD.strCommand += "DSDeleteParameters(paramID)\n"
     "Exit(idfirst)\n";
 
+    mTD.bDoContinuous = false;
     again = AcquireAndTransferImage((void *)array, dataSize, arrSize, width, height,
       divideBy2, 0, m_bGMS2 ? DEL_IMAGE : NO_DEL_IM, NO_SAVE);
     if (again != DM_CALL_EXCEPTION)
