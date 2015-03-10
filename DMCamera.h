@@ -75,6 +75,7 @@ public:
   STDMETHOD(GetDefectList)(/*[out, size_is(*arrSize)]*/short xyPairs[], /*[in, out]*/long *arrSize, /*[out]*/long *numPoints, /*[out]*/long *numTotal);
   STDMETHOD(SetK2Parameters2)(/*[in]*/long mode, /*[in]*/double scaling, /*[in]*/long hardwareProc, /*[in]*/BOOL doseFrac, /*[in]*/double frameTime, /*[in]*/BOOL alignFrames, /*[in]*/BOOL saveFrames, /*[in]*/long rotationFlip, /*[in]*/long flags, /*[in]*/double dummy1, /*[in]*/double dummy2, /*[in]*/double dummy3, /*[in]*/double dummy4, /*[in]*/long filtSize, /*[in, size_is(filtSize)]*/long filter[]);
   STDMETHOD(StopContinuousCamera)();
+	STDMETHOD(GetPluginVersion)(/*[out]*/long *version);
 };
 
 #endif // !defined(AFX_DMCAMERA_H__05E3210A_0D63_47FB_AA3E_CABD30B8E8A4__INCLUDED_)

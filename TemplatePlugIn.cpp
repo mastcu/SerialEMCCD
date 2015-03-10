@@ -3056,7 +3056,8 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 {
   struct _stat statbuf;
   FILE *fp;
-  int newDir, dummy, newDefects = 0;
+  string topDir;
+  int ind1, ind2, newDir, dummy, newDefects = 0, created = 0;
   unsigned int uiSumAndGrab = (unsigned int)(nSumAndGrab + 0.1);
   mTD.iRotationFlip = rotationFlip;
   mTD.iFrameRotFlip = (flags & K2_SKIP_FRAME_ROTFLIP) ? 0 : rotationFlip;
@@ -3109,30 +3110,50 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     return;
   }
 
-  // For one file per image, create the directory, which must not exist
+  // Get the top directory, which is the directory itself or the parent for one file/image
   *error = 0;
+  topDir = mTD.strSaveDir;
   if (filePerImage) {
+    ind1 = (int)topDir.rfind('/');
+    ind2 = (int)topDir.rfind('\\');
+    if (ind2 > ind1)
+      ind1 = ind2;
+    topDir.erase(ind1);
+  }
+
+  // make sure directory exists and is a directory, or try to create it if not
+  // 
+  if (_stat(topDir.c_str(), &statbuf)) {
+    sprintf(m_strTemp, "Trying to create %s\n", topDir.c_str());
+    DebugToResult(m_strTemp);
+    if (_mkdir(topDir.c_str()))
+      *error = DIR_CREATE_ERROR;
+    created = 1;
+  } else if ( !(statbuf.st_mode & _S_IFDIR)) {
+    *error = SAVEDIR_IS_FILE;
+  }
+
+  // For one file per image, create the directory, which must not exist
+  if (! *error && filePerImage) {
     if (_mkdir(mTD.strSaveDir.c_str())) {
       if (errno == EEXIST)
         *error = DIR_ALREADY_EXISTS;
       else
         *error = DIR_CREATE_ERROR;
     }
-  } else {
-
-    // Otherwise, make sure directory exists and is a directory
-    if (_stat(mTD.strSaveDir.c_str(), &statbuf))
-      *error = DIR_NOT_EXIST;
-    if (! *error && !(statbuf.st_mode & _S_IFDIR))
-      *error = SAVEDIR_IS_FILE;
+  } else if (! *error) {
 
     // Check whether the file exists
+    // If so, and the backup already exists, that is an error; otherwise back it up
     sprintf(m_strTemp, "%s\\%s.mrc", mTD.strSaveDir.c_str(), mTD.strRootName.c_str());
-    if (! *error && !_stat(m_strTemp, &statbuf))
-      *error = FILE_ALREADY_EXISTS;
+    if (! *error && !_stat(m_strTemp, &statbuf)) {
+      topDir = string(m_strTemp) + '~';
+      if (!_stat(topDir.c_str(), &statbuf) || imodBackupFile(m_strTemp))
+        *error = FILE_ALREADY_EXISTS;
+    }
 
-    // For a new directory, check writability by opening file
-    if (! *error && newDir) {
+    // For a new directory that was not just created, check writability by opening file
+    if (! *error && newDir && !created) {
       fp = fopen(m_strTemp, "wb");
       if (!fp) {
         *error = DIR_NOT_WRITABLE;
@@ -3794,4 +3815,5 @@ int PlugInWrapper::GetDebugVal()
 double wallTime(void) { return 0.;}
 void overrideWriteBytes(int inVal) {}
 void iiDelete(ImodImageFile *inFile) {}
+int imodBackupFile(const char *) {return 0;}
 #endif

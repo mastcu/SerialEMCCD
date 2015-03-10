@@ -300,6 +300,12 @@ STDMETHODIMP CDMCamera::GetDMVersion(long *version)
 	return S_OK;
 }
 
+STDMETHODIMP CDMCamera::GetPluginVersion(long *version)
+{
+	*version = gPlugInWrapper.GetPluginVersion();
+	return S_OK;
+}
+
 STDMETHODIMP CDMCamera::GetDMCapabilities(BOOL *canSelectShutter, BOOL *canSetSettling,
 											BOOL *openShutterWorks)
 {

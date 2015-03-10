@@ -99,6 +99,7 @@ static ArgDescriptor sFuncTable[] = {
   {GS_GetDefectList,        1, 0, 0,   4, 0, 0,   FALSE},
   {GS_SetK2Parameters2,     5, 3, 6,   0, 0, 0,   TRUE},
   {GS_StopContinuousCamera, 0, 0, 0,   0, 0, 0,   FALSE},
+  {GS_GetPluginVersion,     0, 0, 0,   1, 0, 0,   FALSE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -670,6 +671,11 @@ static int ProcessCommand(int numBytes)
     case GS_GetDMVersion:
       sLongArgs[1] = gPlugInWrapper.GetDMVersion();
       SendArgsBack(sLongArgs[1] < 0 ? 1: 0);
+      break;
+
+    case GS_GetPluginVersion:
+      sLongArgs[1] = gPlugInWrapper.GetPluginVersion();
+      SendArgsBack(0);
       break;
 
     case GS_GetDMCapabilities:

@@ -39,6 +39,7 @@ enum {GS_ExecuteScript = 1, GS_SetDebugMode, GS_SetDMVersion, GS_SetCurrentCamer
       GS_SetShutterNormallyClosed, GS_SetNoDMSettling, GS_GetDSProperties,
       GS_AcquireDSImage, GS_ReturnDSChannel, GS_StopDSAcquisition, GS_CheckReferenceTime,
       GS_SetK2Parameters, GS_ChunkHandshake, GS_SetupFileSaving, GS_GetFileSaveResult,
-      GS_SetupFileSaving2, GS_GetDefectList, GS_SetK2Parameters2,GS_StopContinuousCamera};
+      GS_SetupFileSaving2, GS_GetDefectList, GS_SetK2Parameters2, GS_StopContinuousCamera,
+      GS_GetPluginVersion};
 
 #endif
