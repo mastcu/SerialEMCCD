@@ -794,7 +794,7 @@
 				OutputFile=".\$(OutDir)/SEMCCD-GMS2.$(GMS2_SDK_VERSION)-64.dll"
 				LinkIncremental="1"
 				SuppressStartupBanner="true"
-				AdditionalLibraryDirectories="..\SerialEM\Utilities;..\SerialEM\Shared;.\Shared;&quot;$(GMS2-64_SDK)\lib\x64&quot;"
+				AdditionalLibraryDirectories=".\Shared;&quot;$(GMS2-64_SDK)\lib\x64&quot;"
 				IgnoreDefaultLibraryNames="LIBCMT,LIBCMTD"
 				ModuleDefinitionFile=".\SerialEMCCD.def"
 				ProgramDatabaseFile=".\ReleaseMinDependency/SerialEMCCD.pdb"
