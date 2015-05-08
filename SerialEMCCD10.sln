@@ -1,0 +1,50 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 11.00
+# Visual Studio 2010
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SerialEMCCD", "SerialEMCCD9.vcxproj", "{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Debug|x64 = Debug|x64
+		Debug-64|Win32 = Debug-64|Win32
+		Debug-64|x64 = Debug-64|x64
+		GMS2-32bit|Win32 = GMS2-32bit|Win32
+		GMS2-32bit|x64 = GMS2-32bit|x64
+		GMS2-64bit|Win32 = GMS2-64bit|Win32
+		GMS2-64bit|x64 = GMS2-64bit|x64
+		Release MinDependency|Win32 = Release MinDependency|Win32
+		Release MinDependency|x64 = Release MinDependency|x64
+		Release MinSize|Win32 = Release MinSize|Win32
+		Release MinSize|x64 = Release MinSize|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Debug|Win32.ActiveCfg = Debug|Win32
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Debug|Win32.Build.0 = Debug|Win32
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Debug|x64.ActiveCfg = Debug|x64
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Debug|x64.Build.0 = Debug|x64
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Debug-64|Win32.ActiveCfg = Debug-64|Win32
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Debug-64|Win32.Build.0 = Debug-64|Win32
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Debug-64|x64.ActiveCfg = Debug-64|x64
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Debug-64|x64.Build.0 = Debug-64|x64
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.GMS2-32bit|Win32.ActiveCfg = GMS2-32bit|Win32
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.GMS2-32bit|Win32.Build.0 = GMS2-32bit|Win32
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.GMS2-32bit|x64.ActiveCfg = GMS2-32bit|x64
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.GMS2-32bit|x64.Build.0 = GMS2-32bit|x64
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.GMS2-64bit|Win32.ActiveCfg = GMS2-64bit|Win32
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.GMS2-64bit|Win32.Build.0 = GMS2-64bit|Win32
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.GMS2-64bit|x64.ActiveCfg = GMS2-64bit|x64
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.GMS2-64bit|x64.Build.0 = GMS2-64bit|x64
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Release MinDependency|Win32.ActiveCfg = Release MinDependency|Win32
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Release MinDependency|Win32.Build.0 = Release MinDependency|Win32
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Release MinDependency|x64.ActiveCfg = Release MinDependency|x64
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Release MinDependency|x64.Build.0 = Release MinDependency|x64
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Release MinSize|Win32.ActiveCfg = Release MinSize|Win32
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Release MinSize|Win32.Build.0 = Release MinSize|Win32
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Release MinSize|x64.ActiveCfg = Release MinSize|x64
+		{28CBC5A6-3ECC-4E48-902F-4A93B7F3DE8C}.Release MinSize|x64.Build.0 = Release MinSize|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
