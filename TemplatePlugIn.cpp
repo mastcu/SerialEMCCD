@@ -1,35 +1,32 @@
 #include "stdafx.h"
 
-// For GMS2, this must be defined to a single digit below 3 (0, 1, 2) or to double digits
-// for 3 onwards (30, 31, etc)
+// For GMS2, GMS_MINOR_VERSION must be defined to a single digit below 3 (0, 1, 2) or to 
+// double digits for 3 onwards (30, 31, etc).  GMS_SDK_VERSION goes to 3 digits for GMS3
 // To build all versions starting with 31 - x64:
 // Define to 30, build 30 - x64 then switch to GMS2-32bit - Win32, build 30 - Win32
 // Define to 0, build 0 - Win32
 // Define to 2, switch to GMS2-64bit - x64, build 2 - x64
 // Return to 31
-#ifndef GMS2_SDK_VERSION
-#define GMS2_SDK_VERSION -1
+#ifndef GMS_MINOR_VERSION
+#define GMS_MINOR_VERSION -1
 #endif
 
 #ifndef GMS_MAJOR_VERSION
-#pragma message("NOT DEFINED")
 #define GMS_MAJOR_VERSION 1
 #endif
 #if GMS_MAJOR_VERSION > 2
-#define GMS2_TEMP_VERSION (100 * GMS_MAJOR_VERSION + GMS2_SDK_VERSION)
-#undef GMS2_SDK_VERSION
-#define GMS2_SDK_VERSION GMS2_TEMP_VERSION
+#define GMS_SDK_VERSION (100 * GMS_MAJOR_VERSION + GMS_MINOR_VERSION)
+#else
+#define GMS_SDK_VERSION GMS_MINOR_VERSION
 #endif
 
-// This is here temporarily until GMS_MAJOR_VERSION comes in properly
-#define STRING2(x) #x
-#define STRING(x) STRING2(x)
-#pragma message(STRING(GMS2_SDK_VERSION))
-#pragma message(STRING(GMS_MAJOR_VERSION))
-
 #define _GATANPLUGIN_WIN32_DONT_DEFINE_DLLMAIN
-
 #define _GATANPLUGIN_USES_LIBRARY_VERSION 2
+
+#if GMS_SDK_VERSION >= 300
+#include "GMSFoundation.h"
+#endif
+
 #include "DMPlugInBasic.h"
 
 #define _GATANPLUGIN_USE_CLASS_PLUGINMAIN
@@ -613,13 +610,13 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   // single frame doesn't work in older GMS for async saving; but don't know about newer
   mTD.iK2Processing = newProc;
   if (saveFrames == SAVE_FRAMES && B3DNINT(exposure / mTD.dFrameTime) == 1 && 
-    GMS2_SDK_VERSION < 31)
+    GMS_SDK_VERSION < 31)
     mTD.bAsyncSave = false;
 
   // Also cancel asynchronous save if aligning and saving frames since we need to use
   // the old API, and that is set up to happen only through script calls
   mTD.bUseOldAPI = saveFrames == SAVE_FRAMES && mTD.bAlignFrames && 
-    GMS2_SDK_VERSION >= 31;
+    GMS_SDK_VERSION >= 31;
   if (mTD.bUseOldAPI)
     mTD.bAsyncSave = false;
 
@@ -699,7 +696,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
   // Commands for K2 camera
   if (mTD.iReadMode >= 0) {
-    if (GMS2_SDK_VERSION < 31) {
+    if (GMS_SDK_VERSION < 31) {
       sprintf(m_strTemp, "K2_SetHardwareProcessing(camera, %d)\n", 
         mTD.iReadMode ? sK2HardProcs[mTD.iHardwareProc / 2] : 0);
     } else {
@@ -711,7 +708,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
     if (m_bDoseFrac) {
 
-      if (GMS2_SDK_VERSION < 31 || mTD.bUseOldAPI) {
+      if (GMS_SDK_VERSION < 31 || mTD.bUseOldAPI) {
 
         // WORKAROUND to bug in frame time, save & set the global frame time, restore after
         sprintf(m_strTemp, "Object k2dfa = alloc(K2_DoseFracAcquisition)\n"
@@ -739,7 +736,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       }
 
       // Cancel the rotation/flip done by DM in GMS 2.3.1 rgardless of API
-      if (mTD.iRotationFlip && GMS2_SDK_VERSION >= 31) {
+      if (mTD.iRotationFlip && GMS_SDK_VERSION >= 31) {
         sprintf(m_strTemp, "CM_SetAcqTranspose(acqParams, %d)\n", 
           sInverseTranspose[mTD.iRotationFlip]);
         mTD.strCommand += m_strTemp;
@@ -806,7 +803,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 //      "Image img := CM_CreateImageForAcquire(camera, acqParams, \"temp\")\n"
 //            "CM_AcquireDarkReference(camera, acqParams, img, NULL)\n";
     } else if (mTD.iReadMode >= 0 && m_bDoseFrac && 
-      (GMS2_SDK_VERSION < 31 || mTD.bUseOldAPI)) {
+      (GMS_SDK_VERSION < 31 || mTD.bUseOldAPI)) {
       mTD.strCommand += "Image stack\n"
         "Image img := k2dfa.DoseFrac_AcquireImage(camera, acqParams, stack)\n"
         "K2_DoseFrac_SetFrameExposure(camera, savedFrameTime)\n";
@@ -823,7 +820,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   sprintf(m_strTemp, "KeepImage(img)\n"
     "number retval = GetImageID(img)\n");
   mTD.strCommand += m_strTemp;
-  if (saveFrames == SAVE_FRAMES && (GMS2_SDK_VERSION < 31 || mTD.bUseOldAPI)) {
+  if (saveFrames == SAVE_FRAMES && (GMS_SDK_VERSION < 31 || mTD.bUseOldAPI)) {
     sprintf(m_strTemp, "KeepImage(stack)\n"
       "number stackID = GetImageID(stack)\n"
       //"Result(retval + \"  \" + stackID + \"\\n\")\n"
@@ -942,7 +939,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   // A thread is needed if doing asynchronous saving, or even for synchronous save with
   // an early return, but only for old version
   if (!retval && (mTD.bDoContinuous || 
-    (saveFrames && (mTD.bAsyncSave || (mTD.bEarlyReturn && GMS2_SDK_VERSION < 31))))) {
+    (saveFrames && (mTD.bAsyncSave || (mTD.bEarlyReturn && GMS_SDK_VERSION < 31))))) {
       *arrSize = *width = *height = 0;
       mTDcopy = mTD;
       retTD = &mTDcopy;
@@ -1046,7 +1043,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   DM::Image image, sumImage;
   int i, j, numDim, loop, numLoop = 1;
   GatanPlugIn::ImageDataLocker *imageLp = NULL;
-#if defined(GMS2) && GMS2_SDK_VERSION >= 30
+#if defined(GMS2) && GMS_SDK_VERSION >= 30
   ImageDataPlugin::image_data_t fData;
 #else
   ImageData::image_data_t fData;
@@ -1064,7 +1061,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   int errorRet = 0;
 #ifdef _WIN64
   DM::ScriptObject dummyObj;
-#if GMS2_SDK_VERSION < 31
+#if GMS_SDK_VERSION < 31
   K2_DoseFracAcquisition *k2dfaP = NULL;
 #else
   CM::ImageStackPtr stack;
@@ -1080,8 +1077,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   exposureDone = !doingAsyncSave;
   needTemp = saveFrames && td->bEarlyReturn;
   needSum = saveFrames && td->iNumFramesToSum != 0 && 
-    ((GMS2_SDK_VERSION >= 31 && !td->bUseOldAPI) ||
-    ((GMS2_SDK_VERSION < 31 || td->bUseOldAPI) && td->bEarlyReturn)); 
+    ((GMS_SDK_VERSION >= 31 && !td->bUseOldAPI) ||
+    ((GMS_SDK_VERSION < 31 || td->bUseOldAPI) && td->bEarlyReturn)); 
   td->iifile = NULL;
   td->fp = NULL;
   td->rotBuf = td->tempBuf = NULL;
@@ -1120,7 +1117,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         (CM::AcquisitionProcessing)td->iK2Processing, td->dK2Exposure + 0.001, td->iK2Binning, 
         td->iK2Binning);//, td->iK2Top, td->iK2Left, td->iK2Bottom, td->iK2Right);
       j++;
-#if GMS2_SDK_VERSION < 31
+#if GMS_SDK_VERSION < 31
       k2dfaP = new K2_DoseFracAcquisition;
       k2dfaP->SetFrameExposure(td->dFrameTime);  j++;
       k2dfaP->SetAlignOption(td->bAlignFrames);  j++;
@@ -1149,7 +1146,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       if (retval >= 0.001)
         Sleep((DWORD)(retval * 1000. + 0.5));
 
-#if GMS2_SDK_VERSION < 31
+#if GMS_SDK_VERSION < 31
       sumImage = k2dfaP->AcquireImage(camera, acqParams, image);
       numLoop = 2;
 #else
@@ -1165,7 +1162,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         "\n  %s\n", j, exc.what());
       ErrorToResult(td->strTemp);
       try {
-#if GMS2_SDK_VERSION < 31
+#if GMS_SDK_VERSION < 31
         k2dfaP->Abort();
         DM::DeleteImage(sumImage.get());
         DM::DeleteImage(image.get());
@@ -1183,7 +1180,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   } else if (saveFrames) {
 
     // Synchronous dose-fractionation and saving: the stack is complete
-    if (GMS2_SDK_VERSION < 31 || td->bUseOldAPI) {
+    if (GMS_SDK_VERSION < 31 || td->bUseOldAPI) {
 
       // Old way: stack and image exist
       stackID = (int)((retval + 0.1) / ID_MULTIPLIER);
@@ -1253,7 +1250,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
         // STACK PROCESSING : check dimensions for an image
 
-        if (GMS2_SDK_VERSION < 31 || !td->bAsyncSave) {
+        if (GMS_SDK_VERSION < 31 || !td->bAsyncSave) {
           numDim = DM::ImageGetNumDimensions(image.get());   j++;
           if (numDim < 3) {
             td->iErrorFromSave = STACK_NOT_3D;
@@ -1271,7 +1268,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           if (td->bAsyncSave) {
             wallStart = wallTime();
             while (1) {
-#if GMS2_SDK_VERSION < 31
+#if GMS_SDK_VERSION < 31
               stackAllReady = k2dfaP->IsDone();   j++;
               numSlices = k2dfaP->GetNumFramesProcessed();   j++;
               if (numSlices > slice || stackAllReady) {
@@ -1303,7 +1300,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             }
             sprintf(td->strTemp, "numSlices %d  isStackDone %s\n", numSlices,
               stackAllReady ? "Y":"N");
-            if (GMS2_SDK_VERSION < 31)
+            if (GMS_SDK_VERSION < 31)
               DebugToResult(td->strTemp);
             if (slice >= numSlices || GetWatchedDataValue(td->iDMquitting) || 
               td->iErrorFromSave == QUIT_DURING_SAVE || 
@@ -1332,14 +1329,14 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
               break;
             if (!needTemp)
               td->tempBuf = (short *)array;
-            if (GMS2_SDK_VERSION < 31)
+            if (GMS_SDK_VERSION < 31)
               SetWatchedDataValue(td->iReadyToAcquire, 1);
           }
           wallStart = wallTime();
 
           // Get data pointer
           imageLp = new GatanPlugIn::ImageDataLocker( image );   j++;
-          if (GMS2_SDK_VERSION < 31 || !td->bAsyncSave) {
+          if (GMS_SDK_VERSION < 31 || !td->bAsyncSave) {
             imageLp->GetImageData(2, slice, fData);   j++;
             imageData = fData.get_data();   j++;
           } else {
@@ -1480,7 +1477,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     // Delete image here in asynchronous case
     if (doingAsyncSave) {
       try {
-#if GMS2_SDK_VERSION < 31
+#if GMS_SDK_VERSION < 31
         if (doingStack && !stackAllReady)
           k2dfaP->Abort();
         DM::DeleteImage(image.get());
@@ -1521,14 +1518,14 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       DM::DeleteImage(image.get());
     else 
       DebugToResult("Cannot find image for deleting it\n");
-    if (saveFrames && (GMS2_SDK_VERSION < 31 || td->bUseOldAPI)) {
+    if (saveFrames && (GMS_SDK_VERSION < 31 || td->bUseOldAPI)) {
       if (DM::GetImageFromID(image, stackID))
         DM::DeleteImage(image.get());
       else
         DebugToResult("Cannot find stack for deleting it\n");
     }
   }
-#if defined(_WIN64) && GMS2_SDK_VERSION < 31
+#if defined(_WIN64) && GMS_SDK_VERSION < 31
   delete k2dfaP;
 #endif
   td->arrSize = td->width * td->height;
@@ -1639,7 +1636,7 @@ static int RunContinuousAcquire(ThreadData *td)
     // Seems to be no way to set hardware correction in software for older GMS
     if (K2type) {
 #ifdef _WIN64
-#if GMS2_SDK_VERSION < 31
+#if GMS_SDK_VERSION < 31
       K2_SetHardwareProcessing(camera, 
         td->iReadMode ? sK2HardProcs[td->iHardwareProc / 2] : 0);
 #else
@@ -3113,7 +3110,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   mTD.iNumGrabAndStack = 0;
   if (mTD.bEarlyReturn) {
     mTD.iNumFramesToSum = uiSumAndGrab & 65535;
-    mTD.iNumGrabAndStack = GMS2_SDK_VERSION > 30 ? (uiSumAndGrab >> 16) : 0;
+    mTD.iNumGrabAndStack = GMS_SDK_VERSION > 30 ? (uiSumAndGrab >> 16) : 0;
   }
 
   sprintf(m_strTemp, "SetupFileSaving called with flags %x rf %d frf %d %s fpi %s pix %f"
@@ -3124,7 +3121,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     mTD.strSaveDir.c_str(), mTD.strRootName.c_str());
   DebugToResult(m_strTemp);
 
-  if (mTD.bEarlyReturn && !mTD.bAsyncSave && GMS2_SDK_VERSION > 30) {
+  if (mTD.bEarlyReturn && !mTD.bAsyncSave && GMS_SDK_VERSION > 30) {
     *error = EARLY_RET_WITH_SYNC;
     return;
   }
@@ -3256,7 +3253,7 @@ void TemplatePlugIn::GetFileSaveResult(long *numSaved, long *error)
 int TemplatePlugIn::GetDefectList(short xyPairs[], long *arrSize, 
                                   long *numPoints, long *numTotal)
 {
-#if defined(GMS2) && GMS2_SDK_VERSION > 30
+#if defined(GMS2) && GMS_SDK_VERSION > 30
   unsigned short *pairs = (unsigned short *)xyPairs;
   long minRetSize = B3DMIN(2048, *arrSize);
   memset(xyPairs, 0, 2 * minRetSize);
@@ -3348,7 +3345,7 @@ int TemplatePlugIn::InsertCamera(long camera, BOOL state)
 
 /*
  * Get version from DM, return it and set internal version number
- * HERE IS WHERE IT MATTERS HOW GMS2_SDK_VERSION IS DEFINED
+ * HERE IS WHERE IT MATTERS HOW GMS_SDK_VERSION IS DEFINED
  * IT MUST BE 0, 1, 2, then 30, 31, etc above 2.
  */
 long TemplatePlugIn::GetDMVersion()
@@ -3356,7 +3353,7 @@ long TemplatePlugIn::GetDMVersion()
   unsigned int code;
   mTD.strCommand.resize(0);
   if (m_bGMS2) {
-    if (GMS2_SDK_VERSION < 2) {
+    if (GMS_SDK_VERSION < 2) {
       DebugToResult("GMS2 version < 2, just returning 40000\n");
       m_iDMVersion = 40000;
       return 40000;
