@@ -61,35 +61,41 @@
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseOfMfc>false</UseOfMfc>
     <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v90</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseOfMfc>false</UseOfMfc>
     <UseOfAtl>Static</UseOfAtl>
     <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v90</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseOfMfc>false</UseOfMfc>
     <UseOfAtl>Static</UseOfAtl>
     <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v90</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release MinDependency|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseOfMfc>false</UseOfMfc>
     <UseOfAtl>Static</UseOfAtl>
     <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v90</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release MinSize|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseOfMfc>false</UseOfMfc>
     <UseOfAtl>Dynamic</UseOfAtl>
     <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v90</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseOfMfc>false</UseOfMfc>
     <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v90</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug-64|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
@@ -233,7 +239,7 @@
     <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug-64|x64'">$(Platform)\$(Configuration)\</IntDir>
     <IgnoreImportLibrary Condition="'$(Configuration)|$(Platform)'=='Debug-64|x64'">true</IgnoreImportLibrary>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug-64|x64'">false</LinkIncremental>
-    <TargetName Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">SEMCCD-GMS2.$(GMS2_SDK_VERSION)-64</TargetName>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS2_SDK_VERSION)-64</TargetName>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|Win32'">SEMCCD-GMS2.$(GMS2_SDK_VERSION)-32</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -661,7 +667,7 @@ regsvr32 /s SerialEMCCDps.dll
       <Optimization>MaxSpeed</Optimization>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
       <AdditionalIncludeDirectories>$(BOOST_1_38-64);$(GMS2-64_SDK)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>NDEBUG;WIN32;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>GMS_MAJOR_VERSION=$(GMS_MAJOR_VERSION);GMS2_SDK_VERSION=$(GMS2_SDK_VERSION);IMOD_DIR=$(IMOD_DIR);NDEBUG;WIN32;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -675,6 +681,7 @@ regsvr32 /s SerialEMCCDps.dll
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <CompileAs>Default</CompileAs>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -720,7 +727,7 @@ regsvr32 /s SerialEMCCDps.dll
       <Optimization>MaxSpeed</Optimization>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
       <AdditionalIncludeDirectories>$(BOOST_1_38-32);$(GMS2-32_SDK)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>GMS2_SDK_VERSION=$(GMS2_SDK_VERSION);GMS2;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY</PreprocessorDefinitions>
+      <PreprocessorDefinitions>GMS_MAJOR_VERSION=$(GMS_MAJOR_VERSION);GMS2_SDK_VERSION=$(GMS2_SDK_VERSION);GMS2;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -733,6 +740,7 @@ regsvr32 /s SerialEMCCDps.dll
       <WarningLevel>Level3</WarningLevel>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <CompileAs>Default</CompileAs>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -984,6 +992,7 @@ regsvr32 /s SerialEMCCDps.dll
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|Win32'">true</ExcludedFromBuild>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">WIN32;NDEBUG;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY</PreprocessorDefinitions>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release MinDependency|Win32'">true</ExcludedFromBuild>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="SerialEMCCD.cpp">
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug-64|Win32'">Disabled</Optimization>
@@ -1085,6 +1094,8 @@ regsvr32 /s SerialEMCCDps.dll
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release MinSize|x64'">%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release MinSize|x64'">WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_DLL</PreprocessorDefinitions>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release MinSize|x64'">Create</PrecompiledHeader>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">false</MultiProcessorCompilation>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|Win32'">false</MultiProcessorCompilation>
     </ClCompile>
     <ClCompile Include="TemplatePlugIn.cpp">
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug-64|Win32'">Disabled</Optimization>
