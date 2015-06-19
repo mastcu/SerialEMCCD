@@ -1,5 +1,32 @@
 #include "stdafx.h"
 
+// For GMS2, this must be defined to a single digit below 3 (0, 1, 2) or to double digits
+// for 3 onwards (30, 31, etc)
+// To build all versions starting with 31 - x64:
+// Define to 30, build 30 - x64 then switch to GMS2-32bit - Win32, build 30 - Win32
+// Define to 0, build 0 - Win32
+// Define to 2, switch to GMS2-64bit - x64, build 2 - x64
+// Return to 31
+#ifndef GMS2_SDK_VERSION
+#define GMS2_SDK_VERSION -1
+#endif
+
+#ifndef GMS_MAJOR_VERSION
+#pragma message("NOT DEFINED")
+#define GMS_MAJOR_VERSION 1
+#endif
+#if GMS_MAJOR_VERSION > 2
+#define GMS2_TEMP_VERSION (100 * GMS_MAJOR_VERSION + GMS2_SDK_VERSION)
+#undef GMS2_SDK_VERSION
+#define GMS2_SDK_VERSION GMS2_TEMP_VERSION
+#endif
+
+// This is here temporarily until GMS_MAJOR_VERSION comes in properly
+#define STRING2(x) #x
+#define STRING(x) STRING2(x)
+#pragma message(STRING(GMS2_SDK_VERSION))
+#pragma message(STRING(GMS_MAJOR_VERSION))
+
 #define _GATANPLUGIN_WIN32_DONT_DEFINE_DLLMAIN
 
 #define _GATANPLUGIN_USES_LIBRARY_VERSION 2
@@ -27,16 +54,6 @@ using namespace std ;
 #include "Shared\iimage.h"
 #include "Shared\b3dutil.h"
 
-// For GMS2, this must be defined to a single digit below 3 (0, 1, 2) or to double digits
-// for 3 onwards (30, 31, etc)
-// To build all versions starting with 31 - x64:
-// Define to 30, build 30 - x64 then switch to GMS2-32bit - Win32, build 30 - Win32
-// Define to 0, build 0 - Win32
-// Define to 2, switch to GMS2-64bit - x64, build 2 - x64
-// Return to 31
-#ifndef GMS2_SDK_VERSION
-#define GMS2_SDK_VERSION -1
-#endif
 
 #define MAX_TEMP_STRING   1000
 #define MAX_FILTER_NAME   64
@@ -2126,9 +2143,11 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
       mrc_head_new(&td->hdata, nxFile, nyout, 1, td->fileMode);
       sprintf(td->strTemp, "SerialEMCCD: Dose frac. image, scaled by %.2f  r/f %d", 
         td->writeScaling, td->iFrameRotFlip);
-      if (td->save4bit)
+      if (td->save4bit) {
         sprintf(td->strTemp, "SerialEMCCD: Dose frac. image, 4 bits packed  r/f %d",
-        td->iFrameRotFlip); 
+          td->iFrameRotFlip);
+        td->hdata.imodFlags |= MRC_FLAGS_4BIT_BYTES;
+      }
       mrc_head_label(&td->hdata, td->strTemp);
     }
     fileSlice = 0;
