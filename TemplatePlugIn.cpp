@@ -27,7 +27,7 @@
 #include "GMSFoundation.h"
 #endif
 
-#include "DMPlugInBasic.h"
+#include "DMPlugInbasic.h"
 
 #define _GATANPLUGIN_USE_CLASS_PLUGINMAIN
 #include "DMPlugInMain.h"
@@ -36,7 +36,7 @@
 using namespace Gatan;
 
 #include "TemplatePlugIn.h"
-#ifdef _WIN64
+#if defined(_WIN64) && GMS_SDK_VERSION < 31
 #include "K2DoseFractionation.h"
 #endif
 #include <string>

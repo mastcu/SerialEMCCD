@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#if defined(GMS_MAJOR_VERSION) && GMS_MAJOR_VERSION < 3
 #include "K2DoseFractionation.h"
 
 using namespace Gatan;
@@ -272,3 +273,4 @@ void K2_SetHardwareProcessing(const CM::CameraPtr &camera, long processing)
   GatanPlugIn::gDigitalMicrographInterface.CallFunction
     (__sFunction.get_ptr(), 2, params, __sSignature );
 }
+#endif
