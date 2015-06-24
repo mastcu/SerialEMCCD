@@ -164,15 +164,17 @@ STDMETHODIMP CDMCamera::SetK2Parameters(long readMode, double scaling, long hard
 
 // This new version was added to set rotation/flip for dose fractionation shots that
 // are NOT saving frames, so that DM can be kept from doing the operation for GMS >= 2.3.1
+//   flags are as defined in TemplatePlugin.h:
+//     the first three bits have an antialias filter type + 1 for antialias reduction
+//         In this case reducedSizes must have the size to be reduced to as the
+//         width plus height * K2_REDUCED_Y_SCALE
 STDMETHODIMP CDMCamera::SetK2Parameters2(long readMode, double scaling, long hardwareProc,
-                                         BOOL doseFrac, double frameTime, 
-                                         BOOL alignFrames, BOOL saveFrames, 
-                                         long rotationFlip, long flags, double dummy1, 
-                                         double dummy2, double dummy3, double dummy4, 
-                                         long filtSize, long filter[])
+  BOOL doseFrac, double frameTime, BOOL alignFrames, BOOL saveFrames, long rotationFlip,
+  long flags, double reducedSizes, double dummy2, double dummy3, double dummy4, 
+  long filtSize, long filter[])
 {
 	gPlugInWrapper.SetK2Parameters(readMode, scaling, hardwareProc, doseFrac, frameTime,
-    alignFrames, saveFrames, rotationFlip, flags, dummy1, dummy2, dummy3, dummy4, 
+    alignFrames, saveFrames, rotationFlip, flags, reducedSizes, dummy2, dummy3, dummy4, 
     (char *)filter);
 	return S_OK;
 }
@@ -204,6 +206,7 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 //      K2_EARLY_RETURN    - Return early, with no sum, or sum of subset of frames
 //      K2_ASYNC_IN_RAM    - Acquire stack in DM asynchronously into RAM
 //      K2_SKIP_FRAME_ROTFLIP - Save frames in native orientation, skipping rotation/flip
+//      K2_SAVE_SUMMED_FRAMES - Save variable-sized sums of frames
 //   numGrabSum is relevant when doing an early return; it should be set from an unsigned
 //      int with the number of frames to sum in the low 16 bits and, for GMS >= 2.3.1,
 //      the number of frames to grab into a local stack in the high 16 bits.  The local
@@ -216,6 +219,10 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 //      full name of the gain reference, if K2_COPY_GAIN_REF is set in flags
 //      full defect string, if K2_SAVE_DEFECTS is set
 //      command to run, if K2_RUN_COMMAND is set
+//      if K2_SAVE_SUMMED_FRAMES is set, pairs of values; the first value in each pair is
+//           the number of summed frames to save of a certain size, the second value is
+//           the number of frames to sum into each of those saved sums
+//           All values separated by spaces
 //   
 // The caller is responsible for knowing how much memory is available and for choosing
 // whether to set K2_ASYNC_IN_RAM (with or without an early return) and for setting the
@@ -230,26 +237,9 @@ STDMETHODIMP CDMCamera::SetupFileSaving2(long rotationFlip, BOOL filePerImage,
                                         double dummy2, double dummy3, double dummy4,
                                         long nameSize, long names[], long *error)
 {
-  char *cnames = (char *)names;
-  char *command = NULL;
-  char *refName = NULL;
-  char *defects = NULL;
-  int rootind = (int)strlen(cnames) + 1;
-  int nextInd = rootind;
-  if (flags & K2_COPY_GAIN_REF) {
-    nextInd += (int)strlen(&cnames[nextInd]) + 1;
-    refName = &cnames[nextInd];
-  }
-  if (flags & K2_SAVE_DEFECTS) {
-    nextInd += (int)strlen(&cnames[nextInd]) + 1;
-    defects = &cnames[nextInd];
-  }
-  if (flags & K2_RUN_COMMAND) {
-    nextInd += (int)strlen(&cnames[nextInd]) + 1;
-    command = &cnames[nextInd];
-  }
+
   gPlugInWrapper.SetupFileSaving(rotationFlip, filePerImage, pixelSize, flags, numGrabSum,
-    dummy2, dummy3, dummy4, cnames, &cnames[rootind], refName, defects, command, error);
+    dummy2, dummy3, dummy4, names, error);
   return S_OK;
 }
 
@@ -303,6 +293,12 @@ STDMETHODIMP CDMCamera::GetDMVersion(long *version)
 STDMETHODIMP CDMCamera::GetPluginVersion(long *version)
 {
 	*version = gPlugInWrapper.GetPluginVersion();
+	return S_OK;
+}
+
+STDMETHODIMP CDMCamera::GetLastError(long *error)
+{
+	*error = gPlugInWrapper.mLastRetVal;
 	return S_OK;
 }
 

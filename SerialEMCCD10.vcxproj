@@ -239,8 +239,8 @@
     <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug-64|x64'">$(Platform)\$(Configuration)\</IntDir>
     <IgnoreImportLibrary Condition="'$(Configuration)|$(Platform)'=='Debug-64|x64'">true</IgnoreImportLibrary>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug-64|x64'">false</LinkIncremental>
-    <TargetName Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS2_SDK_VERSION)-64</TargetName>
-    <TargetName Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|Win32'">SEMCCD-GMS2.$(GMS2_SDK_VERSION)-32</TargetName>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS_MINOR_VERSION)-64</TargetName>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|Win32'">SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS_MINOR_VERSION)-32</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <CustomBuildStep>
@@ -690,7 +690,7 @@ regsvr32 /s SerialEMCCDps.dll
     <Link>
       <AdditionalOptions>/force:unresolved %(AdditionalOptions)</AdditionalOptions>
       <AdditionalDependencies>DMPlugInBasic.lib;Foundation.lib;Ws2_32.lib;libiimod-64.lib;libcfshr-64.lib;libtiff-64.lib;libjpeg-64.lib;zlib-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <OutputFile>.\$(OutDir)SEMCCD-GMS2.$(GMS2_SDK_VERSION)-64.dll</OutputFile>
+      <OutputFile>.\$(OutDir)SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS_MINOR_VERSION)-64.dll</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>.\Shared;$(GMS2-64_SDK)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreSpecificDefaultLibraries>LIBCMT;LIBCMTD;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
@@ -749,7 +749,7 @@ regsvr32 /s SerialEMCCDps.dll
     <Link>
       <AdditionalOptions>/force:unresolved %(AdditionalOptions)</AdditionalOptions>
       <AdditionalDependencies>DMPlugInBasic.lib;Foundation.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <OutputFile>$(IntDir)SEMCCD-GMS2.$(GMS2_SDK_VERSION)-32.dll</OutputFile>
+      <OutputFile>$(IntDir)SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS_MINOR_VERSION)-32.dll</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>$(GMS2-32_SDK)\lib\Win32\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>

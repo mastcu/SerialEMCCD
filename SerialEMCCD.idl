@@ -46,6 +46,7 @@ import "ocidl.idl";
 		[id(31), helpstring("method SetK2Parameters2")] HRESULT SetK2Parameters2([in]long mode, [in]double scaling, [in]long hardwareProc, [in]BOOL doseFrac, [in]double frameTime, [in]BOOL alignFrames, [in]BOOL saveFrames, [in]long rotationFlip, [in]long flags, [in]double dummy1, [in]double dummy2, [in]double dummy3, [in]double dummy4, [in]long filtSize, [in, size_is(filtSize)]long filter[]);
 	  [id(32), helpstring("method StopContinuousCamera")] HRESULT StopContinuousCamera();
 		[id(33), helpstring("method GetPluginVersion")] HRESULT GetPluginVersion([out]long *version);
+		[id(34), helpstring("method GetLastError")] HRESULT GetLastError([out]long *error);
 
     // Add new functions at the end.  Be sure to build 32 and 64-bit versions before
     // trying to run through COM from 64-bit, since both proxy-stubs are needed

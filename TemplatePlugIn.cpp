@@ -40,6 +40,7 @@ using namespace Gatan;
 #include "K2DoseFractionation.h"
 #endif
 #include <string>
+#include <vector>
 using namespace std ;
 
 #include <stdio.h>
@@ -67,7 +68,8 @@ enum {NO_SAVE = 0, SAVE_FRAMES};
 enum {NO_DEL_IM = 0, DEL_IMAGE};
 enum {WAIT_FOR_THREAD = 0, WAIT_FOR_RETURN, WAIT_FOR_NEW_SHOT, WAIT_FOR_CONTINUOUS};
 
-// Mapping from program read modes (0-2) to values for K2
+// Mapping from program read modes (0-2) to values for K2.  The read mode index >= 0 is
+// the marker for a K2, so OveView diffraction mode is sent as -2 and not included here
 static int sReadModes[3] = {K2_LINEAR_READ_MODE, K2_COUNTING_READ_MODE, 
 K2_SUPERRES_READ_MODE};
 
@@ -156,11 +158,21 @@ struct ThreadData
   int iContWidth, iContHeight;
   int iWaitingForFrame;
   bool bUseOldAPI;
+  int iAntialias;
+  int iFinalBinning;
+  int iFinalWidth;
+  int iFinalHeight;
+  bool bSaveSummedFrames;
+  vector<short> outSumFrameList;
+  vector<short> numFramesInOutSum;
+  int outSumFrameIndex;
+  int numAddedToOutSum;
+  int numOutSumsDoneAtIndex;
 
   // Items needed internally in save routine and its functions
   FILE *fp;
   ImodImageFile *iifile;
-  short *outData, *rotBuf, *tempBuf;
+  short *outData, *rotBuf, *tempBuf, *outSumBuf;
   int *sumBuf;
   void **grabStack;
   MrcHeader hdata;
@@ -195,6 +207,7 @@ static void ErrorToResult(const char *strMessage, const char *strPrefix = NULL);
 static BOOL SleepMsg(DWORD dwTime_ms);
 static double ExecuteScript(char *strScript);
 static int RunContinuousAcquire(ThreadData *td);
+static void AntialiasReduction(ThreadData *td, void *array);
 
 // Declarations of global functions called from here
 void TerminateModuleUninitializeCOM();
@@ -224,7 +237,8 @@ public:
     double dummy1, double dummy2, double dummy3, double dummy4, char *filter);
   void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, long flags,
     double dummy1, double dummy2, double dummy3, double dummy4, char *dirName, 
-    char *rootName, char *refName, char *defects, char *command, long *error);
+    char *rootName, char *refName, char *defects, char *command, char *sumList, 
+    long *error);
   void GetFileSaveResult(long *numSaved, long *error);
   int GetDefectList(short xyPairs[], long *arrSize, long *numPoints, 
     long *numTotal);
@@ -553,7 +567,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
               long divideBy2, long corrections)
 {
   int saveFrames = NO_SAVE;
-  int newProc, err, procIn;
+  int newProc, err, procIn, binAdj, heightAdj, widthAdj;
+  bool swapXY = mTD.iRotationFlip > 0 && mTD.iRotationFlip % 2 && m_bDoseFrac;
   if (m_bSaveFrames && mTD.iReadMode >= 0 && m_bDoseFrac && mTD.strSaveDir.length() && 
     mTD.strRootName.length())
       saveFrames = SAVE_FRAMES;
@@ -620,14 +635,37 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   if (mTD.bUseOldAPI)
     mTD.bAsyncSave = false;
 
+  // For antialias reduction here, make sure it is allowed and set binning to 1
+  if (mTD.iReadMode >= 0 && mTD.iAntialias && !(mTD.bEarlyReturn && !mTD.iNumFramesToSum))
+  {
+    binAdj = binning / (sReadModes[mTD.iReadMode] == K2_SUPERRES_READ_MODE ? 2 : 1);
+    heightAdj = swapXY ? right - left : bottom - top;
+    widthAdj = swapXY ? bottom - top : right - left;
+    if (binning == 1 || mTD.iFinalWidth * binAdj > widthAdj || 
+      mTD.iFinalHeight * binAdj > heightAdj || mTD.bDoContinuous) {
+        if (mTD.bDoContinuous)
+          sprintf(m_strTemp,"Attempting to use antialias reduction in continuous mode\n");
+        else
+          sprintf(m_strTemp, "Bad parameters for antialiasing: from %d x %d to %d x %d "
+          "binning by %d\n", widthAdj, heightAdj, mTD.iFinalWidth, mTD.iFinalHeight, 
+          binAdj);
+        ErrorToResult(m_strTemp,
+          "\nA problem occurred acquiring an image for SerialEM:\n");
+        return BAD_ANTIALIAS_PARAM;
+    }
+    mTD.iFinalBinning = binning;
+    binning = 1;
+  } else
+    mTD.iAntialias = 0;
+
   // Intercept K2 asynchronous saving and continuous mode here
+  mTD.iTop = top;
+  mTD.iBottom = bottom;
+  mTD.iLeft = left;
+  mTD.iRight = right;
   if ((saveFrames == SAVE_FRAMES && mTD.bAsyncSave) || mTD.bDoContinuous) {
       sprintf(m_strTemp, "Exit(0)");
       mTD.strCommand += m_strTemp;
-      mTD.iTop = top;
-      mTD.iBottom = bottom;
-      mTD.iLeft = left;
-      mTD.iRight = right;
       mTD.dK2Exposure = exposure;
       mTD.dK2Settling = settling;
       mTD.iK2Shutter = shutter;
@@ -661,7 +699,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     // As of DM 3.9.3 (3.9?) need to modify only the allowed coorections to avoid an
     // overscan image in simulator, so change 255 to 49
     if (corrections >= 0) {
-      sprintf(m_strTemp, "CM_SetCorrections(acqParams, 49, %d)\n", corrections);
+      sprintf(m_strTemp, "CM_SetCorrections(acqParams, %d, %d)\n", 0x1000 + 49,
+        corrections);
       mTD.strCommand += m_strTemp;
     }
     // Turn off defect correction for raw images and dark references
@@ -750,6 +789,10 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     mTD.strCommand += m_strTemp;
   }
 
+  // A read mode of -2 means set mode 1 for diffraction
+  if (mTD.iReadMode == -2)
+    mTD.strCommand += "CM_SetReadMode(acqParams, 1)\n";
+  
   // Open shutter if a delay is set
   if (shutterDelay) {
     if (m_iDMVersion < NEW_OPEN_SHUTTER_OK)
@@ -896,6 +939,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 {
   DWORD retval = 0, resret, threadID;
   ThreadData *retTD = &mTD;
+  int retWidth = retTD->width, retHeight = retTD->height;
 
   // If there was an acquire thread started, wait until it is done for any dose frac
   // shot, or until ready for acquisition for other shots
@@ -967,18 +1011,27 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       retval = WaitForAcquireThread(mTD.bEarlyReturn ? WAIT_FOR_RETURN : WAIT_FOR_THREAD);
       mTD.iErrorFromSave = mTDcopy.iErrorFromSave;
       mTD.iFramesSaved = mTDcopy.iFramesSaved;
+      retWidth = mTDcopy.iAntialias ? retTD->iFinalWidth : retTD->width;
+      retHeight = mTDcopy.iAntialias ? retTD->iFinalHeight : retTD->height;
       sprintf(m_strTemp, "Back from thread, retval %d errfs %d  #saved %d w %d h %d\n",
-        retval, mTD.iErrorFromSave, mTD.iFramesSaved, retTD->width, retTD->height);
+        retval, mTD.iErrorFromSave, mTD.iFramesSaved, retWidth, retHeight);
       DebugToResult(m_strTemp);
       if (!retval && !retTD->arrSize && retTD->iNumFramesToSum)
-        retTD->arrSize = retTD->width * retTD->height;
+        retTD->arrSize = retWidth * retHeight;
   } else if (!retval) {
     retval = AcquireProc(&mTD);
+    retWidth = mTD.iAntialias ? mTD.iFinalWidth : mTD.width;
+    retHeight = mTD.iAntialias ? mTD.iFinalHeight : mTD.height;
+    /*sprintf(m_strTemp, "Back from call, retval %d w %d h %d  arrsize %d\n",
+        retval, retWidth, retHeight, mTD.arrSize);
+    DebugToResult(m_strTemp);*/
   }
-  *width = retTD->width;
-  *height = retTD->height;
+  *width = retWidth;
+  *height = retHeight;
   if (!retval && !retTD->arrSize)
     *arrSize = B3DMIN(1024, sizeOrig);
+  else if (!retval && retTD->iAntialias)
+    *arrSize = retWidth * retHeight;
   else
     *arrSize = retTD->arrSize;
   return (int)retval;
@@ -1035,6 +1088,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   ThreadData *td = (ThreadData *)pParam;
   long ID, imageID, stackID, frameDivide = td->divideBy2;
   void *array = td->array;
+  void *unbinnedArray = NULL;
   int outLimit = td->arrSize;
   long divideBy2 = td->divideBy2;
   long transpose = td->transpose;
@@ -1083,6 +1137,23 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   td->fp = NULL;
   td->rotBuf = td->tempBuf = NULL;
   td->sumBuf = NULL;
+  td->outSumBuf = NULL;
+  td->numAddedToOutSum = 0;
+  td->outSumFrameIndex = 0;
+  td->numOutSumsDoneAtIndex = 0;
+
+  // Get array for unbinned image with antialias reduction
+  if (td->iAntialias) {
+    try {
+      i = sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE ? 4 : 1;
+      outLimit = (td->iRight - td->iLeft) * (td->iBottom - td->iTop) * i;
+      unbinnedArray = new short[outLimit];
+      array = unbinnedArray;
+    }
+    catch (...) {
+      return ROTBUF_MEMORY_ERROR;
+    }
+  }
 
   // Execute the command string as developed
   if (td->strCommand.length() > 0)
@@ -1094,7 +1165,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   // If error, return error code
   if (retval == SCRIPT_ERROR_RETURN) {
     td->arrSize = 0;
-    return (int)retval;
+    delete unbinnedArray;
+    return GENERAL_SCRIPT_ERROR;
   }
   if (td->bDoContinuous)
     return RunContinuousAcquire(td);
@@ -1174,7 +1246,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       }
       catch (exception exc) {
       }
-      return (int)SCRIPT_ERROR_RETURN;
+      delete unbinnedArray;
+      return GENERAL_SCRIPT_ERROR;
     }
 #endif
   } else if (saveFrames) {
@@ -1242,6 +1315,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         imageData = imageLp->get();   j++;
         ProcessImage(imageData, array, td->dataSize, td->width, td->height, divideBy2, 
           transpose, td->byteSize, td->isInteger, td->isUnsignedInt, td->fFloatScaling);
+        AntialiasReduction(td, array);
         delete imageLp;
         imageLp = NULL;
 
@@ -1352,6 +1426,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
                 ProcessImage(td->sumBuf, array, td->dataSize, td->width, td->height,
                   divideBy2, transpose, 4, !td->isFloat, false, scaleSave);
                 DebugToResult("Partial sum completed by thread\n");
+                AntialiasReduction(td, array);
             }
             td->iNumSummed++;
             if (exposureDone && !td->iReadyToReturn && 
@@ -1469,9 +1544,11 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     td->fFloatScaling = scaleSave;
 
     // Return the full sum here after all temporary use of array is over
-    if (needSum && !td->bEarlyReturn)
+    if (needSum && !td->bEarlyReturn) {
       ProcessImage(td->sumBuf, array, td->dataSize, td->width, td->height,
         divideBy2, transpose, 4, !td->isFloat, false, scaleSave);
+      AntialiasReduction(td, array);
+    }
 
 #ifdef _WIN64
     // Delete image here in asynchronous case
@@ -1503,6 +1580,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   // Clean up all buffers
   delete [] td->rotBuf;
   delete [] td->sumBuf;
+  delete [] td->outSumBuf;
   if (needTemp)
     delete [] td->tempBuf;
   if (td->iNumGrabAndStack) {
@@ -1528,10 +1606,52 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 #if defined(_WIN64) && GMS_SDK_VERSION < 31
   delete k2dfaP;
 #endif
-  td->arrSize = td->width * td->height;
-  sprintf(td->strTemp, "Leaving thread with return value %d\n", errorRet); 
+
+  delete unbinnedArray;
+  td->arrSize = td->iAntialias ? td->iFinalWidth * td->iFinalHeight :
+    td->width * td->height;
+  sprintf(td->strTemp, "Leaving thread with return value %d arrSize %d\n", errorRet, 
+    td->arrSize); 
   DebugToResult(td->strTemp);
   return errorRet;
+}
+
+static void AntialiasReduction(ThreadData *td, void *array)
+{
+#ifdef _WIN64
+  int error, i, xStart, yStart, nxr, nyr;
+  int type = td->divideBy2 ? SLICE_MODE_SHORT : SLICE_MODE_USHORT;
+  if (!td->iAntialias)
+    return;
+  double filtScale = 1. / td->iFinalBinning;
+  sprintf(td->strTemp, "AntialiasReduction from %d x %d bin %d to %d x %d\n",
+    td->width, td->height, td->iFinalBinning, td->iFinalWidth, td->iFinalHeight);
+  DebugToResult(td->strTemp);
+  unsigned char **linePtrs = makeLinePointers(array, td->width, td->height, 2);
+
+  // Set the offset to center a subset, get filter, and do it
+  float axoff = (float)(B3DMAX(0, td->width - td->iFinalWidth * td->iFinalBinning) / 2.);
+  float ayoff = (float)(B3DMAX(0, td->height - td->iFinalHeight * td->iFinalBinning) /2.);
+  int filterType = B3DMIN(6, td->iAntialias) - 1;
+  error = selectZoomFilter(filterType, filtScale, &i);
+  if (!error && linePtrs) {
+    setZoomValueScaling((float)(td->iFinalBinning * td->iFinalBinning));
+    error = zoomWithFilter(linePtrs, td->width, td->height, axoff, ayoff, 
+      td->iFinalWidth, td->iFinalHeight, td->iFinalWidth, 0, type,
+      td->array, NULL, NULL);
+  }
+  B3DFREE(linePtrs);
+
+  // It is inconvenient to have errors, so fall back to binning
+  if (error) {
+    xStart = B3DNINT(axoff);
+    yStart = B3DNINT(ayoff);
+    extractWithBinning(array, type, td->width, xStart, td->width - xStart - 1, yStart,
+      td->height - yStart - 1, td->iFinalBinning, td->array, 0, &nxr, &nyr);
+    ErrorToResult("Warning: an error occurred in antialias reduction, binning was used "
+      "instead\n", "\nA problem occurred acquiring an image for SerialEM:\n");
+  }
+#endif
 }
 
 //////////////////////////////////////////////////////////////////
@@ -1590,7 +1710,7 @@ static int RunContinuousAcquire(ThreadData *td)
     CM::SetSettling(acqParams, td->dK2Settling);  j++;
     CM::SetShutterIndex(acqParams, td->iK2Shutter);  j++;
     if (td->iCorrections >= 0)
-      CM::SetCorrections(acqParams, 49, td->iCorrections); 
+      CM::SetCorrections(acqParams, 0x1000 + 49, td->iCorrections); 
     j++;
     CM::SetDoContinuousReadout(acqParams, td->bSetContinuousMode); j++;
 
@@ -1647,6 +1767,10 @@ static int RunContinuousAcquire(ThreadData *td)
       CM::SetReadMode(acqParams, sReadModes[td->iReadMode]);
 #endif
     }
+
+    // Set diffraction mode for OneView
+    if (td->iReadMode == -2)
+      CM::SetReadMode(acqParams, 1);
 
     // Get the DM image for this acquisition
     j = 13;
@@ -1962,8 +2086,9 @@ static int GetTypeAndSizeInfo(ThreadData *td, DM::Image &image, int loop,  int o
   if (!sContinuousArray)
     DebugToResult(td->strTemp);
   if (td->width * td->height > outLimit) {
-    ErrorToResult("Warning: image is larger than the supplied array\n",
-      "\nA problem occurred acquiring an image for SerialEM:\n");
+    sprintf(td->strTemp, "Warning: image is larger than the supplied array (image %dx%d"
+      " = %d, array %d)\n", td->width, td->height, td->width * td->height, outLimit);
+    ErrorToResult(td->strTemp, "\nA problem occurred acquiring an image for SerialEM:\n");
     td->height = outLimit / td->width;
   }
   return 0;
@@ -2054,6 +2179,15 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
       return 1;
     }
   }
+  if (td->bSaveSummedFrames) {
+    try {
+      td->outSumBuf = new short [td->width * td->height];
+    }
+    catch (...) {
+      td->outSumBuf = NULL;
+      return 1;
+    }
+  }
 
   // Allocate the pointer array for stack of grabbed frames
   if (td->iNumGrabAndStack) {
@@ -2089,10 +2223,69 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
   float tmean;
   int i, j, tsum, val;
   int nxFile = td->save4bit ? nxout / 2 : nxout;
-  short *sData;
-  unsigned short *usData;
+  short *sData, *sSum;
+  unsigned short *usData, *usSum;
   unsigned char *bData, *packed;
   unsigned char lowbyte;
+
+  // Sum frame first if flag is set, and there is a count
+  if (td->bSaveSummedFrames && td->outSumFrameIndex < td->outSumFrameList.size()) {
+    if (td->numFramesInOutSum[td->outSumFrameIndex] > 1) {
+
+      // If there is just one frame in this sum, just go on and use it,
+      // Otherwise add frame to sum: zero sum first if it is the first one
+      if (!td->numAddedToOutSum)
+        memset(td->outSumBuf, 0, 2 * nxout * nyout);
+      sSum = (short *)td->outSumBuf;
+      usSum = (unsigned short *)td->outSumBuf;
+      if (td->fileMode == MRC_MODE_USHORT) {
+        usData = (unsigned short *)td->outData;
+        for (i = 0; i < nxout * nyout; i++)
+          *(usSum++) += *(usData++);
+      } else if (td->fileMode == MRC_MODE_SHORT) {
+        sData = td->outData;
+        for (i = 0; i < nxout * nyout; i++)
+          *(sSum++) += *(sData++);
+      } else {
+        bData = (unsigned char *)td->outData;
+        for (i = 0; i < nxout * nyout; i++)
+          *(usSum++) += *(bData++);
+      }
+
+      // Increment count; if it still short, return
+      td->numAddedToOutSum++;
+      if (td->numAddedToOutSum < td->numFramesInOutSum[td->outSumFrameIndex] && 
+        !finalFrame)
+        return 0;
+
+      // Otherwise, copy data back to outData
+      sSum = (short *)td->outSumBuf;
+      usSum = (unsigned short *)td->outSumBuf;
+      if (td->fileMode == MRC_MODE_USHORT) {
+        usData = (unsigned short *)td->outData;
+        for (i = 0; i < nxout * nyout; i++)
+          *(usData++) = *(usSum++);
+      } else if (td->fileMode == MRC_MODE_SHORT) {
+        sData = td->outData;
+        for (i = 0; i < nxout * nyout; i++)
+          *(sData++) = *(sSum++);
+      } else {
+        bData = (unsigned char *)td->outData;
+        for (i = 0; i < nxout * nyout; i++) {
+          *(bData++) = (unsigned char)B3DMIN(255, *usSum);
+          usSum++;
+        }
+      }
+    }
+
+    // Increment number of frames done and index if necessary, zero the sum count
+    td->numOutSumsDoneAtIndex++;
+    if (td->numOutSumsDoneAtIndex == td->outSumFrameList[td->outSumFrameIndex]) {
+      td->outSumFrameIndex++;
+      td->numOutSumsDoneAtIndex = 0;
+    }
+    td->numAddedToOutSum = 0;
+  }
 
   // open file if needed
   if (!slice || td->bFilePerImage) {
@@ -3011,7 +3204,7 @@ int TemplatePlugIn::SelectCamera(long camera)
   AddCameraSelection();
   double retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
-    return 1;
+    return GENERAL_SCRIPT_ERROR;
   return 0;
 }
 
@@ -3033,6 +3226,7 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
     m_bSaveFrames = false;
     m_bDoseFrac = false;
   }
+  mTD.iAntialias = 0;
 }
 
 /*
@@ -3041,7 +3235,7 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
 void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwareProc, 
                                      BOOL doseFrac, double frameTime, BOOL alignFrames, 
                                      BOOL saveFrames, long rotationFlip, long flags, 
-                                     double dummy1, double dummy2, double dummy3, 
+                                     double reducedSizes, double dummy2, double dummy3, 
                                      double dummy4, char *filter)
 {
   SetReadMode(mode, scaling);
@@ -3057,6 +3251,11 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
     mTD.strFilterName[MAX_FILTER_NAME - 1] = 0x00;
   }
   m_bSaveFrames = saveFrames;
+  mTD.iAntialias = flags & K2_ANTIALIAS_MASK;
+  if (mTD.iAntialias) {
+    mTD.iFinalHeight = B3DNINT(reducedSizes / K2_REDUCED_Y_SCALE);
+    mTD.iFinalWidth = B3DNINT(reducedSizes - K2_REDUCED_Y_SCALE * mTD.iFinalHeight);
+  }
   sprintf(m_strTemp, "SetK2Parameters called with save %s\n", m_bSaveFrames ? "Y":"N");
   DebugToResult(m_strTemp);
 }
@@ -3068,11 +3267,13 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
                                      double pixelSize, long flags, double nSumAndGrab, 
                                      double dummy2, double dummy3, double dummy4, 
                                      char *dirName, char *rootName, char *refName,
-                                     char *defects, char *command, long *error)
+                                     char *defects, char *command, char *sumList, 
+                                     long *error)
 {
   struct _stat statbuf;
   FILE *fp;
   string topDir;
+  char *strForTok, *token;
   int ind1, ind2, newDir, dummy, newDefects = 0, created = 0;
   unsigned int uiSumAndGrab = (unsigned int)(nSumAndGrab + 0.1);
   mTD.iRotationFlip = rotationFlip;
@@ -3086,6 +3287,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   mTD.bAsyncSave = (flags & K2_SAVE_SYNCHRON) == 0;
   mTD.bEarlyReturn = (flags & K2_EARLY_RETURN) != 0;
   mTD.bAsyncToRAM = (flags & K2_ASYNC_IN_RAM) != 0;
+  mTD.bSaveSummedFrames = (flags & K2_SAVE_SUMMED_FRAMES) != 0;
 
   // Copy all the strings if they are changed
   if (CopyStringIfChanged(dirName, mTD.strSaveDir, newDir, error))
@@ -3103,6 +3305,32 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   if (command && (flags & K2_RUN_COMMAND)) {
     if (CopyStringIfChanged(command, m_strPostSaveCom, dummy, error))
       return;
+  }
+
+  // Unpack the list of frames to sum
+  if (sumList && mTD.bSaveSummedFrames) {
+    mTD.outSumFrameList.clear();
+    mTD.numFramesInOutSum.clear();
+    strForTok = sumList;
+    while ((token = strtok(strForTok, " ")) != NULL) {
+      strForTok = NULL;
+      ind1 = atoi(token);
+      token = strtok(strForTok, " ");
+      if (token)
+        ind2 = atoi(token);
+      if (ind1 <= 0 || !token || ind2 <= 0 || ind1 > 32000 || ind2 > 32000) {
+        *error = BAD_SUM_LIST;
+        return;
+      }
+      try {
+        mTD.outSumFrameList.push_back((short)ind1);
+        mTD.numFramesInOutSum.push_back((short)ind2);
+      }
+      catch (...) {
+        *error = BAD_SUM_LIST;
+        return;
+      }
+    }
   }
 
   // Get number of frames to sum from low 16 bits and number to stack fast from high
@@ -3271,11 +3499,11 @@ int TemplatePlugIn::GetDefectList(short xyPairs[], long *arrSize,
     }
   }
   catch (exception exc) {
-    return 1;
+    return GETTING_DEFECTS_ERROR;
   }
   return 0;
 #else
-  return 1;
+  return GETTING_DEFECTS_ERROR;
 #endif
 }
 
@@ -3339,7 +3567,7 @@ int TemplatePlugIn::InsertCamera(long camera, BOOL state)
   mTD.strCommand += m_strTemp;
   double retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
-    return 1;
+    return GENERAL_SCRIPT_ERROR;
   return 0;
 }
 
@@ -3405,7 +3633,7 @@ int TemplatePlugIn::SetShutterNormallyClosed(long camera, long shutter)
   mTD.strCommand += m_strTemp;
   double retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
-    return 1;
+    return GENERAL_SCRIPT_ERROR;
   return 0;
 }
 
@@ -3431,7 +3659,7 @@ int TemplatePlugIn::GetDSProperties(long extraDelay, double addedFlyback, double
   mTD.strCommand += m_strTemp;
   double retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
-    return 1;
+    return GENERAL_SCRIPT_ERROR;
   *flyback = retval;
   m_dFlyback = retval + addedFlyback;
   mTD.strCommand.resize(0);
@@ -3440,7 +3668,7 @@ int TemplatePlugIn::GetDSProperties(long extraDelay, double addedFlyback, double
   mTD.strCommand += m_strTemp;
   retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
-    return 1;
+    return GENERAL_SCRIPT_ERROR;
   *lineFreq = retval;
   m_dLineFreq = retval;
   mTD.strCommand.resize(0);
@@ -3449,7 +3677,7 @@ int TemplatePlugIn::GetDSProperties(long extraDelay, double addedFlyback, double
   mTD.strCommand += m_strTemp;
   retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
-    return 1;
+    return GENERAL_SCRIPT_ERROR;
   *rotOffset = retval;
   mTD.strCommand.resize(0);
   sprintf(m_strTemp, "Number retval = DSGetDoFlip()\n"
@@ -3457,7 +3685,7 @@ int TemplatePlugIn::GetDSProperties(long extraDelay, double addedFlyback, double
   mTD.strCommand += m_strTemp;
   retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
-    return 1;
+    return GENERAL_SCRIPT_ERROR;
   *doFlip = retval != 0. ? 1 : 0;
   return 0;
 }
@@ -3484,7 +3712,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
 
     // Return with error if continuous is supposed to be started and isn't
     if (!m_bContinuousDS)
-      return 1;
+      return CONTINUOUS_ENDED;
 
     // Timeout since last return of data
     double elapsed = GetTickCount() - mTD.dLastReturnTime;
@@ -3593,7 +3821,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
       "Exit(paramID + 1000000. * idfirst)\n";
     double retval = ExecuteScript((char *)mTD.strCommand.c_str());
     if (retval == SCRIPT_ERROR_RETURN)
-      return 1;
+      return GENERAL_SCRIPT_ERROR;
     mTD.iDSimageID = (int)(retval / 1000000. + 0.5);
     m_iDSparamID = (int)(retval + 0.5 - 1000000. * mTD.iDSimageID);
     m_bContinuousDS = true;
@@ -3612,7 +3840,7 @@ int TemplatePlugIn::ReturnDSChannel(short array[], long *arrSize, long *width,
                                    long *height, long channel, long divideBy2)
 {
   if (m_iDSAcquired[channel] != CHAN_ACQUIRED)
-    return 1;
+    return DS_CHANNEL_NOT_ACQUIRED;
   mTD.strCommand.resize(0);
   if (!m_bContinuousDS) {
     sprintf(m_strTemp, "image imzero\n"
@@ -3633,7 +3861,7 @@ int TemplatePlugIn::ReturnDSChannel(short array[], long *arrSize, long *width,
 int TemplatePlugIn::StopDSAcquisition()
 {
   if (!m_bContinuousDS)
-    return 1;
+    return CONTINUOUS_ENDED;
   mTD.strCommand.resize(0);
   sprintf(m_strTemp, "DSStopAcquisition(%d)\n"
       "Delay(%d)\n"
@@ -3645,7 +3873,7 @@ int TemplatePlugIn::StopDSAcquisition()
   mTD.iDSimageID = 0;
   m_bContinuousDS = false;
   //mTD.dLastReturnTime = GetTickCount();
-  return (retval == SCRIPT_ERROR_RETURN) ? 1 : 0;
+  return (retval == SCRIPT_ERROR_RETURN) ? GENERAL_SCRIPT_ERROR : 0;
 }
 
 // Global instances of the plugin and the wrapper class for calling into this file
@@ -3658,36 +3886,44 @@ PlugInWrapper gPlugInWrapper;
 //
 PlugInWrapper::PlugInWrapper()
 {
+  mLastRetVal = 0;
 }
 
 
 BOOL PlugInWrapper::GetCameraBusy()
 {
+  mLastRetVal = 0;
   return false;
 }
 
 double PlugInWrapper::ExecuteScript(char *strScript, BOOL selectCamera)
 {
-  return gTemplatePlugIn.ExecuteClientScript(strScript, selectCamera);
+  double retVal = gTemplatePlugIn.ExecuteClientScript(strScript, selectCamera);
+  mLastRetVal = SCRIPT_ERROR_RETURN ? CLIENT_SCRIPT_ERROR : 0;
+  return retVal;
 }
 
 void PlugInWrapper::SetDebugMode(int inVal)
 {
+  mLastRetVal = 0;
   gTemplatePlugIn.SetDebugMode(inVal != 0);
 }
 
 void PlugInWrapper::SetDMVersion(long inVal)
 {
+  mLastRetVal = 0;
   gTemplatePlugIn.SetDMVersion((int)inVal);
 }
 
 void PlugInWrapper::SetCurrentCamera(long inVal)
 {
+  mLastRetVal = 0;
   gTemplatePlugIn.SetCurrentCamera((int)inVal);
 }
 
 void PlugInWrapper::QueueScript(char *strScript)
 {
+  mLastRetVal = 0;
   gTemplatePlugIn.QueueScript(strScript);
 }
 
@@ -3697,25 +3933,27 @@ int PlugInWrapper::GetImage(short *array, long *arrSize, long *width,
               long right, long shutter, double settling, long shutterDelay,
               long divideBy2, long corrections)
 {
-  return gTemplatePlugIn.GetImage(array, arrSize, width, height, processing, exposure,
-    binning, top, left, bottom, right, shutter, settling, shutterDelay, divideBy2, 
-    corrections);
+  return (mLastRetVal = gTemplatePlugIn.GetImage(array, arrSize, width, height, 
+    processing, exposure, binning, top, left, bottom, right, shutter, settling, 
+    shutterDelay, divideBy2, corrections));
 }
 
 int PlugInWrapper::GetGainReference(float *array, long *arrSize, long *width, 
                   long *height, long binning)
 {
-  return gTemplatePlugIn.GetGainReference(array, arrSize, width, height, binning);
+  return (mLastRetVal = gTemplatePlugIn.GetGainReference(array, arrSize, width, height, 
+    binning));
 }
 
 
 int PlugInWrapper::SelectCamera(long camera)
 {
-  return gTemplatePlugIn.SelectCamera(camera);
+  return (mLastRetVal = gTemplatePlugIn.SelectCamera(camera));
 }
 
 void PlugInWrapper::SetReadMode(long mode, double scaling)
 {
+  mLastRetVal = 0;
   gTemplatePlugIn.SetReadMode(mode, scaling);
 }
 
@@ -3725,57 +3963,98 @@ void PlugInWrapper::SetK2Parameters(long readMode, double scaling, long hardware
                                     double dummy1, double dummy2, double dummy3, 
                                     double dummy4, char *filter)
 {
+  mLastRetVal = 0;
   gTemplatePlugIn.SetK2Parameters(readMode, scaling, hardwareProc, doseFrac, frameTime, 
     alignFrames, saveFrames, rotationFlip, flags, dummy1, dummy2, dummy3, dummy4, filter);
 }
+
 void PlugInWrapper::SetupFileSaving(long rotationFlip, BOOL filePerImage, 
                                     double pixelSize, long flags, double dummy1, 
                                     double dummy2, double dummy3, double dummy4, 
-                                    char *dirName, char *rootName, char *refName, 
-                                    char *defects, char *command, long *error)
+                                    long *names, long *error)
 {
+  char *cnames = (char *)names;
+  char *command = NULL;
+  char *refName = NULL;
+  char *defects = NULL;
+  char *sumList = NULL;
+  int rootind = (int)strlen(cnames) + 1;
+  int nextInd = rootind;
+  mLastRetVal = 0;
+  if (flags & K2_COPY_GAIN_REF) {
+    nextInd += (int)strlen(&cnames[nextInd]) + 1;
+    refName = &cnames[nextInd];
+  }
+  if (flags & K2_SAVE_DEFECTS) {
+    nextInd += (int)strlen(&cnames[nextInd]) + 1;
+    defects = &cnames[nextInd];
+  }
+  if (flags & K2_RUN_COMMAND) {
+    nextInd += (int)strlen(&cnames[nextInd]) + 1;
+    command = &cnames[nextInd];
+  }
+  if (flags & K2_SAVE_SUMMED_FRAMES) {
+    nextInd += (int)strlen(&cnames[nextInd]) + 1;
+    sumList = &cnames[nextInd];
+  }
   gTemplatePlugIn.SetupFileSaving(rotationFlip, filePerImage, pixelSize, flags, dummy1,
-    dummy2, dummy3, dummy4, dirName, rootName, refName, defects, command, error);
+    dummy2, dummy3, dummy4, cnames, &cnames[rootind], refName, defects, command, sumList,
+    error);
 }
 
 void PlugInWrapper::GetFileSaveResult(long *numSaved, long *error)
 {
+  mLastRetVal = 0;
   gTemplatePlugIn.GetFileSaveResult(numSaved, error);
 }
 
 int PlugInWrapper::GetDefectList(short xyPairs[], long *arrSize, long *numPoints,
                                  long *numTotal)
 {
-  return gTemplatePlugIn.GetDefectList(xyPairs, arrSize, numPoints, numTotal);
+  return (mLastRetVal = gTemplatePlugIn.GetDefectList(xyPairs, arrSize, numPoints, 
+    numTotal));
 }
 
 int PlugInWrapper::GetNumberOfCameras()
 {
-  return gTemplatePlugIn.GetNumberOfCameras();
+  int retVal = gTemplatePlugIn.GetNumberOfCameras();
+  mLastRetVal = 0;
+  if (retVal < 0)
+    mLastRetVal = GENERAL_SCRIPT_ERROR;
+  return retVal;
 }
 
 int PlugInWrapper::IsCameraInserted(long camera)
 {
-  return gTemplatePlugIn.IsCameraInserted(camera);
+  int retVal = gTemplatePlugIn.IsCameraInserted(camera);
+  mLastRetVal = 0;
+  if (retVal < 0)
+    mLastRetVal = GENERAL_SCRIPT_ERROR;
+  return retVal;
 }
 
 int PlugInWrapper::InsertCamera(long camera, BOOL state)
 {
-  return gTemplatePlugIn.InsertCamera(camera, state);
+  return (mLastRetVal = gTemplatePlugIn.InsertCamera(camera, state));
 }
 
 long PlugInWrapper::GetDMVersion()
 {
-  return gTemplatePlugIn.GetDMVersion();
+  int retVal = gTemplatePlugIn.GetDMVersion();
+  mLastRetVal = 0;
+  if (retVal < 0)
+    mLastRetVal = GENERAL_SCRIPT_ERROR;
+  return retVal;
 }
 
 int PlugInWrapper::SetShutterNormallyClosed(long camera, long shutter)
 {
-  return gTemplatePlugIn.SetShutterNormallyClosed(camera, shutter);
+  return (mLastRetVal = gTemplatePlugIn.SetShutterNormallyClosed(camera, shutter));
 }
 
 void PlugInWrapper::SetNoDMSettling(long camera)
 {
+  mLastRetVal = 0;
   gTemplatePlugIn.SetNoDMSettling(camera);
 }
 
@@ -3783,8 +4062,8 @@ int PlugInWrapper::GetDSProperties(long timeout, double addedFlyback, double mar
                                    double *flyback, 
                                    double *lineFreq, double *rotOffset, long *doFlip)
 {
-  return gTemplatePlugIn.GetDSProperties(timeout, addedFlyback, margin, flyback, lineFreq, 
-    rotOffset, doFlip);
+  return (mLastRetVal = gTemplatePlugIn.GetDSProperties(timeout, addedFlyback, margin, 
+    flyback, lineFreq, rotOffset, doFlip));
 }
 
 int PlugInWrapper::AcquireDSImage(short array[], long *arrSize, long *width, 
@@ -3792,25 +4071,25 @@ int PlugInWrapper::AcquireDSImage(short array[], long *arrSize, long *width,
                                   long lineSync, long continuous, long numChan, 
                                   long channels[], long divideBy2)
 {
-  return gTemplatePlugIn.AcquireDSImage(array, arrSize, width, height, rotation, 
-    pixelTime, lineSync, continuous, numChan, channels, divideBy2);
+  return (mLastRetVal = gTemplatePlugIn.AcquireDSImage(array, arrSize, width, height, 
+    rotation, pixelTime, lineSync, continuous, numChan, channels, divideBy2));
 }
 
 int PlugInWrapper::ReturnDSChannel(short array[], long *arrSize, long *width, 
                                    long *height, long channel, long divideBy2)
 {
-  return gTemplatePlugIn.ReturnDSChannel(array, arrSize, width, height, channel,
-    divideBy2);
+  return (mLastRetVal = gTemplatePlugIn.ReturnDSChannel(array, arrSize, width, height, 
+    channel, divideBy2));
 }
 
 int PlugInWrapper::StopDSAcquisition()
 {
-  return gTemplatePlugIn.StopDSAcquisition();
+  return (mLastRetVal = gTemplatePlugIn.StopDSAcquisition());
 }
 
 int PlugInWrapper::StopContinuousCamera()
 {
-  return gTemplatePlugIn.StopContinuousCamera();
+  return (mLastRetVal = gTemplatePlugIn.StopContinuousCamera());
 }
 
 void PlugInWrapper::ErrorToResult(const char *strMessage, const char *strPrefix)

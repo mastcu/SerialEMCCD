@@ -100,6 +100,7 @@ static ArgDescriptor sFuncTable[] = {
   {GS_SetK2Parameters2,     5, 3, 6,   0, 0, 0,   TRUE},
   {GS_StopContinuousCamera, 0, 0, 0,   0, 0, 0,   FALSE},
   {GS_GetPluginVersion,     0, 0, 0,   1, 0, 0,   FALSE},
+  {GS_GetLastError,         0, 0, 0,   1, 0, 0,   FALSE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -479,11 +480,8 @@ static int ListenForHandshake(int superChunk)
 // Process a received message
 static int ProcessCommand(int numBytes)
 {
-  int funcCode, ind, needed, version, rootInd, nextInd;
+  int funcCode, ind, needed, version;
   short *imArray;
-  char *command = NULL;
-  char *refName = NULL;
-  char *defects = NULL;
   struct __stat64 statbuf;
 
   // Get the function code as the second element of the buffer
@@ -615,30 +613,14 @@ static int ProcessCommand(int numBytes)
     case GS_SetupFileSaving:
       ind = (int)strlen((char *)sLongArray) + 1;
       gPlugInWrapper.SetupFileSaving(sLongArgs[1], sBoolArgs[0], sDoubleArgs[0], 0,
-        0., 0., 0., 0., (char *)sLongArray, (char *)sLongArray + ind, NULL, NULL, NULL,
-        &sLongArgs[1]);
+        0., 0., 0., 0., sLongArray, &sLongArgs[1]);
       SendArgsBack(0);
       break;
 
     case GS_SetupFileSaving2:
-      rootInd = (int)strlen((char *)sLongArray) + 1;
-      nextInd = rootInd;
-      if (sLongArgs[2] & K2_COPY_GAIN_REF) {
-        nextInd += (int)strlen((char *)sLongArray + nextInd) + 1;
-        refName = (char *)sLongArray + nextInd;
-      }
-      if (sLongArgs[2] & K2_SAVE_DEFECTS) {
-        nextInd += (int)strlen((char *)sLongArray + nextInd) + 1;
-        defects = (char *)sLongArray + nextInd;
-      }
-      if (sLongArgs[2] & K2_RUN_COMMAND) {
-        nextInd += (int)strlen((char *)sLongArray + nextInd) + 1;
-        command = (char *)sLongArray + nextInd;
-      }
       gPlugInWrapper.SetupFileSaving(sLongArgs[1], sBoolArgs[0], sDoubleArgs[0], 
         sLongArgs[2], sDoubleArgs[1], sDoubleArgs[2], sDoubleArgs[3], sDoubleArgs[4], 
-        (char *)sLongArray, (char *)sLongArray + rootInd, refName, defects, command,
-        &sLongArgs[1]);
+        sLongArray, &sLongArgs[1]);
       SendArgsBack(0);
       break;
 
@@ -675,6 +657,11 @@ static int ProcessCommand(int numBytes)
 
     case GS_GetPluginVersion:
       sLongArgs[1] = gPlugInWrapper.GetPluginVersion();
+      SendArgsBack(0);
+      break;
+
+    case GS_GetLastError:
+      sLongArgs[1] = gPlugInWrapper.mLastRetVal;
       SendArgsBack(0);
       break;
 

@@ -9,7 +9,9 @@ enum {IMAGE_NOT_FOUND = 1, WRONG_DATA_TYPE, DM_CALL_EXCEPTION, NO_STACK_ID, STAC
 FILE_OPEN_ERROR, SEEK_ERROR, WRITE_DATA_ERROR, HEADER_ERROR, ROTBUF_MEMORY_ERROR, 
 DIR_ALREADY_EXISTS, DIR_CREATE_ERROR, DIR_NOT_EXIST, SAVEDIR_IS_FILE, DIR_NOT_WRITABLE,
 FILE_ALREADY_EXISTS, QUIT_DURING_SAVE, OPEN_DEFECTS_ERROR, WRITE_DEFECTS_ERROR, 
-THREAD_ERROR, EARLY_RET_WITH_SYNC, CONTINUOUS_ENDED};
+THREAD_ERROR, EARLY_RET_WITH_SYNC, CONTINUOUS_ENDED, BAD_SUM_LIST, BAD_ANTIALIAS_PARAM,
+CLIENT_SCRIPT_ERROR, GENERAL_SCRIPT_ERROR, GETTING_DEFECTS_ERROR,
+DS_CHANNEL_NOT_ACQUIRED};
 
 // Flags for SetupFileSaving
 #define K2_SAVE_RAW_PACKED       1
@@ -22,6 +24,11 @@ THREAD_ERROR, EARLY_RET_WITH_SYNC, CONTINUOUS_ENDED};
 #define K2_EARLY_RETURN    (1 << 7)
 #define K2_ASYNC_IN_RAM    (1 << 8)
 #define K2_SKIP_FRAME_ROTFLIP  (1 << 9)
+#define K2_SAVE_SUMMED_FRAMES  (1 << 10)
+
+// Flags for SetK2Parameters
+#define K2_ANTIALIAS_MASK    7
+#define K2_REDUCED_Y_SCALE  100000.
 
 // Continuous mode definitions
 #define QUALITY_BITS_SHIFT   3
@@ -40,6 +47,6 @@ enum {GS_ExecuteScript = 1, GS_SetDebugMode, GS_SetDMVersion, GS_SetCurrentCamer
       GS_AcquireDSImage, GS_ReturnDSChannel, GS_StopDSAcquisition, GS_CheckReferenceTime,
       GS_SetK2Parameters, GS_ChunkHandshake, GS_SetupFileSaving, GS_GetFileSaveResult,
       GS_SetupFileSaving2, GS_GetDefectList, GS_SetK2Parameters2, GS_StopContinuousCamera,
-      GS_GetPluginVersion};
+      GS_GetPluginVersion, GS_GetLastError};
 
 #endif

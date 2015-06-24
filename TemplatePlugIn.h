@@ -13,6 +13,7 @@
 #define K2_LINEAR_READ_MODE 0
 #define K2_COUNTING_READ_MODE 2
 #define K2_SUPERRES_READ_MODE 3
+#define OV_DIFFRACTION_MODE   1
 
 #define OLD_OPEN_SHUTTER_BROKEN    360
 #define OLD_SELECT_SHUTTER_BROKEN    360
@@ -26,7 +27,7 @@
 #define NEW_SELECT_SHUTTER_OK 371
 #define NEW_SETTLING_OK       371
 
-#define PLUGIN_VERSION    100
+#define PLUGIN_VERSION    101
 
 class PlugInWrapper
 {
@@ -44,8 +45,8 @@ public:
     double frameTime, BOOL alignFrames, BOOL saveFrames, long rotationFlip, long flags, 
     double dummy1, double dummy2, double dummy3, double dummy4, char *filter);
   void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, long flags,
-    double dummy1, double dummy2, double dummy3, double dummy4, char *dirName, 
-    char *rootName, char *refName, char *defects, char *command, long *error);
+    double dummy1, double dummy2, double dummy3, double dummy4, long *names,
+    long *error);
   void GetFileSaveResult(long *numSaved, long *error);
   int GetDefectList(short xyPairs[], long *arrSize, long *numPoints, 
     long *numTotal);
@@ -76,4 +77,5 @@ public:
 	void ErrorToResult(const char *strMessage, const char *strPrefix = NULL);
 	void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
   int GetDebugVal();
+  int mLastRetVal;
 };
