@@ -675,6 +675,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       // Make call to acquire image or start continuous acquires
       err = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
         divideBy2, 0, DEL_IMAGE, SAVE_FRAMES);
+      mTD.iAntialias = 0;
 
       // Then fetch the first continuous frame if that was OK
       if (!err && mTD.bDoContinuous) {
@@ -882,6 +883,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   //DebugToResult(m_strTemp);
   int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
     divideBy2, 0, DEL_IMAGE, saveFrames); 
+  mTD.iAntialias = 0;
 
   return retval;
 }
@@ -913,6 +915,7 @@ int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width,
     "Exit(retval)", binning);
   mTD.strCommand += m_strTemp;
   mTD.bDoContinuous = false;
+  mTD.iAntialias = 0;
   retval = AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0, transpose, 
     DEL_IMAGE, NO_SAVE);
   if (transpose & 256) {
@@ -3706,6 +3709,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
   float delayErrorFactor = 1.05f;
   double fullExpTime = *height * (*width * pixelTime + m_dFlyback + 
     (lineSync ? m_dSyncMargin : 0.)) / 1000.;
+  mTD.iAntialias = 0;
 
   // If continuing with continuous, 
   if (continuous < 0) {
@@ -3842,6 +3846,7 @@ int TemplatePlugIn::ReturnDSChannel(short array[], long *arrSize, long *width,
   if (m_iDSAcquired[channel] != CHAN_ACQUIRED)
     return DS_CHANNEL_NOT_ACQUIRED;
   mTD.strCommand.resize(0);
+  mTD.iAntialias = 0;
   if (!m_bContinuousDS) {
     sprintf(m_strTemp, "image imzero\n"
       "Number idzero = -1.\n"
