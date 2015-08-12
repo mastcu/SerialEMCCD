@@ -27,7 +27,6 @@
 #define NEW_SELECT_SHUTTER_OK 371
 #define NEW_SETTLING_OK       371
 
-#define PLUGIN_VERSION    101
 
 class PlugInWrapper
 {
@@ -35,7 +34,7 @@ public:
 	void SetNoDMSettling(long camera);
 	int SetShutterNormallyClosed(long camera, long shutter);
 	long GetDMVersion();
-  long GetPluginVersion() {return PLUGIN_VERSION;};
+  long GetPluginVersion() {return SEMCCD_PLUGIN_VERSION;};
 	int InsertCamera(long camera, BOOL state);
 	int IsCameraInserted(long camera);
 	int GetNumberOfCameras();
@@ -78,4 +77,5 @@ public:
 	void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
   int GetDebugVal();
   int mLastRetVal;
+  void FreeK2GainReference(long which);
 };

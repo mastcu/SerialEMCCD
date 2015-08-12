@@ -77,6 +77,7 @@ public:
   STDMETHOD(StopContinuousCamera)();
 	STDMETHOD(GetPluginVersion)(/*[out]*/long *version);
 	STDMETHOD(GetLastError)(/*[out]*/long *error);
+	STDMETHOD(FreeK2GainReference)(/*[in]*/long which);
 };
 
 #endif // !defined(AFX_DMCAMERA_H__05E3210A_0D63_47FB_AA3E_CABD30B8E8A4__INCLUDED_)

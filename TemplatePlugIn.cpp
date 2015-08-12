@@ -93,6 +93,12 @@ static int sJ;
 // Array for storing continuously acquired images to pass from thread to caller
 static short *sContinuousArray = NULL;
 
+// Static data about loaded gain refs that needs to be set by the threads
+static float *sK2GainRefData[2] = {NULL, NULL};
+static double sK2GainRefTime[2];
+static int sK2GainRefWidth[2];
+static int sK2GainRefHeight[2];
+
 #define DELETE_CONTINUOUS {delete [] sContinuousArray; sContinuousArray = NULL;}
 
 // Structure to hold data to pass to acquire proc/thread
@@ -162,6 +168,8 @@ struct ThreadData
   int iFinalBinning;
   int iFinalWidth;
   int iFinalHeight;
+  bool bGainNormSum;
+  float fGainNormScale;
   bool bSaveSummedFrames;
   vector<short> outSumFrameList;
   vector<short> numFramesInOutSum;
@@ -179,6 +187,8 @@ struct ThreadData
   int fileMode, outByteSize, byteSize;
   bool isInteger, isUnsignedInt, isFloat, signedBytes, save4bit;
   float writeScaling;
+  int refCopyReturnVal;
+  double curRefTime;
 };
 
 // Local functions callable from thread
@@ -208,6 +218,7 @@ static BOOL SleepMsg(DWORD dwTime_ms);
 static double ExecuteScript(char *strScript);
 static int RunContinuousAcquire(ThreadData *td);
 static void AntialiasReduction(ThreadData *td, void *array);
+static void GainNormalizeSum(ThreadData *td, void *array);
 
 // Declarations of global functions called from here
 void TerminateModuleUninitializeCOM();
@@ -268,6 +279,7 @@ public:
   int StopDSAcquisition();
   int StopContinuousCamera();
   void SetDebugMode(BOOL inVal) {sDebug = inVal;};
+  void FreeK2GainReference(long which);
   virtual void Start();
   virtual void Run();
   virtual void Cleanup();
@@ -309,6 +321,9 @@ TemplatePlugIn::TemplatePlugIn()
 
   sDataMutexHandle = CreateMutex(0, 0, 0);
   sImageMutexHandle = CreateMutex(0, 0, 0);
+#ifdef _WIN64
+  b3dSetStoreError(1);
+#endif
   m_HAcquireThread = NULL;
   m_iDMVersion = 340;
   m_iCurrentCamera = 0;
@@ -567,7 +582,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
               long divideBy2, long corrections)
 {
   int saveFrames = NO_SAVE;
-  int newProc, err, procIn, binAdj, heightAdj, widthAdj;
+  int newProc, err, procIn, binAdj, heightAdj, widthAdj, scaleAdj;
   bool swapXY = mTD.iRotationFlip > 0 && mTD.iRotationFlip % 2 && m_bDoseFrac;
   if (m_bSaveFrames && mTD.iReadMode >= 0 && m_bDoseFrac && mTD.strSaveDir.length() && 
     mTD.strRootName.length())
@@ -620,6 +635,17 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   if (!m_strQueue.empty()) {
     mTD.strCommand += m_strQueue;
     m_strQueue.resize(0);
+  }
+
+  // Gain normalize the return sum if flag is set and saving dark-subtracted counting or
+  // super-res frames, and there is a gain reference name set
+  mTD.bGainNormSum = (mTD.iSaveFlags & K2_GAIN_NORM_SUM) != 0 && saveFrames == SAVE_FRAMES
+    && newProc == NEWCM_DARK_SUBTRACTED && mTD.iReadMode > K2_LINEAR_READ_MODE && 
+    !mTD.strGainRefToCopy.empty();
+  if (mTD.bGainNormSum) {
+    scaleAdj = (divideBy2 ? 2 : 1) * B3DNINT(mTD.fFloatScaling / (divideBy2 ? 2 : 1));
+    mTD.fGainNormScale = (float)(mTD.fFloatScaling / scaleAdj);
+    mTD.fFloatScaling = (float)scaleAdj;
   }
 
   // single frame doesn't work in older GMS for async saving; but don't know about newer
@@ -676,6 +702,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       err = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
         divideBy2, 0, DEL_IMAGE, SAVE_FRAMES);
       mTD.iAntialias = 0;
+      mTD.bGainNormSum = false;
 
       // Then fetch the first continuous frame if that was OK
       if (!err && mTD.bDoContinuous) {
@@ -884,6 +911,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
     divideBy2, 0, DEL_IMAGE, saveFrames); 
   mTD.iAntialias = 0;
+  mTD.bGainNormSum = false;
 
   return retval;
 }
@@ -916,6 +944,7 @@ int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width,
   mTD.strCommand += m_strTemp;
   mTD.bDoContinuous = false;
   mTD.iAntialias = 0;
+  mTD.bGainNormSum = false;
   retval = AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0, transpose, 
     DEL_IMAGE, NO_SAVE);
   if (transpose & 256) {
@@ -1318,6 +1347,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         imageData = imageLp->get();   j++;
         ProcessImage(imageData, array, td->dataSize, td->width, td->height, divideBy2, 
           transpose, td->byteSize, td->isInteger, td->isUnsignedInt, td->fFloatScaling);
+        GainNormalizeSum(td, array);
         AntialiasReduction(td, array);
         delete imageLp;
         imageLp = NULL;
@@ -1429,6 +1459,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
                 ProcessImage(td->sumBuf, array, td->dataSize, td->width, td->height,
                   divideBy2, transpose, 4, !td->isFloat, false, scaleSave);
                 DebugToResult("Partial sum completed by thread\n");
+                GainNormalizeSum(td, array);
                 AntialiasReduction(td, array);
             }
             td->iNumSummed++;
@@ -1550,6 +1581,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     if (needSum && !td->bEarlyReturn) {
       ProcessImage(td->sumBuf, array, td->dataSize, td->width, td->height,
         divideBy2, transpose, 4, !td->isFloat, false, scaleSave);
+      GainNormalizeSum(td, array);
       AntialiasReduction(td, array);
     }
 
@@ -1619,6 +1651,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   return errorRet;
 }
 
+// Do antialias reduction if it is called for
 static void AntialiasReduction(ThreadData *td, void *array)
 {
 #ifdef _WIN64
@@ -1656,6 +1689,102 @@ static void AntialiasReduction(ThreadData *td, void *array)
   }
 #endif
 }
+
+// Gain normalize the return sum from a dark-subtracted dose frac shot
+static void GainNormalizeSum(ThreadData *td, void *array)
+{
+#ifdef _WIN64
+  int refInd = sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE ? 1 : 0;
+  int ind, error = 0;
+  int iVal;
+  short *sData = (short *)array;
+  unsigned short *usData = (unsigned short *)array;
+  float *refData;
+  string errStr;
+  ImodImageFile *iiFile = NULL;
+  if (!td->bGainNormSum)
+    return;
+  if (td->refCopyReturnVal) {
+    error = 1;
+    errStr = "there was a problem copying the gain reference";
+  } else {
+    if (!sK2GainRefData[refInd] || sK2GainRefTime[refInd] + 10. < td->curRefTime) {
+      iiFile = iiOpen(td->strGainRefToCopy.c_str(), "rb");
+      if (!iiFile) {
+        error = 2;
+        errStr = "the gain reference file could not be opened as an IMOD image file: " +
+          string(b3dGetError());
+      } else {
+        if (iiFile->nx != td->width || iiFile->ny != td->height) {
+          error = 3;
+        }
+      }
+
+      if (!error) {
+        try {
+          sK2GainRefData[refInd] = new float[td->width * td->height];
+          error = iiReadSection(iiFile, (char *)sK2GainRefData[refInd], 0);
+          if (error) {
+            sprintf(td->strTemp, "error %d occurred reading the gain reference file",
+              error);
+            errStr = td->strTemp;
+            error = 5;
+            delete sK2GainRefData[refInd];
+          } else {
+            sK2GainRefTime[refInd] = td->curRefTime;
+            sK2GainRefWidth[refInd] = td->width;
+            sK2GainRefHeight[refInd] = td->height;
+            sprintf(td->strTemp, "Loaded %s mode gain reference\n", 
+              refInd ? "super-res" : "counting");
+            DebugToResult(td->strTemp);
+          }
+        }
+        catch (...) {
+          error = 4;
+          errStr = "could not allocate memory for gain reference";
+        }
+        if (error)
+          sK2GainRefData[refInd] = NULL;
+      }
+    }
+  }
+
+  // Here, check that size matches for an existing reference
+  if (!error && (td->width != sK2GainRefWidth[refInd] || 
+    td->height != sK2GainRefHeight[refInd]))
+      error = 3;
+  if (error == 3) {
+    sprintf(td->strTemp, "gain reference size (%d x %d) is not the same as the "
+      "image size (%d x %d)", iiFile->nx, iiFile->ny, td->width, td->height);
+    errStr = td->strTemp;
+  }
+
+  // Normalize at last; no more errors
+  if (!error) {
+    refData = sK2GainRefData[refInd];
+    if (td->divideBy2) {
+      for (ind = 0; ind < td->width * td->height; ind++) {
+        iVal = (int)(sData[ind] * refData[ind] * td->fGainNormScale + 0.5);
+        sData[ind] = B3DMAX(-32768, B3DMIN(32767, iVal));
+      }
+    } else {
+      for (ind = 0; ind < td->width * td->height; ind++) {
+        iVal = (int)(usData[ind] * refData[ind] * td->fGainNormScale + 0.5);
+        usData[ind] = B3DMAX(0, B3DMIN(65535, iVal));
+      }
+    }
+  }
+
+  if (iiFile)
+    iiDelete(iiFile);
+  if (error) {
+    sprintf(td->strTemp, "Warning: The returned summed image could not be gain "
+      "normalized:\n%s\n", errStr.c_str());
+    ErrorToResult(td->strTemp, "\nA problem occurred acquiring an image for SerialEM:\n");
+  }
+#endif
+}
+
 
 //////////////////////////////////////////////////////////////////
 //  CONTINUOUS ACQUIRE ROUTINES
@@ -2211,7 +2340,7 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
     sReadModes[td->iReadMode] == K2_COUNTING_READ_MODE) && !td->isFloat && 
     td->iK2Processing != NEWCM_GAIN_NORMALIZED) &&
     (td->iSaveFlags & K2_COPY_GAIN_REF) && td->strGainRefToCopy.length())
-    CopyK2ReferenceIfNeeded(td);
+      td->refCopyReturnVal = CopyK2ReferenceIfNeeded(td);
   return 0;
 }
 
@@ -3060,6 +3189,7 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   char *prefix[2] = {"Count", "Super"};
   int ind, retVal = 0;
   bool needCopy = true, namesOK = false;
+  double maxCopySec = 0.;
   int prefInd = sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE ? 1 : 0;
 
   // For single image files, find the date-time root and split up the name
@@ -3081,6 +3211,8 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
     return 1;
   } 
   FindClose(hFindRef);
+  td->curRefTime = 429.4967296 * findRefData.ftCreationTime.dwHighDateTime + 
+        1.e-7 * findRefData.ftCreationTime.dwLowDateTime;
 
   // If there is an existing copy and the mode and the directory match, find the copy
   // Otherwise look for all matching files in directory
@@ -3094,7 +3226,7 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
     hFindCopy = FindFirstFile(td->strTemp, &findCopyData);
     //sprintf(td->strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefix[prefInd]);
   }
-  // DebugToResult(td->strTemp);
+  //DebugToResult(td->strTemp);
 
   // Test that file or all candidate files in the directory and stop if find one
   // is sufficiently newer then the ref
@@ -3106,13 +3238,12 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
       // but can lose precision but can come out earlier when comparing last write time,
       // although they are given current access times.  Copies on the SSD RAID are given 
       // the original write time but a current creation and access time
-      double refSec = 429.4967296 * findRefData.ftCreationTime.dwHighDateTime + 
-        1.e-7 * findRefData.ftCreationTime.dwLowDateTime;
       double copySec = 429.4967296 * findCopyData.ftCreationTime.dwHighDateTime + 
         1.e-7 * findCopyData.ftCreationTime.dwLowDateTime;
-      //sprintf(td->strTemp, "refSec  %f  copySec %f\n", refSec, copySec);
-      //DebugToResult(td->strTemp);
-      needCopy = refSec > copySec + 10.;
+      /*sprintf(td->strTemp, "refSec  %f  copySec %f\n", td->curRefTime, copySec);
+      DebugToResult(td->strTemp);*/
+      needCopy = td->curRefTime > copySec + 10.;
+      maxCopySec = B3DMAX(maxCopySec, copySec);
       if (!needCopy || !FindNextFile(hFindCopy, &findCopyData))
         break;
     }
@@ -3134,7 +3265,9 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   td->strLastRefName = td->strTemp;
 
   // Copy the reference
-  DebugToResult("Making new copy of gain reference\n");
+  sprintf(td->strTemp, "Making new copy of gain reference: refSec  %f  maxCopySec %f\n",
+    td->curRefTime, maxCopySec);
+  DebugToResult(td->strTemp);
   if (!CopyFile(td->strGainRefToCopy.c_str(), td->strTemp, false)) {
     sprintf(td->strTemp, "An error occurred copying %s to %s\n", 
       td->strGainRefToCopy.c_str(), td->strTemp);
@@ -3230,6 +3363,7 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
     m_bDoseFrac = false;
   }
   mTD.iAntialias = 0;
+  mTD.bGainNormSum = false;
 }
 
 /*
@@ -3710,6 +3844,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
   double fullExpTime = *height * (*width * pixelTime + m_dFlyback + 
     (lineSync ? m_dSyncMargin : 0.)) / 1000.;
   mTD.iAntialias = 0;
+  mTD.bGainNormSum = false;
 
   // If continuing with continuous, 
   if (continuous < 0) {
@@ -3847,6 +3982,7 @@ int TemplatePlugIn::ReturnDSChannel(short array[], long *arrSize, long *width,
     return DS_CHANNEL_NOT_ACQUIRED;
   mTD.strCommand.resize(0);
   mTD.iAntialias = 0;
+  mTD.bGainNormSum = false;
   if (!m_bContinuousDS) {
     sprintf(m_strTemp, "image imzero\n"
       "Number idzero = -1.\n"
@@ -3879,6 +4015,22 @@ int TemplatePlugIn::StopDSAcquisition()
   m_bContinuousDS = false;
   //mTD.dLastReturnTime = GetTickCount();
   return (retval == SCRIPT_ERROR_RETURN) ? GENERAL_SCRIPT_ERROR : 0;
+}
+
+// Remove one or both K2 gain references
+void TemplatePlugIn::FreeK2GainReference(long which)
+{
+  for (int ind = 0; ind < 2; ind++) {
+    if (which & (ind + 1)) {
+      if (sK2GainRefData[ind]) {
+        sprintf(m_strTemp, "Freed memory for %s mode gain reference\n", 
+          ind ? "super-res" : "counting");
+        DebugToResult(m_strTemp);
+        delete sK2GainRefData[ind];
+        sK2GainRefData[ind] = NULL;
+      }
+    }
+  }
 }
 
 // Global instances of the plugin and the wrapper class for calling into this file
@@ -4108,6 +4260,10 @@ void PlugInWrapper::DebugToResult(const char *strMessage, const char *strPrefix)
 int PlugInWrapper::GetDebugVal()
 {
   return gTemplatePlugIn.m_iDebugVal;
+}
+void PlugInWrapper::FreeK2GainReference(long which)
+{
+  gTemplatePlugIn.FreeK2GainReference(which);
 }
 
 // Dummy functions for 32-bit.

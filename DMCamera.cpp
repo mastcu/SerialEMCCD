@@ -207,6 +207,8 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 //      K2_ASYNC_IN_RAM    - Acquire stack in DM asynchronously into RAM
 //      K2_SKIP_FRAME_ROTFLIP - Save frames in native orientation, skipping rotation/flip
 //      K2_SAVE_SUMMED_FRAMES - Save variable-sized sums of frames
+//      K2_GAIN_NORM_SUM   - Normalize return sum from dark-subtracted counting or super-
+//                           res mode shot; requires K2_COPY_GAIN_REF and gain ref name
 //   numGrabSum is relevant when doing an early return; it should be set from an unsigned
 //      int with the number of frames to sum in the low 16 bits and, for GMS >= 2.3.1,
 //      the number of frames to grab into a local stack in the high 16 bits.  The local
@@ -299,6 +301,12 @@ STDMETHODIMP CDMCamera::GetPluginVersion(long *version)
 STDMETHODIMP CDMCamera::GetLastError(long *error)
 {
 	*error = gPlugInWrapper.mLastRetVal;
+	return S_OK;
+}
+
+STDMETHODIMP CDMCamera::FreeK2GainReference(long which)
+{
+  gPlugInWrapper.FreeK2GainReference(which);
 	return S_OK;
 }
 

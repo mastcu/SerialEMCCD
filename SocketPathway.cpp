@@ -101,6 +101,7 @@ static ArgDescriptor sFuncTable[] = {
   {GS_StopContinuousCamera, 0, 0, 0,   0, 0, 0,   FALSE},
   {GS_GetPluginVersion,     0, 0, 0,   1, 0, 0,   FALSE},
   {GS_GetLastError,         0, 0, 0,   1, 0, 0,   FALSE},
+  {GS_FreeK2GainReference,  1, 0, 0,   0, 0, 0,   FALSE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -662,6 +663,11 @@ static int ProcessCommand(int numBytes)
 
     case GS_GetLastError:
       sLongArgs[1] = gPlugInWrapper.mLastRetVal;
+      SendArgsBack(0);
+      break;
+
+    case GS_FreeK2GainReference:
+      gPlugInWrapper.FreeK2GainReference(sLongArgs[1]);
       SendArgsBack(0);
       break;
 

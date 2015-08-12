@@ -4,6 +4,8 @@
  */
 #ifndef SEMCCD_DEFINES_H
 
+#define SEMCCD_PLUGIN_VERSION    102
+
 // Error codes
 enum {IMAGE_NOT_FOUND = 1, WRONG_DATA_TYPE, DM_CALL_EXCEPTION, NO_STACK_ID, STACK_NOT_3D,
 FILE_OPEN_ERROR, SEEK_ERROR, WRITE_DATA_ERROR, HEADER_ERROR, ROTBUF_MEMORY_ERROR, 
@@ -25,6 +27,7 @@ DS_CHANNEL_NOT_ACQUIRED};
 #define K2_ASYNC_IN_RAM    (1 << 8)
 #define K2_SKIP_FRAME_ROTFLIP  (1 << 9)
 #define K2_SAVE_SUMMED_FRAMES  (1 << 10)
+#define K2_GAIN_NORM_SUM   (1 << 11)
 
 // Flags for SetK2Parameters
 #define K2_ANTIALIAS_MASK    7
@@ -47,6 +50,6 @@ enum {GS_ExecuteScript = 1, GS_SetDebugMode, GS_SetDMVersion, GS_SetCurrentCamer
       GS_AcquireDSImage, GS_ReturnDSChannel, GS_StopDSAcquisition, GS_CheckReferenceTime,
       GS_SetK2Parameters, GS_ChunkHandshake, GS_SetupFileSaving, GS_GetFileSaveResult,
       GS_SetupFileSaving2, GS_GetDefectList, GS_SetK2Parameters2, GS_StopContinuousCamera,
-      GS_GetPluginVersion, GS_GetLastError};
+      GS_GetPluginVersion, GS_GetLastError, GS_FreeK2GainReference};
 
 #endif

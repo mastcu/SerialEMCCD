@@ -47,6 +47,7 @@ import "ocidl.idl";
 	  [id(32), helpstring("method StopContinuousCamera")] HRESULT StopContinuousCamera();
 		[id(33), helpstring("method GetPluginVersion")] HRESULT GetPluginVersion([out]long *version);
 		[id(34), helpstring("method GetLastError")] HRESULT GetLastError([out]long *error);
+		[id(35), helpstring("method FreeK2GainReference")] HRESULT FreeK2GainReference([in]long which);
 
     // Add new functions at the end.  Be sure to build 32 and 64-bit versions before
     // trying to run through COM from 64-bit, since both proxy-stubs are needed
