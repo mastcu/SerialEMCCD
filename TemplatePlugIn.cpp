@@ -3268,9 +3268,9 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   sprintf(td->strTemp, "Making new copy of gain reference: refSec  %f  maxCopySec %f\n",
     td->curRefTime, maxCopySec);
   DebugToResult(td->strTemp);
-  if (!CopyFile(td->strGainRefToCopy.c_str(), td->strTemp, false)) {
+  if (!CopyFile(td->strGainRefToCopy.c_str(), td->strLastRefName.c_str(), false)) {
     sprintf(td->strTemp, "An error occurred copying %s to %s\n", 
-      td->strGainRefToCopy.c_str(), td->strTemp);
+      td->strGainRefToCopy.c_str(), td->strLastRefName.c_str());
     ErrorToResult(td->strTemp);
     td->strLastRefName = "";
     return 1;
@@ -3932,6 +3932,16 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
   // Acquisition and return commands
   if (!continuous) {
     //j = (int)((fullExpTime + m_iExtraDSdelay) * delayErrorFactor * 0.06 + 0.5);
+/*#if GMS_MAJOR_VERSION > 1 && GMS_SDK_VERSION >= 2
+    mTD.strCommand += "if (DSHasScanControl()) {\n"
+      "  number xDS, yDS\n"
+      "  DSGetBeamDSPosition( xDS, yDS )\n"
+      "  DSInvokeButton(7, 1)\n"
+      "  Result(\"enable Beam control, beam at \" + xDS + \",\" + yDS + \"\\n\")\n"
+      "} else {\n"
+      "  Result(\"No scan control before shot\\n\")\n"
+      "}\n";
+#endif*/
     if (m_iExtraDSdelay > 0) {
 
       // With this loop, it doesn't seem to need any delay at the end
@@ -3944,6 +3954,16 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
     } else {
       mTD.strCommand += "DSStartAcquisition(paramID, 0, 1)\n";
     }
+#if GMS_MAJOR_VERSION > 1 && GMS_SDK_VERSION >= 2
+    mTD.strCommand += "if (DSHasScanControl()) {\n"
+      /*"  number xDS, yDS\n"
+      "  DSGetBeamDSPosition( xDS, yDS )\n"
+      "  Result(\"Going to safe from beam at \" + xDS + \",\" + yDS + \"\\n\")\n"*/
+      "  DSSetBeamToSafePosition()\n"
+      /*"} else {\n"
+      "  Result(\"No scan control after shot\\n\")\n"*/
+      "}\n";
+#endif
     mTD.strCommand += "DSDeleteParameters(paramID)\n"
     "Exit(idfirst)\n";
 
