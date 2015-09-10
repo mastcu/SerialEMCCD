@@ -164,17 +164,20 @@ STDMETHODIMP CDMCamera::SetK2Parameters(long readMode, double scaling, long hard
 
 // This new version was added to set rotation/flip for dose fractionation shots that
 // are NOT saving frames, so that DM can be kept from doing the operation for GMS >= 2.3.1
-//   flags are as defined in TemplatePlugin.h:
+//   flags are as defined in SEMCCDDefines.h:
 //     the first three bits have an antialias filter type + 1 for antialias reduction
 //         In this case reducedSizes must have the size to be reduced to as the
 //         width plus height * K2_REDUCED_Y_SCALE
+//     K2_OVW_MAKE_SUBAREA  - Make a subarea from a full-frame image.  In this case 
+//         must have the full unbinned size of the camera as width plus 
+//         height * K2_REDUCED_Y_SCALE
 STDMETHODIMP CDMCamera::SetK2Parameters2(long readMode, double scaling, long hardwareProc,
   BOOL doseFrac, double frameTime, BOOL alignFrames, BOOL saveFrames, long rotationFlip,
-  long flags, double reducedSizes, double dummy2, double dummy3, double dummy4, 
+  long flags, double reducedSizes, double fullSizes, double dummy3, double dummy4, 
   long filtSize, long filter[])
 {
 	gPlugInWrapper.SetK2Parameters(readMode, scaling, hardwareProc, doseFrac, frameTime,
-    alignFrames, saveFrames, rotationFlip, flags, reducedSizes, dummy2, dummy3, dummy4, 
+    alignFrames, saveFrames, rotationFlip, flags, reducedSizes, fullSizes, dummy3, dummy4, 
     (char *)filter);
 	return S_OK;
 }
@@ -195,7 +198,7 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 //      DM from doing rotation/flip for GMS >= 2.3.1
 //   filePerImage is a flag for one file per image
 //   pixelSize should be in Angstroms
-//   flags are as defined in TemplatePlugin.h:
+//   flags are as defined in SEMCCDDefines.h:
 //      K2_SAVE_RAW_PACKED - save non-normalized frames as 4/8 bit for super-res/counting
 //      K2_COPY_GAIN_REF   - Copy gain reference as needed if saving non-normalized frames
 //      K2_RUN_COMMAND     - Not suppported yet

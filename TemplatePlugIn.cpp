@@ -168,9 +168,12 @@ struct ThreadData
   int iFinalBinning;
   int iFinalWidth;
   int iFinalHeight;
+  int iFullSizeX;
+  int iFullSizeY;
   bool bGainNormSum;
   float fGainNormScale;
   bool bSaveSummedFrames;
+  bool bMakeSubarea;
   vector<short> outSumFrameList;
   vector<short> numFramesInOutSum;
   int outSumFrameIndex;
@@ -217,8 +220,23 @@ static void ErrorToResult(const char *strMessage, const char *strPrefix = NULL);
 static BOOL SleepMsg(DWORD dwTime_ms);
 static double ExecuteScript(char *strScript);
 static int RunContinuousAcquire(ThreadData *td);
-static void AntialiasReduction(ThreadData *td, void *array);
+static void SubareaAndAntialiasReduction(ThreadData *td, void *array);
 static void GainNormalizeSum(ThreadData *td, void *array);
+static void ExtractSubarea(ThreadData *td, void *inArray, int iTop, int iLeft, 
+  int iBottom, int iRight, void *outArray, long &width, long &height);
+/* These would be needed if continuous acquire needs to and can cancel rotationFlip when
+  making a subarea
+static void CorDefMirrorCoords(int size, int binning, int &start, int &end);
+static void CorDefUserToRotFlipCCD(int operation, int binning, int &camSizeX, 
+  int &camSizeY, int &imSizeX, int &imSizeY, int &top, int &left, int &bottom,int &right);
+static void CorDefRotFlipCCDtoUser(int operation, int binning, int &camSizeX,
+  int &camSizeY, int &imSizeX, int &imSizeY, int &top, int &left, int &bottom,int &right);
+static void CorDefRotateCoordsCW(int binning, int &camSizeX, int &camSizeY, int &imSizeX,
+                          int &imSizeY, int &top, int &left, int &bottom, int &right);
+static void CorDefRotateCoordsCCW(int binning, int &camSizeX, int &camSizeY, int &imSizeX,
+                           int &imSizeY, int &top, int &left, int &bottom, int &right);
+static void CorDefRotFlipCCDcoord(int operation, int camSizeX, int camSizeY, int &xx, 
+  int &yy);*/
 
 // Declarations of global functions called from here
 void TerminateModuleUninitializeCOM();
@@ -280,6 +298,8 @@ public:
   int StopContinuousCamera();
   void SetDebugMode(BOOL inVal) {sDebug = inVal;};
   void FreeK2GainReference(long which);
+  void ClearSpecialFlags() {mTD.iAntialias = 0; mTD.bGainNormSum = false;
+    mTD.bMakeSubarea = false;};
   virtual void Start();
   virtual void Run();
   virtual void Cleanup();
@@ -684,6 +704,11 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   } else
     mTD.iAntialias = 0;
 
+  if (mTD.bMakeSubarea) {
+    mTD.iFullSizeX = (mTD.iFullSizeX + binning - 1) / binning;
+    mTD.iFullSizeY = (mTD.iFullSizeY + binning - 1) / binning;
+  }
+
   // Intercept K2 asynchronous saving and continuous mode here
   mTD.iTop = top;
   mTD.iBottom = bottom;
@@ -701,8 +726,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       // Make call to acquire image or start continuous acquires
       err = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
         divideBy2, 0, DEL_IMAGE, SAVE_FRAMES);
-      mTD.iAntialias = 0;
-      mTD.bGainNormSum = false;
+      ClearSpecialFlags();
 
       // Then fetch the first continuous frame if that was OK
       if (!err && mTD.bDoContinuous) {
@@ -717,7 +741,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     sprintf(m_strTemp, "Object acqParams = CM_CreateAcquisitionParameters_FullCCD"
       "(camera, %d, %g, %d, %d)\n", newProc, exposure, binning, binning);
     mTD.strCommand += m_strTemp;
-    if (!m_bDoseFrac) {
+    if (!m_bDoseFrac && !mTD.bMakeSubarea) {
       sprintf(m_strTemp, "CM_SetBinnedReadArea(camera, acqParams, %d, %d, %d, %d)\n",
        top, left, bottom, right);
       mTD.strCommand += m_strTemp;
@@ -817,9 +841,11 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     mTD.strCommand += m_strTemp;
   }
 
-  // A read mode of -2 means set mode 1 for diffraction
-  if (mTD.iReadMode == -2)
-    mTD.strCommand += "CM_SetReadMode(acqParams, 1)\n";
+  // A read mode of -3 or -2 means set mode 0 for regular or 1 for diffraction
+  if (mTD.iReadMode == -2 || mTD.iReadMode == -3) {
+    sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n", 3 + mTD.iReadMode);
+    mTD.strCommand += m_strTemp;
+  }
   
   // Open shutter if a delay is set
   if (shutterDelay) {
@@ -910,8 +936,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   //DebugToResult(m_strTemp);
   int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
     divideBy2, 0, DEL_IMAGE, saveFrames); 
-  mTD.iAntialias = 0;
-  mTD.bGainNormSum = false;
+  ClearSpecialFlags();
 
   return retval;
 }
@@ -943,8 +968,7 @@ int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width,
     "Exit(retval)", binning);
   mTD.strCommand += m_strTemp;
   mTD.bDoContinuous = false;
-  mTD.iAntialias = 0;
-  mTD.bGainNormSum = false;
+  ClearSpecialFlags();
   retval = AcquireAndTransferImage((void *)array, 4, arrSize, width, height, 0, transpose, 
     DEL_IMAGE, NO_SAVE);
   if (transpose & 256) {
@@ -1043,8 +1067,10 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       retval = WaitForAcquireThread(mTD.bEarlyReturn ? WAIT_FOR_RETURN : WAIT_FOR_THREAD);
       mTD.iErrorFromSave = mTDcopy.iErrorFromSave;
       mTD.iFramesSaved = mTDcopy.iFramesSaved;
-      retWidth = mTDcopy.iAntialias ? retTD->iFinalWidth : retTD->width;
-      retHeight = mTDcopy.iAntialias ? retTD->iFinalHeight : retTD->height;
+      retWidth = (mTDcopy.iAntialias || mTDcopy.bMakeSubarea) ? 
+        retTD->iFinalWidth : retTD->width;
+      retHeight = (mTDcopy.iAntialias || mTDcopy.bMakeSubarea) ? 
+        retTD->iFinalHeight : retTD->height;
       sprintf(m_strTemp, "Back from thread, retval %d errfs %d  #saved %d w %d h %d\n",
         retval, mTD.iErrorFromSave, mTD.iFramesSaved, retWidth, retHeight);
       DebugToResult(m_strTemp);
@@ -1052,8 +1078,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         retTD->arrSize = retWidth * retHeight;
   } else if (!retval) {
     retval = AcquireProc(&mTD);
-    retWidth = mTD.iAntialias ? mTD.iFinalWidth : mTD.width;
-    retHeight = mTD.iAntialias ? mTD.iFinalHeight : mTD.height;
+    retWidth = (mTD.iAntialias || mTD.bMakeSubarea) ? mTD.iFinalWidth : mTD.width;
+    retHeight = (mTD.iAntialias || mTD.bMakeSubarea) ? mTD.iFinalHeight : mTD.height;
     /*sprintf(m_strTemp, "Back from call, retval %d w %d h %d  arrsize %d\n",
         retval, retWidth, retHeight, mTD.arrSize);
     DebugToResult(m_strTemp);*/
@@ -1062,7 +1088,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   *height = retHeight;
   if (!retval && !retTD->arrSize)
     *arrSize = B3DMIN(1024, sizeOrig);
-  else if (!retval && retTD->iAntialias)
+  else if (!retval && (retTD->iAntialias || retTD->bMakeSubarea))
     *arrSize = retWidth * retHeight;
   else
     *arrSize = retTD->arrSize;
@@ -1174,11 +1200,16 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   td->outSumFrameIndex = 0;
   td->numOutSumsDoneAtIndex = 0;
 
-  // Get array for unbinned image with antialias reduction
-  if (td->iAntialias) {
+  // Get array for unbinned image with antialias reduction, or for subarea
+  if (td->iAntialias || td->bMakeSubarea) {
     try {
-      i = sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE ? 4 : 1;
-      outLimit = (td->iRight - td->iLeft) * (td->iBottom - td->iTop) * i;
+      i = 1;
+      if (td->iReadMode >= 0)
+        i = sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE ? 4 : 1;
+      if (td->bMakeSubarea)
+        outLimit = td->iFullSizeX * td->iFullSizeY * i;
+      else
+        outLimit = (td->iRight - td->iLeft) * (td->iBottom - td->iTop) * i;
       unbinnedArray = new short[outLimit];
       array = unbinnedArray;
     }
@@ -1348,7 +1379,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         ProcessImage(imageData, array, td->dataSize, td->width, td->height, divideBy2, 
           transpose, td->byteSize, td->isInteger, td->isUnsignedInt, td->fFloatScaling);
         GainNormalizeSum(td, array);
-        AntialiasReduction(td, array);
+        SubareaAndAntialiasReduction(td, array);
         delete imageLp;
         imageLp = NULL;
 
@@ -1460,7 +1491,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
                   divideBy2, transpose, 4, !td->isFloat, false, scaleSave);
                 DebugToResult("Partial sum completed by thread\n");
                 GainNormalizeSum(td, array);
-                AntialiasReduction(td, array);
+                SubareaAndAntialiasReduction(td, array);
             }
             td->iNumSummed++;
             if (exposureDone && !td->iReadyToReturn && 
@@ -1582,7 +1613,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       ProcessImage(td->sumBuf, array, td->dataSize, td->width, td->height,
         divideBy2, transpose, 4, !td->isFloat, false, scaleSave);
       GainNormalizeSum(td, array);
-      AntialiasReduction(td, array);
+      SubareaAndAntialiasReduction(td, array);
     }
 
 #ifdef _WIN64
@@ -1643,8 +1674,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 #endif
 
   delete unbinnedArray;
-  td->arrSize = td->iAntialias ? td->iFinalWidth * td->iFinalHeight :
-    td->width * td->height;
+  td->arrSize = (td->iAntialias || td->bMakeSubarea) ? 
+    td->iFinalWidth * td->iFinalHeight : td->width * td->height;
   sprintf(td->strTemp, "Leaving thread with return value %d arrSize %d\n", errorRet, 
     td->arrSize); 
   DebugToResult(td->strTemp);
@@ -1652,8 +1683,17 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 }
 
 // Do antialias reduction if it is called for
-static void AntialiasReduction(ThreadData *td, void *array)
+static void SubareaAndAntialiasReduction(ThreadData *td, void *array)
 {
+  long width = td->width;
+  long height = td->height;
+  if (td->bMakeSubarea) {
+    ExtractSubarea(td, array, td->iTop, td->iLeft, td->iBottom, td->iRight, 
+      (short *)(td->iAntialias ? array : td->array), width, height);
+    sprintf(td->strTemp, "Subarea extraction from %d x %d to %d x %d\n",
+      td->width, td->height, width, height);
+    DebugToResult(td->strTemp);
+  }
 #ifdef _WIN64
   int error, i, xStart, yStart, nxr, nyr;
   int type = td->divideBy2 ? SLICE_MODE_SHORT : SLICE_MODE_USHORT;
@@ -1661,18 +1701,18 @@ static void AntialiasReduction(ThreadData *td, void *array)
     return;
   double filtScale = 1. / td->iFinalBinning;
   sprintf(td->strTemp, "AntialiasReduction from %d x %d bin %d to %d x %d\n",
-    td->width, td->height, td->iFinalBinning, td->iFinalWidth, td->iFinalHeight);
+    width, height, td->iFinalBinning, td->iFinalWidth, td->iFinalHeight);
   DebugToResult(td->strTemp);
-  unsigned char **linePtrs = makeLinePointers(array, td->width, td->height, 2);
+  unsigned char **linePtrs = makeLinePointers(array, width, height, 2);
 
   // Set the offset to center a subset, get filter, and do it
-  float axoff = (float)(B3DMAX(0, td->width - td->iFinalWidth * td->iFinalBinning) / 2.);
-  float ayoff = (float)(B3DMAX(0, td->height - td->iFinalHeight * td->iFinalBinning) /2.);
+  float axoff = (float)(B3DMAX(0, width - td->iFinalWidth * td->iFinalBinning) / 2.);
+  float ayoff = (float)(B3DMAX(0, height - td->iFinalHeight * td->iFinalBinning) /2.);
   int filterType = B3DMIN(6, td->iAntialias) - 1;
   error = selectZoomFilter(filterType, filtScale, &i);
   if (!error && linePtrs) {
     setZoomValueScaling((float)(td->iFinalBinning * td->iFinalBinning));
-    error = zoomWithFilter(linePtrs, td->width, td->height, axoff, ayoff, 
+    error = zoomWithFilter(linePtrs, width, height, axoff, ayoff, 
       td->iFinalWidth, td->iFinalHeight, td->iFinalWidth, 0, type,
       td->array, NULL, NULL);
   }
@@ -1682,12 +1722,33 @@ static void AntialiasReduction(ThreadData *td, void *array)
   if (error) {
     xStart = B3DNINT(axoff);
     yStart = B3DNINT(ayoff);
-    extractWithBinning(array, type, td->width, xStart, td->width - xStart - 1, yStart,
-      td->height - yStart - 1, td->iFinalBinning, td->array, 0, &nxr, &nyr);
+    extractWithBinning(array, type, width, xStart, width - xStart - 1, yStart,
+      height - yStart - 1, td->iFinalBinning, td->array, 0, &nxr, &nyr);
     ErrorToResult("Warning: an error occurred in antialias reduction, binning was used "
       "instead\n", "\nA problem occurred acquiring an image for SerialEM:\n");
   }
 #endif
+}
+
+// Simple routine to extract subarea and adjust the passed width and height values
+static void ExtractSubarea(ThreadData *td, void *inArray, int iTop, int iLeft, 
+  int iBottom, int iRight, void *outArray, long &width, long &height)
+{
+  int ix, iy;
+  int bottom = B3DMIN(iBottom, height);
+  int right = B3DMIN(iRight, width);
+  short *outArr = (short *)outArray;
+  for (iy = iTop; iy < bottom; iy++) {
+    short *line = ((short *)inArray) + iy * width;
+    for (ix = iLeft; ix < right; ix++)
+      *outArr++ = line[ix];
+  }
+  width = right - iLeft;
+  height = bottom - iTop;
+  if (!td->iAntialias) {
+    td->iFinalWidth = width;
+    td->iFinalHeight = height;
+  }
 }
 
 // Gain normalize the return sum from a dark-subtracted dose frac shot
@@ -1804,6 +1865,8 @@ static int RunContinuousAcquire(ThreadData *td)
   bool startedAcquire = false, madeImage = false;
   int outLimit = td->arrSize;
   int j, transpose, nxout, nyout, maxTime = 0, retval = 0, rotationFlip = 0;
+  int tleft, ttop, tbot, tright;
+  //int tsizeX, tsizeY, tfullX, tfullY;
   double delay;
   short *procOutArray = sContinuousArray;
   DM::Image image;
@@ -1828,6 +1891,14 @@ static int RunContinuousAcquire(ThreadData *td)
   void *imageData;
   td->arrSize = 0;
 
+  // Get modified sizes and temp array size for subarea
+  if (td->bMakeSubarea) {
+    outLimit = td->iFullSizeX * td->iFullSizeY;
+    if (K2type && td->iReadMode >= 0 && sReadModes[td->iReadMode] == 
+      K2_SUPERRES_READ_MODE)
+      outLimit *= 4;
+  }
+
   try {
 
     // Set up the acquisition parameters
@@ -1837,7 +1908,9 @@ static int RunContinuousAcquire(ThreadData *td)
     acqParams = CM::CreateAcquisitionParameters_FullCCD(
       camera, (CM::AcquisitionProcessing)td->iK2Processing, 
       td->dK2Exposure + (K2type ? 0.001 : 0.), td->iK2Binning,  td->iK2Binning); j++;
-    CM::SetBinnedReadArea(camera, acqParams, td->iTop, td->iLeft, td->iBottom,td->iRight);
+    if (!td->bMakeSubarea)
+      CM::SetBinnedReadArea(camera, acqParams, td->iTop, td->iLeft, td->iBottom,
+        td->iRight);
     j++;
     CM::SetSettling(acqParams, td->dK2Settling);  j++;
     CM::SetShutterIndex(acqParams, td->iK2Shutter);  j++;
@@ -1846,26 +1919,42 @@ static int RunContinuousAcquire(ThreadData *td)
     j++;
     CM::SetDoContinuousReadout(acqParams, td->bSetContinuousMode); j++;
 
-    // Find out if there is a transpose; cancel it and set up for rotation/flip
-    dfltTrans2d = CM::Config_GetDefaultTranspose(camera); j++;
+    transpose = 0;
+
+    // Switch to this test if some other camera needs to have subareas made and can cancel
+    // the rotationFlip
+    //if (td->iReadMode != -2 && td->iReadMode != -3) {
+    if (!td->bMakeSubarea) {
+
+      // Find out if there is a transpose; cancel it and set up for rotation/flip
+      dfltTrans2d = CM::Config_GetDefaultTranspose(camera); j++;
 #ifdef GMS2
-    transpose = dfltTrans2d.ToBits();
+      transpose = dfltTrans2d.ToBits();
 #else
-    transpose = (int)dfltTrans2d;
+      transpose = (int)dfltTrans2d;
 #endif
-    if (transpose) {
-      
-      // The inverse is the same except for 257/258, which are inverses of each other
-      if ((transpose + 1) / 2 == 129)
-        transpose = 515 - transpose;
+      if (transpose) {
 
-      // Set the inverse transpose and look up needed rotation/flip
-      CM::SetTotalTranspose(camera, acqParams, zeroTrans2d);
-      //CM::SetAcqTranspose(acqParams, zeroTrans2d);
-      for (rotationFlip = 0; rotationFlip < 8; rotationFlip++)
-        if (sInverseTranspose[rotationFlip] == transpose)
-          break;
+        // The inverse is the same except for 257/258, which are inverses of each other
+        if ((transpose + 1) / 2 == 129)
+          transpose = 515 - transpose;
 
+        // Set the inverse transpose and look up needed rotation/flip
+        CM::SetTotalTranspose(camera, acqParams, zeroTrans2d);
+        //CM::SetAcqTranspose(acqParams, zeroTrans2d);
+        for (rotationFlip = 0; rotationFlip < 8; rotationFlip++)
+          if (sInverseTranspose[rotationFlip] == transpose)
+            break;
+
+      }
+      sprintf(td->strTemp, "Default transpose %d  rotationFlip %d\n", 
+        transpose, rotationFlip);
+      DebugToResult(td->strTemp);
+      j++;
+    }
+
+
+    if (transpose || td->bMakeSubarea) {
       try {
         procOutArray = new short[outLimit];
       }
@@ -1874,10 +1963,6 @@ static int RunContinuousAcquire(ThreadData *td)
         return ROTBUF_MEMORY_ERROR;
       }
     }
-    sprintf(td->strTemp, "Default transpose %d  rotationFlip %d\n", 
-      transpose, rotationFlip);
-    DebugToResult(td->strTemp);
-    j++;
 
     // Subtract 1 here; they are numbered from 0 in the script call
     if (td->iContinuousQuality > 0)
@@ -1900,9 +1985,9 @@ static int RunContinuousAcquire(ThreadData *td)
 #endif
     }
 
-    // Set diffraction mode for OneView
-    if (td->iReadMode == -2)
-      CM::SetReadMode(acqParams, 1);
+    // Set read mode for OneView
+    if (td->iReadMode == -2 || td->iReadMode == -3)
+      CM::SetReadMode(acqParams, td->iReadMode + 3);
 
     // Get the DM image for this acquisition
     j = 13;
@@ -1960,6 +2045,24 @@ static int RunContinuousAcquire(ThreadData *td)
         td->fFloatScaling); sJ++;
       delete imageLp; sJ++;
       imageLp = NULL; sJ++;
+
+      if (td->bMakeSubarea) {
+        tright = td->iRight;
+        tleft = td->iLeft;
+        ttop = td->iTop;
+        tbot = td->iBottom;
+        /* This would be needed if rotation/Flip needed to be done for a subarea
+        if (rotationFlip) {
+          tfullX = td->iFullSizeX;
+          tfullY = td->iFullSizeY;
+          tsizeX = tright - tleft;
+          tsizeY = tbot - ttop;
+          CorDefUserToRotFlipCCD(rotationFlip, 1, tfullX, tfullY, tsizeX, tsizeY, ttop,
+            tleft, tbot, tright);
+        } */
+        ExtractSubarea(td, procOutArray, ttop, tleft, tbot, tright,  
+          rotationFlip ? procOutArray : sContinuousArray, td->width, td->height);
+      }
       if (rotationFlip) {
         WaitForSingleObject(sImageMutexHandle, IMAGE_MUTEX_WAIT);
         sJ++;
@@ -2018,6 +2121,8 @@ static int RunContinuousAcquire(ThreadData *td)
   // Shut down and clean up
   DebugToResult(retval == WRONG_DATA_TYPE ? "Ending thread due to wrong data type\n" :
     "Ending thread due to end or quit or exception\n");
+  if (transpose || td->bMakeSubarea)
+    delete [] procOutArray;
   try {
     if (madeImage)
       DM::DeleteImage(image.get());
@@ -3362,8 +3467,7 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
     m_bSaveFrames = false;
     m_bDoseFrac = false;
   }
-  mTD.iAntialias = 0;
-  mTD.bGainNormSum = false;
+  ClearSpecialFlags();
 }
 
 /*
@@ -3372,7 +3476,7 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
 void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwareProc, 
                                      BOOL doseFrac, double frameTime, BOOL alignFrames, 
                                      BOOL saveFrames, long rotationFlip, long flags, 
-                                     double reducedSizes, double dummy2, double dummy3, 
+                                     double reducedSizes, double fullSizes, double dummy3, 
                                      double dummy4, char *filter)
 {
   SetReadMode(mode, scaling);
@@ -3392,6 +3496,11 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
   if (mTD.iAntialias) {
     mTD.iFinalHeight = B3DNINT(reducedSizes / K2_REDUCED_Y_SCALE);
     mTD.iFinalWidth = B3DNINT(reducedSizes - K2_REDUCED_Y_SCALE * mTD.iFinalHeight);
+  }
+  mTD.bMakeSubarea = (flags & K2_OVW_MAKE_SUBAREA) && fullSizes > 0.;
+  if (mTD.bMakeSubarea) {
+    mTD.iFullSizeX = B3DNINT(fullSizes / K2_REDUCED_Y_SCALE);
+    mTD.iFullSizeY = B3DNINT(fullSizes - K2_REDUCED_Y_SCALE * mTD.iFullSizeX);
   }
   sprintf(m_strTemp, "SetK2Parameters called with save %s\n", m_bSaveFrames ? "Y":"N");
   DebugToResult(m_strTemp);
@@ -3843,8 +3952,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
   float delayErrorFactor = 1.05f;
   double fullExpTime = *height * (*width * pixelTime + m_dFlyback + 
     (lineSync ? m_dSyncMargin : 0.)) / 1000.;
-  mTD.iAntialias = 0;
-  mTD.bGainNormSum = false;
+  ClearSpecialFlags();
 
   // If continuing with continuous, 
   if (continuous < 0) {
@@ -3954,16 +4062,16 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
     } else {
       mTD.strCommand += "DSStartAcquisition(paramID, 0, 1)\n";
     }
-#if GMS_MAJOR_VERSION > 1 && GMS_SDK_VERSION >= 2
-    mTD.strCommand += "if (DSHasScanControl()) {\n"
-      /*"  number xDS, yDS\n"
-      "  DSGetBeamDSPosition( xDS, yDS )\n"
-      "  Result(\"Going to safe from beam at \" + xDS + \",\" + yDS + \"\\n\")\n"*/
-      "  DSSetBeamToSafePosition()\n"
-      /*"} else {\n"
-      "  Result(\"No scan control after shot\\n\")\n"*/
-      "}\n";
-#endif
+    if (m_iDMVersion >= 40200) {
+      mTD.strCommand += "if (DSHasScanControl()) {\n"
+        /*"  number xDS, yDS\n"
+        "  DSGetBeamDSPosition( xDS, yDS )\n"
+        "  Result(\"Going to safe from beam at \" + xDS + \",\" + yDS + \"\\n\")\n"*/
+        "  DSSetBeamToSafePosition()\n"
+        /*"} else {\n"
+        "  Result(\"No scan control after shot\\n\")\n"*/
+        "}\n";
+    }
     mTD.strCommand += "DSDeleteParameters(paramID)\n"
     "Exit(idfirst)\n";
 
@@ -4001,8 +4109,7 @@ int TemplatePlugIn::ReturnDSChannel(short array[], long *arrSize, long *width,
   if (m_iDSAcquired[channel] != CHAN_ACQUIRED)
     return DS_CHANNEL_NOT_ACQUIRED;
   mTD.strCommand.resize(0);
-  mTD.iAntialias = 0;
-  mTD.bGainNormSum = false;
+  ClearSpecialFlags();
   if (!m_bContinuousDS) {
     sprintf(m_strTemp, "image imzero\n"
       "Number idzero = -1.\n"

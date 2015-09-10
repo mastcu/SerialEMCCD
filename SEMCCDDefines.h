@@ -4,7 +4,7 @@
  */
 #ifndef SEMCCD_DEFINES_H
 
-#define SEMCCD_PLUGIN_VERSION    103
+#define SEMCCD_PLUGIN_VERSION    104
 
 // Error codes
 enum {IMAGE_NOT_FOUND = 1, WRONG_DATA_TYPE, DM_CALL_EXCEPTION, NO_STACK_ID, STACK_NOT_3D,
@@ -31,6 +31,7 @@ DS_CHANNEL_NOT_ACQUIRED};
 
 // Flags for SetK2Parameters
 #define K2_ANTIALIAS_MASK    7
+#define K2_OVW_MAKE_SUBAREA (1 << 3)
 #define K2_REDUCED_Y_SCALE  100000.
 
 // Continuous mode definitions
