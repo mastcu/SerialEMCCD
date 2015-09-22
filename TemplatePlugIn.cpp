@@ -2337,14 +2337,16 @@ static int GetTypeAndSizeInfo(ThreadData *td, DM::Image &image, int loop,  int o
 static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum, 
                             long &frameDivide, bool &needProc)
 {
+  bool isSuperRes = sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE;
+  bool isCounting = sReadModes[td->iReadMode] == K2_COUNTING_READ_MODE;
   // Float super-res image is from software processing and needs special scaling
   // into bytes, set divide -1 as flag for this
-  if (sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE && td->isFloat)
+  if (isSuperRes && td->isFloat)
     frameDivide = -1;
 
   // But if they are counting mode images in integer, they need to not be scaled
   // or divided by 2 if placed into shorts, and they may be packed to bytes
-  if (sReadModes[td->iReadMode] == K2_COUNTING_READ_MODE && td->isInteger) {
+  if (isCounting && td->isInteger) {
     td->fFloatScaling = 1.;
     frameDivide = 0;
     if(td->iSaveFlags & K2_SAVE_RAW_PACKED)
@@ -2353,8 +2355,7 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
 
   // For 2.3.1 simulator (so far) super-res nonGN frames come through as shorts
   // so they need to be truncated to bytes also
-  if (sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE && td->isInteger && 
-    td->byteSize == 2) {
+  if (isSuperRes && td->isInteger && td->byteSize == 2) {
       td->fFloatScaling = 1.;
       frameDivide = -2;
   }
@@ -2368,7 +2369,8 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
     td->fileMode = MRC_MODE_SHORT;
   else
     td->fileMode = MRC_MODE_USHORT;
-  td->save4bit = sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE && td->byteSize <= 2
+  td->save4bit = ((isSuperRes && td->byteSize <= 2) || 
+    (isCounting && td->isInteger && (td->iSaveFlags & K2_RAW_COUNTING_4BIT)))
     && (td->iSaveFlags & K2_SAVE_RAW_PACKED);
   needProc = td->byteSize > 2 || td->signedBytes || frameDivide < 0;
 
@@ -2460,6 +2462,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
   float tmean;
   int i, j, tsum, val;
   int nxFile = td->save4bit ? nxout / 2 : nxout;
+  int use4bitMode = (td->save4bit && (td->iSaveFlags & K2_SAVE_4BIT_MRC_MODE)) ? 1 : 0;
   short *sData, *sSum;
   unsigned short *usData, *usSum;
   unsigned char *bData, *packed;
@@ -2565,17 +2568,23 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
       return 1;
     }
 
-    // Set up header for one slice
-    if (!td->bWriteTiff) {
-      mrc_head_new(&td->hdata, nxFile, nyout, 1, td->fileMode);
+    // Set up title/description line
+    if (td->save4bit)
+      sprintf(td->strTemp, "SerialEMCCD: Dose frac. image, 4 bits packed  r/f %d",
+        td->iFrameRotFlip);
+    else
       sprintf(td->strTemp, "SerialEMCCD: Dose frac. image, scaled by %.2f  r/f %d", 
         td->writeScaling, td->iFrameRotFlip);
-      if (td->save4bit) {
-        sprintf(td->strTemp, "SerialEMCCD: Dose frac. image, 4 bits packed  r/f %d",
-          td->iFrameRotFlip);
+
+    // Set up header for one slice
+    if (!td->bWriteTiff) {
+      set4BitOutputMode(use4bitMode);
+      mrc_head_new(&td->hdata, use4bitMode ? nxout : nxFile, nyout, 1, td->fileMode);
+      if (td->save4bit && !use4bitMode)
         td->hdata.imodFlags |= MRC_FLAGS_4BIT_BYTES;
-      }
       mrc_head_label(&td->hdata, td->strTemp);
+    } else {
+      tiffAddDescription(td->strTemp);
     }
     fileSlice = 0;
     tmin = 1000000;
@@ -2638,6 +2647,8 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
       lowbyte = *bData++ & 15;
       *packed++ = lowbyte | ((*bData++ & 15) << 4);
     }
+    B3DCLAMP(tmin, 0, 15);
+    B3DCLAMP(tmax, 0, 15);
   }
 
   if (td->bWriteTiff) {
@@ -3943,13 +3954,16 @@ int TemplatePlugIn::GetDSProperties(long extraDelay, double addedFlyback, double
  */
 int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width, 
                                   long *height, double rotation, double pixelTime, 
-                                  long lineSync, long continuous, long numChan, 
+                                  long flags, long continuous, long numChan, 
                                   long channels[], long divideBy2)
 {
   int chan, j, again, dataSize = 2;
   // 7/25/13: Set based on fact that 20 second exposures were not safe even with 800
   // msec extra shot delay.  This is extra-generous, 1.04 should do it.
   float delayErrorFactor = 1.05f;
+  int lineSync = flags & DS_LINE_SYNC;
+  int beamToSafe = flags & DS_BEAM_TO_SAFE;
+  int beamToFixed = flags & DS_BEAM_TO_FIXED;
   double fullExpTime = *height * (*width * pixelTime + m_dFlyback + 
     (lineSync ? m_dSyncMargin : 0.)) / 1000.;
   ClearSpecialFlags();
@@ -4040,16 +4054,16 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
   // Acquisition and return commands
   if (!continuous) {
     //j = (int)((fullExpTime + m_iExtraDSdelay) * delayErrorFactor * 0.06 + 0.5);
-/*#if GMS_MAJOR_VERSION > 1 && GMS_SDK_VERSION >= 2
-    mTD.strCommand += "if (DSHasScanControl()) {\n"
-      "  number xDS, yDS\n"
-      "  DSGetBeamDSPosition( xDS, yDS )\n"
-      "  DSInvokeButton(7, 1)\n"
-      "  Result(\"enable Beam control, beam at \" + xDS + \",\" + yDS + \"\\n\")\n"
-      "} else {\n"
-      "  Result(\"No scan control before shot\\n\")\n"
+    if (m_iDMVersion >= 40200 && (beamToFixed || beamToSafe)) {
+    mTD.strCommand += "DSInvokeButton(7, 1)\n"
+      "number xDS, yDS\n"
+      "DSGetBeamDSPosition( xDS, yDS )\n"
+      "Result(\"Before shot, beam at \" + xDS + \",\" + yDS + \"\\n\")\n"
+      "if (!DSHasScanControl()) {\n"
+      "  DSSetScanControl(1)\n"
+      "  Result(\"Have to take scan control before shot\\n\")\n"
       "}\n";
-#endif*/
+    }
     if (m_iExtraDSdelay > 0) {
 
       // With this loop, it doesn't seem to need any delay at the end
@@ -4062,14 +4076,23 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
     } else {
       mTD.strCommand += "DSStartAcquisition(paramID, 0, 1)\n";
     }
-    if (m_iDMVersion >= 40200) {
-      mTD.strCommand += "if (DSHasScanControl()) {\n"
-        /*"  number xDS, yDS\n"
-        "  DSGetBeamDSPosition( xDS, yDS )\n"
-        "  Result(\"Going to safe from beam at \" + xDS + \",\" + yDS + \"\\n\")\n"*/
-        "  DSSetBeamToSafePosition()\n"
-        /*"} else {\n"
-        "  Result(\"No scan control after shot\\n\")\n"*/
+    if (m_iDMVersion >= 40200 && (beamToFixed || beamToSafe)) {
+      mTD.strCommand += "DSGetBeamDSPosition( xDS, yDS )\n"
+      "Result(\"After shot, beam at \" + xDS + \",\" + yDS + \"\\n\")\n"
+      "if (!DSHasScanControl()) {\n"
+        "  DSSetScanControl(1)\n"
+        "  Result(\"Have to take scan control after shot\\n\")\n"
+        "}\n"
+        "if (DSHasScanControl()) {\n";
+      if (beamToSafe)
+        mTD.strCommand += "  DSSetBeamToSafePosition()\n";
+      else
+        mTD.strCommand += "  DSSetBeamDSPosition(16000, 16000)\n";
+
+        // But those commands don't work in the simulator, this one does.
+        //mTD.strCommand += "  DSPositionBeam( imchan, xsize - 10, ysize - 10 )\n";
+      mTD.strCommand += "} else {\n"
+        "  Result(\"Failed to get scan control after shot\\n\")\n"
         "}\n";
     }
     mTD.strCommand += "DSDeleteParameters(paramID)\n"

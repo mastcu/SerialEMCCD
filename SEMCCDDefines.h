@@ -27,12 +27,19 @@ DS_CHANNEL_NOT_ACQUIRED};
 #define K2_ASYNC_IN_RAM    (1 << 8)
 #define K2_SKIP_FRAME_ROTFLIP  (1 << 9)
 #define K2_SAVE_SUMMED_FRAMES  (1 << 10)
-#define K2_GAIN_NORM_SUM   (1 << 11)
+#define K2_GAIN_NORM_SUM       (1 << 11)
+#define K2_SAVE_4BIT_MRC_MODE  (1 << 12)
+#define K2_RAW_COUNTING_4BIT   (1 << 13)
 
 // Flags for SetK2Parameters
 #define K2_ANTIALIAS_MASK    7
 #define K2_OVW_MAKE_SUBAREA (1 << 3)
 #define K2_REDUCED_Y_SCALE  100000.
+
+// Flags for AcquireDSImage in lineSync argument
+#define DS_LINE_SYNC             1
+#define DS_BEAM_TO_SAFE    (1 << 1)
+#define DS_BEAM_TO_FIXED   (1 << 2)
 
 // Continuous mode definitions
 #define QUALITY_BITS_SHIFT   3

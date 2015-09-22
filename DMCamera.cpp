@@ -167,10 +167,10 @@ STDMETHODIMP CDMCamera::SetK2Parameters(long readMode, double scaling, long hard
 //   flags are as defined in SEMCCDDefines.h:
 //     the first three bits have an antialias filter type + 1 for antialias reduction
 //         In this case reducedSizes must have the size to be reduced to as the
-//         width plus height * K2_REDUCED_Y_SCALE
+//         width plus height * K2_REDUCED_Y_SCALE  (version 101)
 //     K2_OVW_MAKE_SUBAREA  - Make a subarea from a full-frame image.  In this case 
 //         must have the full unbinned size of the camera as width plus 
-//         height * K2_REDUCED_Y_SCALE
+//         height * K2_REDUCED_Y_SCALE  (version 104)
 STDMETHODIMP CDMCamera::SetK2Parameters2(long readMode, double scaling, long hardwareProc,
   BOOL doseFrac, double frameTime, BOOL alignFrames, BOOL saveFrames, long rotationFlip,
   long flags, double reducedSizes, double fullSizes, double dummy3, double dummy4, 
@@ -209,9 +209,14 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 //      K2_EARLY_RETURN    - Return early, with no sum, or sum of subset of frames
 //      K2_ASYNC_IN_RAM    - Acquire stack in DM asynchronously into RAM
 //      K2_SKIP_FRAME_ROTFLIP - Save frames in native orientation, skipping rotation/flip
-//      K2_SAVE_SUMMED_FRAMES - Save variable-sized sums of frames
+//      K2_SAVE_SUMMED_FRAMES - Save variable-sized sums of frames (version 101)
 //      K2_GAIN_NORM_SUM   - Normalize return sum from dark-subtracted counting or super-
 //                           res mode shot; requires K2_COPY_GAIN_REF and gain ref name
+//                           (version 102)
+//      K2_SAVE_4BIT_MRC_MODE - Use mode 101 and the full size in X for 4-bit MRC files
+//                           (version 104)
+//      K2_RAW_COUNTING_4BIT  - Save non-normalized counting frames as 4-bit, not 8-bit
+//                           (version 104)
 //   numGrabSum is relevant when doing an early return; it should be set from an unsigned
 //      int with the number of frames to sum in the low 16 bits and, for GMS >= 2.3.1,
 //      the number of frames to grab into a local stack in the high 16 bits.  The local

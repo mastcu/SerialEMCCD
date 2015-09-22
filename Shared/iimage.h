@@ -5,6 +5,7 @@
 #ifndef IIMAGE_H
 #define IIMAGE_H
 
+#include "ilist.h"
 #include "mrcfiles.h"
 #include "mrcslice.h"
 #include <math.h>
@@ -15,11 +16,14 @@ extern "C" {
 
   /* DOC_CODE ImodImageFile definitions */
   /* Values for the file member of ImodImageFile, describing kind of file */
+  /* Except IIFILE_DEFAULT means use the default output file type */
+#define IIFILE_DEFAULT -1
 #define IIFILE_UNKNOWN 0
 #define IIFILE_TIFF    1
 #define IIFILE_MRC     2
 #define IIFILE_QIMAGE  3
 #define IIFILE_RAW     4
+#define IIFILE_HDF     5
 
   /* Values for the format member of ImodImageFile, describing kind data */
 #define IIFORMAT_LUMINANCE 0
@@ -41,6 +45,7 @@ extern "C" {
 #define IISTATE_NOTINIT 0
 #define IISTATE_PARK    1
 #define IISTATE_READY   2
+#define IISTATE_UNUSED  3
 #define IISTATE_BUSY    4
 
   /* Error codes, used by check routines */
@@ -49,6 +54,13 @@ extern "C" {
 #define IIERR_IO_ERROR   2
 #define IIERR_MEMORY_ERR 3
 #define IIERR_NO_SUPPORT 4
+
+  /* Codes for source of HDF files */
+#define IIHDF_IMOD       1
+#define IIHDF_OTHER_MRC  2
+#define IIHDF_EMAN       3
+#define IIHDF_CHIMERA    4
+#define IIHDF_UNKNOWN    5
 
   /* Flags for userData */
 #define IIFLAG_BYTES_SWAPPED   1
@@ -71,6 +83,10 @@ extern "C" {
 #define IIAXIS_Y 2
 #define IIAXIS_Z 3
 
+#define MRSA_NOPROC 0
+#define MRSA_BYTE   1
+#define MRSA_FLOAT  2
+#define MRSA_USHORT 3
 
   /* DOC_CODE ImodImageFile structure */
   typedef struct  ImodImageFileStruct ImodImageFile;
@@ -79,7 +95,7 @@ extern "C" {
   struct  ImodImageFileStruct
   {
     char *filename;
-    char *fmode;
+    char fmode[4];
     FILE *fp;
     char *description;
     int   state;
@@ -90,7 +106,8 @@ extern "C" {
     int   format;     /* Kind of data represented: i.e. gray, color, complex */
     int   type;       /* Type if numerical elements, i.e. byte, etc. */
     int   mode;       /* MRC mode value */
-
+    int   newFile;    /* Newly created file */
+    
     /* optional data to be set if input file supports it. */
     float amin, amax, amean;
     float xscale, yscale, zscale;
@@ -103,6 +120,8 @@ extern "C" {
     float slope, offset, smin, smax;
     int   axis;
     int   mirrorFFT;   /* Return mirrored FFT when scaling to bytes */
+    int   padLeft;     /* Padding at start or end of line when reading or writing a */
+    int   padRight;    /* subset of the array, in pixels not bytes */
 
     /* extra storage used by individual file format functions. */
     int   headerSize;
@@ -120,15 +139,38 @@ extern "C" {
     int  anyTiffPixSize;     /* Set non-0 to have TIFF pixel size put into [xyz]scale */
     int  tileSizeX;          /* Tile size in X, or 0 if no tiles */
     int  tileSizeY;          /* Tile size in Y if tiles, strip size if not */
+    int  lastWrittenZ;       /* Last Z written, needed if sequential writing only */
+    int  packed4bits;        /* Data in file are 4-bit, packed 2 pixels per byte */
+    int fillOrder;           /* Fill order for the 4-bit data */
+
+    /* HDF variables */
+    Ilist *stackSetList;     /* Names, ID's for stack of single-image datasets */
+    int *zToDataSetMap;      /* Map from Z value to index in dataset list */
+    int zMapSize;            /* Allocated size of Z map */
+    char *datasetName;       /* Dataset name for single volume open in this iifile */
+    int datasetID;           /* ID for dataset of single volume */
+    int datasetIsOpen;       /* Flag that it is open */
+    int numVolumes;          /* Number of volume datasets in the HDF file */
+    ImodImageFile **iiVolumes;  /* Array of pointers to iifiles open in the HDF file */
+    int adocIndex;           /* Index of autodoc with metadata for this iifile */
+    int globalAdocIndex;     /* Index for global metadata in multifile case */
+    int hdfSource;           /* Apparent source of file (IIHDF_ value) */
+    int hdfFileID;           /* File ID */
+    int zChunkSize;          /* Size of chunk in Z; must be nonzero for a volume */
 
     /* Callback functions used by different file formats. */
     iiSectionFunc readSection;
     iiSectionFunc readSectionByte;
     iiSectionFunc readSectionUShort;
+    iiSectionFunc readSectionFloat;
     iiSectionFunc writeSection;
+    iiSectionFunc writeSectionFloat;
     void (*cleanUp)(ImodImageFile *inFile);
     void (*close)(ImodImageFile *inFile);
     int (*reopen)(ImodImageFile *inFile);
+    int (*fillMrcHeader)(ImodImageFile *inFile, MrcHeader *hdata);
+    int (*syncFromMrcHeader)(ImodImageFile *inFile, MrcHeader *hdata);
+    int (*writeHeader)(ImodImageFile *inFile);
 
   };
 /* END_CODE */
@@ -152,6 +194,43 @@ extern "C" {
   } RawImageInfo;
 /* END_CODE */
 
+/* Structure for line-processing function in mrcsec.c */
+  typedef struct {
+    int xStart, xEnd;
+    int convert;
+    unsigned char *bdata;
+    unsigned char *buf;
+    unsigned char *bufp;
+    b3dUInt16 *usbufp;
+    b3dFloat *fbufp;
+    unsigned char *fft;
+    b3dUInt16 *usfft;
+    unsigned char *map;
+    b3dUInt16 *usmap;
+    int byte;
+    int toShort;
+    int mapSbytes;
+    int doScale;
+    int needData;
+    int type;
+    int xDimension;
+    int xsize;
+    int deltaYsign;
+    unsigned int pixIndex;
+    int cz;
+    int readY;
+    int line;
+    int ymin, ymax;
+    int yStart;
+    int imYmin, imYmax;
+    int imXsize;
+    int toggleY;
+    int seekEndY;
+    int pixSize;
+    int swapped;
+    int bytesSinceCheck;
+  } LineProcData;
+
   typedef int (*IIFileCheckFunction)(ImodImageFile *);
   typedef int (*IIRawCheckFunction)(FILE *, char *, RawImageInfo *);
 
@@ -160,16 +239,41 @@ extern "C" {
   void iiDeleteCheckList();
   void iiAddRawCheckFunction(IIRawCheckFunction func, const char *name);
   void iiDeleteRawCheckList();
+  void iiRegisterQuitCheck(int (*func)(int));
+  int iiCheckForQuit();
   ImodImageFile *iiNew(void);
   ImodImageFile *iiOpen(const char *filename, const char *mode);
+  ImodImageFile *iiOpenNew(const char *filename, const char *mode, int fileKind);
   int  iiReopen(ImodImageFile *inFile);
   void iiClose(ImodImageFile *inFile);
   void iiDelete(ImodImageFile *inFile);
+  int iiFillMrcHeader(ImodImageFile *inFile, MrcHeader *hdata);
+  void iiSyncFromMrcHeader(ImodImageFile *inFile, MrcHeader *hdata);
+  int iiDefaultMinMaxMean(int type, float *amin, float *amax, float *amean);
+  int iiWriteHeader(ImodImageFile *inFile);
   int  iiSetMM(ImodImageFile *inFile, float inMin, float inMax, float scaleMax);
+  void iiFileChangeAddress(ImodImageFile *oldFile, ImodImageFile *newFile);
+  FILE *iiFOpen(const char *filename, const char *mode);
+  ImodImageFile *iiLookupFileFromFP(FILE *fp);
+  void iiFClose(FILE *fp);
+  void iiChangeCallCount(int delta);
+  int iiCallingReadOrWrite();
+  FILE *iiFOpenVolume(ImodImageFile *inFile, int volIndex);
+  FILE *iiFOpenNewVolume(ImodImageFile *inFile);
+  void iiAllowMultiVolume(int allow);
+  int iiGetAdocIndex(ImodImageFile *inFile, int global, int openMdocOrNew);
+  int iiTransferAdocSections(ImodImageFile *fromFile, ImodImageFile *toFile);
+  int iiSetChunkSizes(ImodImageFile *inFile, int xSize, int ySize, int zSize);
+  void iiConvertLineOfFloats(float *fbufp, unsigned char *bdata, int nx, int mrcMode, 
+                             int bytesSigned, int pack4bits);
+  void iiSaveLoadParams(ImodImageFile *iiFile, ImodImageFile *iiSave);
+  int iiRestoreLoadParams(int retVal, ImodImageFile *iiFile, ImodImageFile *iiSave);
 
   int iiReadSection(ImodImageFile *inFile, char *buf, int inSection);
   int iiReadSectionByte(ImodImageFile *inFile, char *buf, int inSection);
   int iiReadSectionUShort(ImodImageFile *inFile, char *buf, int inSection);
+  int iiReadSectionFloat(ImodImageFile *inFile, char *buf, int inSection);
+  float iiReadPoint(ImodImageFile *inFile, int x, int y, int z);
   int iiLoadPCoord(ImodImageFile *inFile, int useMdoc, IloadInfo *li,
                    int nx, int ny, int nz);
 
@@ -177,18 +281,23 @@ extern "C" {
   int iiInit(ImodImageFile *i, int xsize, int ysize, int zsize, 
              int file, int format, int type);
   int iiWriteSection(ImodImageFile *inFile, char *buf, int inSection);
+  int iiWriteSectionFloat(ImodImageFile *inFile, char *buf, int inSection);
 
   /* Declarations for specific file types needed by other modules */
+  /* SOME OF THESE DO NOT NEED TO BE GLOBALS! */
   int iiTIFFCheck(ImodImageFile *inFile);
   int iiMRCCheck(ImodImageFile *inFile);
-  int iiMRCreadSection(ImodImageFile *inFile, char *buf, int inSection);
-  int iiMRCreadSectionByte(ImodImageFile *inFile, char *buf, int inSection);
-  int iiMRCreadSectionUShort(ImodImageFile *inFile, char *buf, int inSection);
-  int iiMRCLoadPCoord(ImodImageFile *inFile, IloadInfo *li, int nx,
-                      int ny, int nz);
+  int iiMRCfillHeader(ImodImageFile *inFile, MrcHeader *hdata);
+  int iiMRCopenNew(ImodImageFile *inFile, const char *mode);
+  void iiMRCsetIOFuncs(ImodImageFile *inFile, int rawFile);
+  void iiMRCsetLoadInfo(ImodImageFile *inFile, IloadInfo *li);
+  void iiMRCmodeToFormatType(ImodImageFile *iif, int mode, int bytesSigned);
+  int iiMRCLoadPCoord(ImodImageFile *inFile, IloadInfo *li, int nx, int ny, int nz);
   int iiMRCcheckPCoord(MrcHeader *hdr);
+  int tiffFillMrcHeader(ImodImageFile *inFile, MrcHeader *hdata);
   int tiffReadSectionByte(ImodImageFile *inFile, char *buf, int inSection);
   int tiffReadSectionUShort(ImodImageFile *inFile, char *buf, int inSection);
+  int tiffReadSectionFloat(ImodImageFile *inFile, char *buf, int inSection);
   int tiffReadSection(ImodImageFile *inFile, char *buf, int inSection);
   void tiffClose(ImodImageFile *inFile);
   int tiffGetField(ImodImageFile *inFile, int tag, void *value);
@@ -203,14 +312,28 @@ extern "C" {
                      int quality, int *outRows, int *outNum, int *tileSizeX);
   int tiffWriteStrip(ImodImageFile *inFile, int strip, void *buf);
   void tiffWriteFinish(ImodImageFile *inFile);
+  int iiTiffWriteSection(ImodImageFile *inFile, char *buf, int inSection);
+  int iiTiffWriteSectionFloat(ImodImageFile *inFile, char *buf, int inSection);
   int tiffVersion(int *minor);
   int tiffReopen(ImodImageFile *inFile);
   void tiffDelete(ImodImageFile *inFile);
   void tiffSetMapping(int value);
+  void tiffAddDescription(const char *text);
   int iiLikeMRCCheck(ImodImageFile *inFile);
   void iiLikeMRCDelete(ImodImageFile *inFile);
   int iiSetupRawHeaders(ImodImageFile *inFile, RawImageInfo *info);
   int analyzeDM3(FILE *fp, char *filename, int dmformat, RawImageInfo *info, int *dmtype);
+
+  int iiHDFCheck(ImodImageFile *inFile);
+  int iiHDFopenNew(ImodImageFile *inFile, const char *mode);
+  int hdfWriteGlobalAdoc(ImodImageFile *inFile);
+  int iiProcessReadLine(MrcHeader *hdata, IloadInfo *li, LineProcData *d);
+  int iiInitReadSectionAny(MrcHeader *hdata, IloadInfo *li, unsigned char *buf,
+                           LineProcData *d, int *freeMap, int *yEnd, const char *caller);
+  void iiBestTileSize(int imSize, int *tileSize, int *numTiles, int multipleOf);
+
+  /* This is here in case a program links with iiqimage */
+  int iiQImageCheck(ImodImageFile *inFile);
 
 #ifdef __cplusplus
 }
