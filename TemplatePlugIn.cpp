@@ -607,6 +607,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   if (m_bSaveFrames && mTD.iReadMode >= 0 && m_bDoseFrac && mTD.strSaveDir.length() && 
     mTD.strRootName.length())
       saveFrames = SAVE_FRAMES;
+  if (saveFrames == NO_SAVE)
+    mTD.bEarlyReturn = false;
 
   // Strip continuous mode information from processing, set flag to do it if no conflict
   mTD.bDoContinuous = false;
@@ -3513,7 +3515,8 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
     mTD.iFullSizeX = B3DNINT(fullSizes / K2_REDUCED_Y_SCALE);
     mTD.iFullSizeY = B3DNINT(fullSizes - K2_REDUCED_Y_SCALE * mTD.iFullSizeX);
   }
-  sprintf(m_strTemp, "SetK2Parameters called with save %s\n", m_bSaveFrames ? "Y":"N");
+  sprintf(m_strTemp, "SetK2Parameters called with save %s  flags %x\n", 
+    m_bSaveFrames ? "Y":"N", flags);
   DebugToResult(m_strTemp);
 }
 
