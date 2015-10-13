@@ -40,6 +40,10 @@ DS_CHANNEL_NOT_ACQUIRED};
 #define DS_LINE_SYNC             1
 #define DS_BEAM_TO_SAFE    (1 << 1)
 #define DS_BEAM_TO_FIXED   (1 << 2)
+#define DS_BEAM_TO_EDGE    (1 << 3)
+#define DS_CONTROL_SCAN    (1 << 4)
+#define DS_INVOKE_BUTTON_0 (1 << 5)
+#define DS_INVOKE_BUTTON_1 (1 << 6)
 
 // Continuous mode definitions
 #define QUALITY_BITS_SHIFT   3
