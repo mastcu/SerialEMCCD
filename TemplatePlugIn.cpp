@@ -20,10 +20,16 @@
 #define GMS_SDK_VERSION GMS_MINOR_VERSION
 #endif
 
+/*#define XSTR(x) STR(x)
+#define STR(x) #x */
+//#pragma message ( XSTR(GMS_SDK_VERSION) )
+
 #define _GATANPLUGIN_WIN32_DONT_DEFINE_DLLMAIN
 #define _GATANPLUGIN_USES_LIBRARY_VERSION 2
 
 #if GMS_SDK_VERSION >= 300
+extern "C" int _forceCRTManifestCUR = 0;
+extern "C" int _forceMFCManifestCUR = 0;
 #include "GMSFoundation.h"
 #endif
 

@@ -760,7 +760,7 @@
 				Optimization="2"
 				InlineFunctionExpansion="1"
 				AdditionalIncludeDirectories="&quot;$(BOOST_1_38-64)&quot;;&quot;$(GMS2-64_SDK)\include&quot;"
-				PreprocessorDefinitions="NDEBUG;WIN32;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE"
+				PreprocessorDefinitions="GMS_MAJOR_VERSION=$(GMS_MAJOR_VERSION);GMS_MINOR_VERSION=$(GMS_MINOR_VERSION);NDEBUG;WIN32;GMS2;_DMSDK;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;$(PreprocessorDefinitions)"
 				StringPooling="true"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
@@ -791,10 +791,10 @@
 				IgnoreImportLibrary="true"
 				AdditionalOptions="/force:unresolved"
 				AdditionalDependencies="DMPlugInBasic.lib Foundation.lib Ws2_32.lib libiimod-64.lib libcfshr-64.lib libtiff-64.lib libjpeg-64.lib zlib-64.lib"
-				OutputFile=".\$(OutDir)/SEMCCD-GMS2.$(GMS2_SDK_VERSION)-64.dll"
+				OutputFile=".\$(OutDir)\SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS_MINOR_VERSION)-64.dll"
 				LinkIncremental="1"
 				SuppressStartupBanner="true"
-				AdditionalLibraryDirectories=".\Shared;&quot;$(GMS2-64_SDK)\lib\x64&quot;"
+				AdditionalLibraryDirectories=".\Shared;$(GMS2-64_SDK)\lib\x64;%(AdditionalLibraryDirectories)"
 				IgnoreDefaultLibraryNames="LIBCMT,LIBCMTD"
 				ModuleDefinitionFile=".\SerialEMCCD.def"
 				ProgramDatabaseFile=".\ReleaseMinDependency/SerialEMCCD.pdb"
@@ -865,7 +865,7 @@
 				Optimization="2"
 				InlineFunctionExpansion="1"
 				AdditionalIncludeDirectories="&quot;$(BOOST_1_38-32)&quot;;&quot;$(GMS2-32_SDK)\include&quot;"
-				PreprocessorDefinitions="GMS2_SDK_VERSION=$(GMS2_SDK_VERSION);GMS2;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NOINHERIT)"
+				PreprocessorDefinitions="GMS_MAJOR_VERSION=$(GMS_MAJOR_VERSION);GMS_MINOR_VERSION=$(GMS_MINOR_VERSION);GMS2;_DMSDK;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NOINHERIT)"
 				StringPooling="true"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
@@ -1399,7 +1399,8 @@
 					>
 					<Tool
 						Name="VCCLCompilerTool"
-						PreprocessorDefinitions="WIN32;NDEBUG;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NOINHERIT)"
+						PreprocessorDefinitions="GMS_MAJOR_VERSION=$(GMS_MAJOR_VERSION);GMS_MINOR_VERSION=$(GMS_MINOR_VERSION);WIN32;NDEBUG;GMS2;_WIN64;_DMSDK;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NOINHERIT)"
+						GeneratePreprocessedFile="0"
 					/>
 				</FileConfiguration>
 				<FileConfiguration
@@ -2037,7 +2038,7 @@
 						Name="VCCLCompilerTool"
 						Optimization="2"
 						AdditionalIncludeDirectories=""
-						PreprocessorDefinitions="GMS2_SDK_VERSION=$(GMS2_SDK_VERSION);WIN32;NDEBUG;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NOINHERIT)"
+						PreprocessorDefinitions="GMS_MAJOR_VERSION=$(GMS_MAJOR_VERSION);GMS_MINOR_VERSION=$(GMS_MINOR_VERSION);WIN32;NDEBUG;GMS2;_WIN64;_DMSDK;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY;$(NOINHERIT)"
 					/>
 				</FileConfiguration>
 				<FileConfiguration

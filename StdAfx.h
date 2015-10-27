@@ -14,6 +14,10 @@
 #define _WIN32_WINNT 0x0500
 #endif
 #define _ATL_APARTMENT_THREADED
+#define NOMINMAX
+#ifndef _BIND_TO_CURRENT_VCLIBS_VERSION								 // Force the CRT/MFC version to be put into the manifest
+#define _BIND_TO_CURRENT_VCLIBS_VERSION 1
+#endif
 
 #include <atlbase.h>
 //You may derive a class from CComModule and use it if you want to override
