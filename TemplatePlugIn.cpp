@@ -3971,13 +3971,12 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
   // msec extra shot delay.  This is extra-generous, 1.04 should do it.
   float delayErrorFactor = 1.05f;
   int lineSync = flags & DS_LINE_SYNC;
+  flags = flags % 2000;   // Temporarily keep this so Weizmann test settings work
   int beamToSafe = flags & DS_BEAM_TO_SAFE;
   int beamToFixed = flags & DS_BEAM_TO_FIXED;
   int beamToEdge = flags & DS_BEAM_TO_EDGE;
-  int controlScan = flags & (DS_CONTROL_SCAN | DS_BEAM_TO_SAFE | DS_BEAM_TO_FIXED |
-    DS_BEAM_TO_EDGE);
-  int invokeButton0 = flags & DS_INVOKE_BUTTON_0;
-  int invokeButton1 = flags & DS_INVOKE_BUTTON_1;
+  bool controlScan = (flags & (DS_CONTROL_SCAN | DS_BEAM_TO_SAFE | DS_BEAM_TO_FIXED |
+    DS_BEAM_TO_EDGE)) != 0 && m_iDMVersion >= 40200;
   double fullExpTime = *height * (*width * pixelTime + m_dFlyback + 
     (lineSync ? m_dSyncMargin : 0.)) / 1000.;
   ClearSpecialFlags();
@@ -4068,20 +4067,21 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
   // Acquisition and return commands
   if (!continuous) {
     //j = (int)((fullExpTime + m_iExtraDSdelay) * delayErrorFactor * 0.06 + 0.5);
-    if (m_iDMVersion >= 40200 && controlScan) {
-      if (invokeButton0)
-        mTD.strCommand += "DSInvokeButton(7, 0)\n";
-      else if (invokeButton1)
-        mTD.strCommand += "DSInvokeButton(7, 1)\n";
-      mTD.strCommand +=   "number xDS, yDS\n"
-        "DSGetBeamDSPosition( xDS, yDS )\n"
-        "Result(\"Before shot, beam at \" + xDS + \",\" + yDS + \"\\n\")\n"
-        "if (!DSHasScanControl()) {\n"
+    if (controlScan) {
+      mTD.strCommand += "DSControlBeamEnabled(1)\n";
+      if (beamToEdge || beamToFixed)
+        mTD.strCommand += "TagGroup tg = GetPersistentTagGroup()\n"
+          "tg.TagGroupSetTagAsNumber(\"DigiScan:AllowBeamMarkerOutsideImage\", 1)\n";
+      if (sDebug)
+        mTD.strCommand += "number xDS, yDS\n"
+          "DSGetBeamDSPosition( xDS, yDS )\n"
+          "Result(\"Before shot, beam at \" + xDS + \",\" + yDS + \"\\n\")\n";
+      mTD.strCommand += "if (!DSHasScanControl()) {\n"
         "  DSSetScanControl(1)\n"
         "  Result(\"Have to take scan control before shot\\n\")\n"
         "}\n";
     }
-    if (m_iExtraDSdelay > 0) {
+    if (m_iExtraDSdelay > 0 && !controlScan) {
 
       // With this loop, it doesn't seem to need any delay at the end
       mTD.strCommand += "DSStartAcquisition(paramID, 0, 0)\n"
@@ -4093,10 +4093,12 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
     } else {
       mTD.strCommand += "DSStartAcquisition(paramID, 0, 1)\n";
     }
-    if (m_iDMVersion >= 40200 && controlScan) {
-      mTD.strCommand += "DSGetBeamDSPosition( xDS, yDS )\n"
-      "Result(\"After shot, beam at \" + xDS + \",\" + yDS + \"\\n\")\n"
-      "if (!DSHasScanControl()) {\n"
+    if (controlScan) {
+      mTD.strCommand += "Delay(1)\n";
+      if (sDebug)
+        mTD.strCommand += "DSGetBeamDSPosition( xDS, yDS )\n"
+          "Result(\"After shot, beam at \" + xDS + \",\" + yDS + \"\\n\")\n";
+      mTD.strCommand += "if (!DSHasScanControl()) {\n"
         "  DSSetScanControl(1)\n"
         "  Result(\"Have to take scan control after shot\\n\")\n"
         "}\n"
@@ -4104,17 +4106,16 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
       if (beamToSafe)
         mTD.strCommand += "  DSSetBeamToSafePosition()\n";
       else if (beamToFixed)
-        mTD.strCommand += "  DSSetBeamDSPosition(11000, 11000)\n";
-
-        // But those commands don't work in the simulator, this one does.
+        mTD.strCommand += "  DSPositionBeam(imchan, -xsize / 8, -ysize / 8)\n";
       else if (beamToEdge)
-        mTD.strCommand += "  DSPositionBeam( imchan, xsize - 10, ysize - 10 )\n";
+        mTD.strCommand += "  DSPositionBeam(imchan, xsize + xsize / 8, ysize + "
+        "ysize / 8)\n";
       mTD.strCommand += "} else {\n"
         "  Result(\"Failed to get scan control after shot\\n\")\n"
         "}\n";
     }
     mTD.strCommand += "DSDeleteParameters(paramID)\n"
-    "Exit(idfirst)\n";
+      "Exit(idfirst)\n";
 
     mTD.bDoContinuous = false;
     again = AcquireAndTransferImage((void *)array, dataSize, arrSize, width, height,
