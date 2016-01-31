@@ -33,6 +33,15 @@
     <ClCompile Include="TemplatePlugIn.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Shared\CorrectDefects.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Shared\framealign.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Shared\frameutil.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="SerialEMCCD.def">
@@ -69,6 +78,15 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TemplatePlugIn.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Shared\CorrectDefects.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Shared\framealign.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Shared\frameutil.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

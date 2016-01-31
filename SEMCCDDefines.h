@@ -4,7 +4,7 @@
  */
 #ifndef SEMCCD_DEFINES_H
 
-#define SEMCCD_PLUGIN_VERSION    104
+#define SEMCCD_PLUGIN_VERSION    105
 
 // Error codes
 enum {IMAGE_NOT_FOUND = 1, WRONG_DATA_TYPE, DM_CALL_EXCEPTION, NO_STACK_ID, STACK_NOT_3D,
@@ -13,7 +13,9 @@ DIR_ALREADY_EXISTS, DIR_CREATE_ERROR, DIR_NOT_EXIST, SAVEDIR_IS_FILE, DIR_NOT_WR
 FILE_ALREADY_EXISTS, QUIT_DURING_SAVE, OPEN_DEFECTS_ERROR, WRITE_DEFECTS_ERROR, 
 THREAD_ERROR, EARLY_RET_WITH_SYNC, CONTINUOUS_ENDED, BAD_SUM_LIST, BAD_ANTIALIAS_PARAM,
 CLIENT_SCRIPT_ERROR, GENERAL_SCRIPT_ERROR, GETTING_DEFECTS_ERROR,
-DS_CHANNEL_NOT_ACQUIRED};
+DS_CHANNEL_NOT_ACQUIRED, NO_DEFERRED_SUM, NO_GPU_AVAILABLE, DEFECT_PARSE_ERROR, 
+GAIN_REF_LOAD_ERROR, BAD_FRAME_REDUCE_PARAM, FRAMEALI_INITIALIZE, FRAMEALI_NEXT_FRAME,
+FRAMEALI_FINISH_ALIGN};
 
 // Flags for SetupFileSaving
 #define K2_SAVE_RAW_PACKED       1
@@ -30,11 +32,22 @@ DS_CHANNEL_NOT_ACQUIRED};
 #define K2_GAIN_NORM_SUM       (1 << 11)
 #define K2_SAVE_4BIT_MRC_MODE  (1 << 12)
 #define K2_RAW_COUNTING_4BIT   (1 << 13)
+#define K2_MAKE_DEFERRED_SUM   (1 << 14)
 
 // Flags for SetK2Parameters
 #define K2_ANTIALIAS_MASK    7
-#define K2_OVW_MAKE_SUBAREA (1 << 3)
+#define K2_OVW_MAKE_SUBAREA  (1 << 3)
+#define K2_USE_FRAMEALIGN    (1 << 4)
 #define K2_REDUCED_Y_SCALE  100000.
+
+// Flags for SetupFrameAligning (bit 1 is apply gain ref, bit 7 is for early return)
+// (And bit 5 is for synchronous align/save, and bit 6 for apply defects, 8 for async in RAM)
+#define K2FA_USE_HYBRID_SHIFTS       1
+#define K2FA_SMOOTH_SHIFTS     (1 << 2)
+#define K2FA_GROUP_REFINE      (1 << 3)
+#define K2FA_DEFER_GPU_SUM     (1 << 4)
+#define K2FA_MAKE_EVEN_ODD     (1 << 9)
+#define K2FA_PRESERVE_FLOATS   (1 << 10)
 
 // Flags for AcquireDSImage in lineSync argument
 #define DS_LINE_SYNC             1
@@ -60,6 +73,8 @@ enum {GS_ExecuteScript = 1, GS_SetDebugMode, GS_SetDMVersion, GS_SetCurrentCamer
       GS_AcquireDSImage, GS_ReturnDSChannel, GS_StopDSAcquisition, GS_CheckReferenceTime,
       GS_SetK2Parameters, GS_ChunkHandshake, GS_SetupFileSaving, GS_GetFileSaveResult,
       GS_SetupFileSaving2, GS_GetDefectList, GS_SetK2Parameters2, GS_StopContinuousCamera,
-      GS_GetPluginVersion, GS_GetLastError, GS_FreeK2GainReference};
+      GS_GetPluginVersion, GS_GetLastError, GS_FreeK2GainReference, GS_IsGpuAvailable,
+      GS_SetupFrameAligning, GS_FrameAlignResults, GS_ReturnDeferredSum
+};
 
 #endif

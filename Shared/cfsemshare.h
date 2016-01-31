@@ -65,6 +65,10 @@ extern "C" {
                  float scale, float dmean, int linear);
 
   /* reduce_by_binning.c */
+  int extractAndBinIntoArray(void *array, int type, int nxDim, int xStart, int xEnd,
+                             int yStart, int yEnd, int nbin, void *brray, int nxBdim,
+                             int bxOffset, int byOffset, int keepByte, int *nxr,
+                             int *nyr);
   int extractWithBinning(void *array, int type, int nxDim, int xStart, int xEnd,
                          int yStart, int yEnd, int nbin, void *brray, int keepByte, 
                          int *nxr, int *nyr);
@@ -105,6 +109,10 @@ extern "C" {
   int indicesForFFTwrap(int ny, int direction, int *iyOut, int *iyLow, int *iyHigh);
   void fourierShiftImage(float *fft, int nxPad, int nyPad, float dx, float dy,
                          float *temp);
+  void fourierReduceImage(float *fftIn, int nxrIn, int nyrIn, float *fftOut, int nxrOut,
+                          int nyrOut, float dxIn,float dyIn, float *temp);
+  void fourierRingCorr(float *ffta, float *fftb, int nxReal, int ny, float *ringCorrs,
+                       int maxRings, float deltaR, float *temp);
 
   /* taperpad.c */
   void sliceTaperOutPad(void *array, int type, int nxbox, int nybox, 
@@ -119,6 +127,9 @@ extern "C" {
                       int nxdim, int nx, int ny, int iffill, float fillin);
   void sliceSmoothOutPad(void *array, int type, int nxbox, int nybox, 
                            float *brray, int nxdim, int nx, int ny);
+  void sliceNoiseTaperPad(void *array, int type, int nxbox, int nybox, float *brray,
+                          int nxdim, int nx, int ny, int noiseLength, int noiseRows,
+                          float *temp);
 
   /* taperatfill.c */
   int sliceTaperAtFill(Islice *sl, int ntaper, int inside);
@@ -197,6 +208,10 @@ extern "C" {
                          float *theta, float *smag, float *str, float *phi);
   void rotmagstrToAmat(float theta, float smag, float str, float phi,
                        float *a11, float *a12, float *a21, float *a22);
+  void amatToRotMag(float a11, float a12, float a21, float a22, float *theta, 
+                    float *ydtheta, float *smag, float *ydmag);
+  void rotMagToAmat(float theta, float ydtheta, float smag, float ydmag, float *a11, 
+                    float *a12, float *a21, float *a22);
 
   /* percentile.c */
   float percentileFloat(int s, float *r, int num);
@@ -339,6 +354,14 @@ extern "C" {
                      float *sdMin, float *ddenMin, int numIter, int limStep);
   void montSdCalc(float *array, float *brray, int nx, int ny, int ixBox0, int iyBox0,
                   int ixBox1, int iyBox1, float dx, float dy, float *sd, float *dden);
+
+  /* gcvspl */
+  int gcvspl(double *x, double *y, int yDim, double *wgtx, double *wgty, int mOrder,
+             int numVal, int numYcol, int mode, double val, double *coeff, int coeffDim, 
+             double *work, int *ier);
+  double splder(int derivOrder, int mOrder, int numVal, double tVal, double *x,
+                double *coeff, int *nearInd, double *work);
+
 
 #ifdef __cplusplus
 }

@@ -1,4 +1,10 @@
 // DMCamera.cpp : Implementation of COM object methods that call in to TemplatePlugin
+//
+// Copyright (C) 2013-2016 by the Regents of the University of
+// Colorado.  See Copyright.txt for full notice of copyright and limitations.
+//
+// Author: David Mastronarde
+//
 
 #include "stdafx.h"
 #include "SerialEMCCD.h"
@@ -265,6 +271,47 @@ STDMETHODIMP CDMCamera::GetFileSaveResult(long *numSaved, long *error)
 {
   gPlugInWrapper.GetFileSaveResult(numSaved, error);
   return S_OK;
+}
+
+STDMETHODIMP CDMCamera::IsGpuAvailable(long gpuNum, long *available, double *gpuMemory)
+{
+  *available = gPlugInWrapper.IsGpuAvailable(gpuNum, gpuMemory);
+  return S_OK;
+}
+
+STDMETHODIMP CDMCamera::SetupFrameAligning(long aliBinning, double rad2Filt1, 
+  double rad2Filt2, double rad2Filt3, double rad2Filt4, double sigma2Ratio, 
+  double truncLimit, long alignFlags, long gpuFlags, long numAllVsAll, long groupSize, 
+  long shiftLimit, long antialiasType, long refineIter, double stopIterBelow, 
+  double refRad2, long nSumAndGrab, long dumInt1, long dumInt2, double dumDbl1, 
+  double dumDbl2, double dumDbl3, double dumDbl4, long stringSize, long strings[], 
+  long *error)
+{
+  gPlugInWrapper.SetupFrameAligning(aliBinning, rad2Filt1, rad2Filt2, rad2Filt3, 
+    rad2Filt4, sigma2Ratio, truncLimit, alignFlags, gpuFlags, numAllVsAll, groupSize, 
+  shiftLimit, antialiasType, refineIter, stopIterBelow, refRad2, nSumAndGrab, dumInt1, 
+  dumInt2, dumDbl1, dumDbl2, dumDbl3, dumDbl4, strings, error);
+  return S_OK;
+}
+
+STDMETHODIMP CDMCamera::FrameAlignResults(double *rawDist, double *smoothDist, 
+  double *resMean, double *maxResMax, double *meanRawMax, double *maxRawMax, 
+  double *crossHalf, double *crossQuarter, double *crossEighth, double *halfNyq, 
+  long *dumInt1, double *dumDbl1, double *dumDbl2, double *dumDbl3)
+{
+  gPlugInWrapper.FrameAlignResults(rawDist, smoothDist, resMean, maxResMax, meanRawMax, 
+    maxRawMax, crossHalf, crossQuarter, crossEighth, halfNyq, dumInt1, dumDbl1, dumDbl2, 
+    dumDbl3);
+  return S_OK;
+}
+
+STDMETHODIMP CDMCamera::ReturnDeferredSum(short *array, long *arrSize, long *width, 
+		long *height)
+{
+	int retval = gPlugInWrapper.ReturnDeferredSum(array, arrSize, width, height);
+	if (retval)
+		return E_FAIL;
+	return S_OK;
 }
 
 STDMETHODIMP CDMCamera::GetNumberOfCameras(long *numCameras)

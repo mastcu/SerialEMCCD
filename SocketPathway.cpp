@@ -1,5 +1,11 @@
 // SocketPathway: A module for a socket connection instead of COM connection to the
 // plugin functions
+//
+// Copyright (C) 2013-2016 by the Regents of the University of
+// Colorado.  See Copyright.txt for full notice of copyright and limitations.
+//
+// Author: David Mastronarde
+//
 
 #include "stdafx.h"
 #include "TemplatePlugIn.h"
@@ -102,6 +108,10 @@ static ArgDescriptor sFuncTable[] = {
   {GS_GetPluginVersion,     0, 0, 0,   1, 0, 0,   FALSE},
   {GS_GetLastError,         0, 0, 0,   1, 0, 0,   FALSE},
   {GS_FreeK2GainReference,  1, 0, 0,   0, 0, 0,   FALSE},
+  {GS_IsGpuAvailable,       1, 0, 0,   1, 0, 1,   FALSE},
+  {GS_SetupFrameAligning,   12, 0, 12, 1, 0, 0,   TRUE},
+  {GS_FrameAlignResults,    0, 0, 0,   1, 0, 13,  FALSE},
+  {GS_ReturnDeferredSum,    3, 0, 0,   4, 0, 0,   FALSE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -634,6 +644,35 @@ static int ProcessCommand(int numBytes)
       imArray = new short[sLongArgs[1]];
       SendImageBack(gPlugInWrapper.GetDefectList(imArray, &sLongArgs[1], &sLongArgs[2],
         &sLongArgs[3]), imArray, 2); 
+      break;
+
+    case GS_IsGpuAvailable:
+      sLongArgs[1] = gPlugInWrapper.IsGpuAvailable(sLongArgs[1], &sDoubleArgs[0]);
+      SendArgsBack(0);
+      break;
+
+    case GS_SetupFrameAligning:
+      gPlugInWrapper.SetupFrameAligning(sLongArgs[1], sDoubleArgs[0], sDoubleArgs[1], 
+        sDoubleArgs[2], sDoubleArgs[3], sDoubleArgs[4], sDoubleArgs[5], sLongArgs[2], 
+        sLongArgs[3], sLongArgs[4], sLongArgs[5], sLongArgs[6], sLongArgs[7], 
+        sLongArgs[8], sDoubleArgs[6], sDoubleArgs[7], sLongArgs[9], sLongArgs[10], 
+        sLongArgs[11], sDoubleArgs[8], sDoubleArgs[9], sDoubleArgs[10], sDoubleArgs[11], 
+        sLongArray, &sLongArgs[1]);
+      SendArgsBack(0);
+      break;
+
+    case GS_FrameAlignResults:
+      gPlugInWrapper.FrameAlignResults(&sDoubleArgs[0], &sDoubleArgs[1], &sDoubleArgs[2], 
+        &sDoubleArgs[3], &sDoubleArgs[4], &sDoubleArgs[5], &sDoubleArgs[6], 
+        &sDoubleArgs[7], &sDoubleArgs[8], &sDoubleArgs[9], &sLongArgs[1], 
+        &sDoubleArgs[10], &sDoubleArgs[11], &sDoubleArgs[12]);
+      SendArgsBack(0);
+      break;
+
+    case GS_ReturnDeferredSum:
+      imArray = new short[sLongArgs[1]];
+      SendImageBack(gPlugInWrapper.ReturnDeferredSum(imArray, &sLongArgs[1], 
+        &sLongArgs[2], &sLongArgs[3]), imArray, 2); 
       break;
 
     case GS_GetNumberOfCameras:

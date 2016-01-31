@@ -1,3 +1,8 @@
+/*
+ * TemplatePlugIn.h - declarations for TemplatePlugIn.cpp and the wrapper class
+ *
+ * See Copyright.txt for copyright and limitations
+ */
 #pragma once
 
 #include "SEMCCDDefines.h"
@@ -49,6 +54,18 @@ public:
   void GetFileSaveResult(long *numSaved, long *error);
   int GetDefectList(short xyPairs[], long *arrSize, long *numPoints, 
     long *numTotal);
+  int IsGpuAvailable(long gpuNum, double *gpuMemory);
+  void SetupFrameAligning(long aliBinning, double rad2Filt1, 
+    double rad2Filt2, double rad2Filt3, double rad2Filt4, double sigma2Ratio, 
+    double truncLimit, long alignFlags, long gpuFlags, long numAllVsAll, long groupSize, 
+    long shiftLimit, long antialiasType, long refineIter, double stopIterBelow, 
+    double refRad2, long nSumAndGrab, long dumInt1, long dumInt2, double dumDbl1, 
+    double dumDbl2, double dumDbl3, double dumDbl4, long *strings, long *error);
+  void FrameAlignResults(double *rawDist, double *smoothDist, 
+    double *resMean, double *maxResMax, double *meanRawMax, double *maxRawMax, 
+    double *crossHalf, double *crossQuarter, double *crossEighth, double *halfNyq, 
+    long *dumInt1, double *dumDbl1, double *dumDbl2, double *dumDbl3);
+  int ReturnDeferredSum(short array[], long *arrSize, long *width, long *height); 
 	int GetImage(short *array, long *arrSize, long *width, 
 		long *height, long processing, double exposure,
 		long binning, long top, long left, long bottom, 

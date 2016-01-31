@@ -9,11 +9,15 @@ syntax: glob
 *.aps
 *.ncb
 *.suo
+*sdf
 *.vcproj.*.user
+*.vcxproj.user
 *~
 *.\#*
 \#*\#
+register*bat
 
+ipch
 Debug
 ReleaseMinDependency
 GMS2-64bit

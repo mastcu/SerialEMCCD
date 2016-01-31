@@ -1,5 +1,7 @@
 // DMCamera.h: Definition of the CDMCamera class
 //
+// See Copyright.txt for copyright and limitations
+//
 //////////////////////////////////////////////////////////////////////
 
 #if !defined(AFX_DMCAMERA_H__05E3210A_0D63_47FB_AA3E_CABD30B8E8A4__INCLUDED_)
@@ -74,6 +76,11 @@ public:
   STDMETHOD(SetupFileSaving2)(/*[in]*/long rotationFlip, /*[in]*/BOOL filePerImage, /*[in]*/double pixelSize, /*[in]*/long flags, /*[in]*/double dummy1, /*[in]*/double dummy2, /*[in]*/double dummy3, /*[in]*/double dummy4, /*[in]*/long nameSize, /*[in, size_is(nameSize)]*/long names[], /*[out]*/long *error);
   STDMETHOD(GetDefectList)(/*[out, size_is(*arrSize)]*/short xyPairs[], /*[in, out]*/long *arrSize, /*[out]*/long *numPoints, /*[out]*/long *numTotal);
   STDMETHOD(SetK2Parameters2)(/*[in]*/long mode, /*[in]*/double scaling, /*[in]*/long hardwareProc, /*[in]*/BOOL doseFrac, /*[in]*/double frameTime, /*[in]*/BOOL alignFrames, /*[in]*/BOOL saveFrames, /*[in]*/long rotationFlip, /*[in]*/long flags, /*[in]*/double dummy1, /*[in]*/double dummy2, /*[in]*/double dummy3, /*[in]*/double dummy4, /*[in]*/long filtSize, /*[in, size_is(filtSize)]*/long filter[]);
+  STDMETHOD(IsGpuAvailable)(/*[in]*/long gpuNum, /*[out]*/long *available, /*[out]*/double *gpuMemory);
+  STDMETHOD(SetupFrameAligning)(/*[in]*/long aliBinning, /*[in]*/double rad2Filt1, /*[in]*/double rad2Filt2, /*[in]*/double rad2Filt3, /*[in]*/double rad2Filt4, /*[in]*/double sigma2Ratio, /*[in]*/double truncLimit, /*[in]*/long alignFlags, /*[in]*/long gpuFlags, /*[in]*/long numAllVsAll, /*[in]*/long groupSize, /*[in]*/long shiftLimit, /*[in]*/long antialiasType, /*[in]*/long refineIter, 
+    /*[in]*/double stopIterBelow, /*[in]*/double refRad2, /*[in]*/long nSumAndGrab, /*[in]*/long dumInt1, /*[in]*/long dumInt2, /*[in]*/double dumDbl1, /*[in]*/double dumDbl2, /*[in]*/double dumDbl3, /*[in]*/double dumDbl4, /*[in]*/long stringSize, /*[in, size_is(stringSize)]*/long strings[], /*[out]*/long *error);
+  STDMETHOD(FrameAlignResults)(/*[out]*/double *rawDist, /*[out]*/double *smoothDist, /*[out]*/double *resMean, /*[out]*/double *maxResMax, /*[out]*/double *meanRawMax, /*[out]*/double *maxRawMax, /*[out]*/double *crossHalf, /*[out]*/double *crossQuarter, /*[out]*/double *crossEighth, /*[out]*/double *halfNyq, /*[out]*/long *dumInt1, /*[out]*/double *dumDbl1, /*[out]*/double *dumDbl2, /*[out]*/double *dumDbl3);
+  STDMETHOD(ReturnDeferredSum)(/*[out, size_is(*arrSize)]*/short array[], /*[in, out]*/long *arrSize, /*[in, out]*/long *width, /*[out]*/long *height);
   STDMETHOD(StopContinuousCamera)();
 	STDMETHOD(GetPluginVersion)(/*[out]*/long *version);
 	STDMETHOD(GetLastError)(/*[out]*/long *error);

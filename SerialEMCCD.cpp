@@ -1,5 +1,10 @@
-// SerialEMCCD.cpp : Implementation of DLL Exports.
-
+// SerialEMCCD.cpp : Implementation of DLL Exports for SerialEMCCD
+//
+// Copyright (C) 2013-2016 by the Regents of the University of
+// Colorado.  See Copyright.txt for full notice of copyright and limitations.
+//
+// Author: David Mastronarde
+//
 
 // Note: Proxy/Stub Information
 //      To build a separate proxy/stub DLL, 

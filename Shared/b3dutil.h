@@ -29,6 +29,8 @@
 #define B3DREALLOC(a,b,c) a = (b *)realloc(a, (c) * sizeof(b))
 #define B3DSWAP(a,b,c) {c = (a); a = (b); b = c;}
 #define B3DCHOICE(a,b,c) ((a) ? (b) : (c))
+#define ACCUM_MAX(a, b) a = ((a) > (b) ? (a) : (b))
+#define ACCUM_MIN(a, b) a = ((a) < (b) ? (a) : (b))
 
 #define IMOD_MRC_STAMP 1146047817
 #define WRITE_SBYTES_DEFAULT 1
@@ -110,6 +112,7 @@ extern "C" {
   void set4BitOutputMode(int inVal);
   int write4BitModeForBytes();
   int dataSizeForMode(int mode, int *bytes, int *channels);
+  int totalCudaCores(int major, int minor, int multiprocCount);
 
 #ifdef __cplusplus
 }

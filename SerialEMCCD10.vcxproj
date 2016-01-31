@@ -667,7 +667,7 @@ regsvr32 /s SerialEMCCDps.dll
       <Optimization>MaxSpeed</Optimization>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
       <AdditionalIncludeDirectories>$(BOOST_1_38-64);$(GMS2-64_SDK)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>GMS_MAJOR_VERSION=$(GMS_MAJOR_VERSION);GMS_MINOR_VERSION=$(GMS_MINOR_VERSION);NDEBUG;WIN32;GMS2;_DMSDK;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>GMS_MAJOR_VERSION=$(GMS_MAJOR_VERSION);GMS_MINOR_VERSION=$(GMS_MINOR_VERSION);NDEBUG;WIN32;GMS2;_DMSDK;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;DELAY_LOAD_FGPU;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -689,7 +689,7 @@ regsvr32 /s SerialEMCCDps.dll
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/force:unresolved %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>DMPlugInBasic.lib;Foundation.lib;Ws2_32.lib;libiimod-64.lib;libcfshr-64.lib;libtiff-64.lib;libjpeg-64.lib;zlib-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>DMPlugInBasic.lib;Foundation.lib;Ws2_32.lib;libiimod-64.lib;libifft.lib;libcfshr-64.lib;libfftwf-3.3.lib;libtiff-64.lib;libjpeg-64.lib;zlib-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>.\$(OutDir)SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS_MINOR_VERSION)-64.dll</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>.\Shared;$(GMS2-64_SDK)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -1031,6 +1031,19 @@ regsvr32 /s SerialEMCCDps.dll
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release MinSize|x64'">%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release MinSize|x64'">WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_DLL</PreprocessorDefinitions>
     </ClCompile>
+    <ClCompile Include="Shared\CorrectDefects.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|Win32'">true</ExcludedFromBuild>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="Shared\framealign.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|Win32'">true</ExcludedFromBuild>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">F77FUNCAP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="Shared\frameutil.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|Win32'">true</ExcludedFromBuild>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="SocketPathway.cpp">
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|x64'">WIN32;NDEBUG;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release MinDependency|x64'">WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY</PreprocessorDefinitions>
@@ -1207,6 +1220,9 @@ regsvr32 /s SerialEMCCDps.dll
     <ClInclude Include="K2DoseFractionation.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="SEMCCDDefines.h" />
+    <ClInclude Include="Shared\CorrectDefects.h" />
+    <ClInclude Include="Shared\framealign.h" />
+    <ClInclude Include="Shared\frameutil.h" />
     <ClInclude Include="StdAfx.h" />
     <ClInclude Include="TemplatePlugIn.h" />
   </ItemGroup>
