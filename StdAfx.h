@@ -15,9 +15,12 @@
 #endif
 #define _ATL_APARTMENT_THREADED
 #define NOMINMAX
-#ifndef _BIND_TO_CURRENT_VCLIBS_VERSION								 // Force the CRT/MFC version to be put into the manifest
-#define _BIND_TO_CURRENT_VCLIBS_VERSION 1
-#endif
+
+// Adding this makes all the GMS builds have manifests with 21022 and 30729 which fails to
+// register in some sites.  The GMS 3 build still has both but maybe that will be OK
+//#ifndef _BIND_TO_CURRENT_VCLIBS_VERSION								 // Force the CRT/MFC version to be put into the manifest
+//#define _BIND_TO_CURRENT_VCLIBS_VERSION 1
+//#endif
 
 #include <atlbase.h>
 //You may derive a class from CComModule and use it if you want to override
