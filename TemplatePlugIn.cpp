@@ -85,6 +85,7 @@ static CameraDefects sCamDefects;
 #define FRAME_EVENT_WAIT  200
 #define IMAGE_MUTEX_WAIT  1000
 #define IMAGE_MUTEX_CLEAN_WAIT  5000
+#define DFACQUIRE_MUTEX_WAIT 10000
 enum {CHAN_UNUSED = 0, CHAN_ACQUIRED, CHAN_RETURNED};
 enum {NO_SAVE = 0, SAVE_FRAMES};
 enum {NO_DEL_IM = 0, DEL_IMAGE};
@@ -110,6 +111,7 @@ static int sEnvDebug;
 // Handle for mutexes for writing critical components of thread data and continuous image
 static HANDLE sDataMutexHandle;
 static HANDLE sImageMutexHandle;
+static HANDLE sDFAcquireMutexHandle;
 static HANDLE sFrameReadyEvent = NULL;
 static int sJ;
 
@@ -178,6 +180,7 @@ struct ThreadData
   int iNumGrabAndStack;
   bool bEarlyReturn;
   bool bAsyncToRAM;
+  bool isTDcopy;
   int iReadyToAcquire;
   int iReadyToReturn;
   int iDMquitting;
@@ -403,6 +406,9 @@ TemplatePlugIn::TemplatePlugIn()
 
   sDataMutexHandle = CreateMutex(0, 0, 0);
   sImageMutexHandle = CreateMutex(0, 0, 0);
+#if defined(_WIN64) && GMS_SDK_VERSION < 31
+  sDFAcquireMutexHandle = CreateMutex(0, 0, 0);
+#endif
 #ifdef _WIN64
   b3dSetStoreError(1);
   sFrameAli.setPrintFunc(framePrintFunc);
@@ -1118,6 +1124,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
                       long delImage, long saveFrames)
 {
   DWORD retval = 0, resret, threadID;
+  bool hasMutex = false;
   ThreadData *retTD = &mTD;
   bool useFinal;
   int retWidth = retTD->width, retHeight = retTD->height;
@@ -1167,6 +1174,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
     (mTD.bAsyncSave || (mTD.bEarlyReturn && GMS_SDK_VERSION < 31))))) {
       *arrSize = *width = *height = 0;
       mTDcopy = mTD;
+      mTDcopy.isTDcopy = true;
       retTD = &mTDcopy;
       m_HAcquireThread = CreateThread(NULL, 0, AcquireProc, &mTDcopy, CREATE_SUSPENDED, 
         &threadID);
@@ -1201,7 +1209,19 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       if (!retval && !retTD->arrSize && retTD->iNumFramesToSum)
         retTD->arrSize = retWidth * retHeight;
   } else if (!retval) {
+#endif
+    // Acquire a mutex to prevent thread from finishing up during a single shot
+#if defined(_WIN64) && GMS_SDK_VERSION < 31
+    if (m_HAcquireThread) {
+      WaitForSingleObject(sDFAcquireMutexHandle, DFACQUIRE_MUTEX_WAIT);
+      hasMutex = true;
+    }
+#endif
     retval = AcquireProc(&mTD);
+ #if defined(_WIN64) && GMS_SDK_VERSION < 31
+    if (hasMutex)
+      ReleaseMutex(sDFAcquireMutexHandle);
+#endif
     useFinal = mTD.iAntialias || mTD.bMakeSubarea || mTD.bUseFrameAlign;
     retWidth = useFinal ? mTD.iFinalWidth : mTD.width;
     retHeight = useFinal ? mTD.iFinalHeight : mTD.height;
@@ -1813,6 +1833,12 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     delete [] td->grabStack;
   }
 
+  // Acquire mutex so that final cleanup does not occur during a single-shot
+#if defined(_WIN64) && GMS_SDK_VERSION < 31
+  if (td->isTDcopy) 
+    WaitForSingleObject(sDFAcquireMutexHandle, DFACQUIRE_MUTEX_WAIT);
+#endif
+
   // Delete image(s) before return if they can be found
   if (delImage && !doingAsyncSave) {
     if (DM::GetImageFromID(image, imageID))
@@ -1832,13 +1858,15 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 #endif
 #if defined(_WIN64) && GMS_SDK_VERSION < 31
   delete k2dfaP;
+  if (td->isTDcopy) 
+    ReleaseMutex(sDFAcquireMutexHandle);
 #endif
 
   delete unbinnedArray;
   td->arrSize = (td->iAntialias || td->bMakeSubarea || td->bUseFrameAlign) ? 
     td->iFinalWidth * td->iFinalHeight : td->width * td->height;
-  sprintf(td->strTemp, "Leaving thread with return value %d arrSize %d\n", errorRet, 
-    td->arrSize); 
+  sprintf(td->strTemp, "Leaving acquire %s with return value %d arrSize %d\n",
+    td->isTDcopy ? "thread" : "proc", errorRet, td->arrSize); 
   DebugToResult(td->strTemp);
   return errorRet;
 }
