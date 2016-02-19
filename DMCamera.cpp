@@ -280,17 +280,16 @@ STDMETHODIMP CDMCamera::IsGpuAvailable(long gpuNum, long *available, double *gpu
 }
 
 STDMETHODIMP CDMCamera::SetupFrameAligning(long aliBinning, double rad2Filt1, 
-  double rad2Filt2, double rad2Filt3, double rad2Filt4, double sigma2Ratio, 
+  double rad2Filt2, double rad2Filt3, double sigma2Ratio, 
   double truncLimit, long alignFlags, long gpuFlags, long numAllVsAll, long groupSize, 
   long shiftLimit, long antialiasType, long refineIter, double stopIterBelow, 
   double refRad2, long nSumAndGrab, long dumInt1, long dumInt2, double dumDbl1, 
-  double dumDbl2, double dumDbl3, double dumDbl4, long stringSize, long strings[], 
-  long *error)
+  long stringSize, long strings[], long *error)
 {
   gPlugInWrapper.SetupFrameAligning(aliBinning, rad2Filt1, rad2Filt2, rad2Filt3, 
-    rad2Filt4, sigma2Ratio, truncLimit, alignFlags, gpuFlags, numAllVsAll, groupSize, 
+    sigma2Ratio, truncLimit, alignFlags, gpuFlags, numAllVsAll, groupSize, 
   shiftLimit, antialiasType, refineIter, stopIterBelow, refRad2, nSumAndGrab, dumInt1, 
-  dumInt2, dumDbl1, dumDbl2, dumDbl3, dumDbl4, strings, error);
+  dumInt2, dumDbl1, strings, error);
   return S_OK;
 }
 
@@ -302,6 +301,13 @@ STDMETHODIMP CDMCamera::FrameAlignResults(double *rawDist, double *smoothDist,
   gPlugInWrapper.FrameAlignResults(rawDist, smoothDist, resMean, maxResMax, meanRawMax, 
     maxRawMax, crossHalf, crossQuarter, crossEighth, halfNyq, dumInt1, dumDbl1, dumDbl2, 
     dumDbl3);
+  return S_OK;
+}
+
+STDMETHODIMP CDMCamera::MakeAlignComFile(long flags, long dumInt1, double dumDbl1, 
+  double dumDbl2, long stringSize, long strings[], long *error)
+{
+  gPlugInWrapper.MakeAlignComFile(flags, dumInt1, dumDbl1, dumDbl2, strings, error);
   return S_OK;
 }
 

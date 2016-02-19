@@ -19,8 +19,8 @@
 
 static int sDumpInd = 0;
 static CharArgType sPrintFunc = NULL;
-static char *sDot = ".";
-static char *sDumpDir = sDot;
+static const char *sDot = ".";
+static const char *sDumpDir = sDot;
 static bool sSetDumpDir = false;
 
 static void checkDumpDir(void);

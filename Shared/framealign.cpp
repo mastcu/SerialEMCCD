@@ -851,7 +851,7 @@ int FrameAlign::nextFrame(void *frame, int type, float *gainRef, int nxGain, int
     // Substitute source pointer and type
     useFrame = fullArr;
     useType = MRC_MODE_FLOAT;
-    //dumpImage(fullArr, mNx, mNx, mNy, 0, "processed original");
+    //utilDumpImage(fullArr, mNx, mNx, mNy, 0, "processed original");
   }
 
   // PROCESS THE CURRENT IMAGE: Get the padded full image
@@ -870,10 +870,10 @@ int FrameAlign::nextFrame(void *frame, int type, float *gainRef, int nxGain, int
     // forward in a simple function and it was actually twice as fast to copy backwards
     sliceTaperOutPad(useFrame, useType, mNx, mNy, fullArr, mNx,  mNx, mNy, 0, 0.);
   } else {
-    fullArr = (float *)frame;
+    fullArr = (float *)useFrame;
   }
   mWallPreProc += wallTime() - mWallStart;
-  //dumpImage(fullArr, nxDimForBP, nxForBP, nyForBP, 0, "padded tapered original");
+  //utilDumpImage(fullArr, nxDimForBP, nxForBP, nyForBP, 0, "padded tapered original");
 
   // If doing trim or taper, bin the subarea and taper inside, take the FFT
   if (doBinPad && mSummingMode >= 0) {
@@ -1018,7 +1018,8 @@ int FrameAlign::nextFrame(void *frame, int type, float *gainRef, int nxGain, int
         mXallShifts[filt][ref * mNumAllVsAll + ind] = xShift;
         mYallShifts[filt][ref * mNumAllVsAll + ind] = yShift;
         if (mDebug > 1)
-          utilPrint("%d to %d  %.2f  %.2f\n", useInd, useInd + ref - ind, xShift, yShift);
+          utilPrint("%d to %d  %.2f  %.2f   near %.2f  %.2f\n", useInd,
+                    useInd + ref - ind, xShift, yShift, nearXshift, nearYshift);
       }
     }
   } else if (!mNumAllVsAll) {
@@ -1110,7 +1111,6 @@ void FrameAlign::findAllVsAllAlignment(bool justForLimits)
   for (filt = 0; filt < mNumFilters; filt++) {
     maxRaw[filt] = maxWgtRes[filt] = 0.;
     resSum = resSumSq = 0; 
-
     if (mGroupSize > 1 && (numGroups < mGroupSize || numData < numGroups)) {
       for (ind = 0; ind < numGroups; ind++)
         mXnearShifts[ind] = mYnearShifts[ind] = 0.;
@@ -1197,7 +1197,7 @@ void FrameAlign::findAllVsAllAlignment(bool justForLimits)
     if (!filt) {
       for (ind = 0; ind < numGroups; ind++) {
         mXnearShifts[ind] = mXfitShifts[0][ind];
-        mXnearShifts[ind] = mXfitShifts[0][ind];
+        mYnearShifts[ind] = mYfitShifts[0][ind];
       }
     }
     if (justForLimits)

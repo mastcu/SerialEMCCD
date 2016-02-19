@@ -15,7 +15,8 @@ THREAD_ERROR, EARLY_RET_WITH_SYNC, CONTINUOUS_ENDED, BAD_SUM_LIST, BAD_ANTIALIAS
 CLIENT_SCRIPT_ERROR, GENERAL_SCRIPT_ERROR, GETTING_DEFECTS_ERROR,
 DS_CHANNEL_NOT_ACQUIRED, NO_DEFERRED_SUM, NO_GPU_AVAILABLE, DEFECT_PARSE_ERROR, 
 GAIN_REF_LOAD_ERROR, BAD_FRAME_REDUCE_PARAM, FRAMEALI_INITIALIZE, FRAMEALI_NEXT_FRAME,
-FRAMEALI_FINISH_ALIGN};
+FRAMEALI_FINISH_ALIGN, MAKECOM_BAD_PARAM, MAKECOM_NO_REL_PATH, OPEN_COM_ERROR,
+WRITE_COM_ERROR, OPEN_MDOC_ERROR, WRITE_MDOC_ERROR, COPY_MDOC_ERROR};
 
 // Flags for SetupFileSaving
 #define K2_SAVE_RAW_PACKED       1
@@ -38,16 +39,21 @@ FRAMEALI_FINISH_ALIGN};
 #define K2_ANTIALIAS_MASK    7
 #define K2_OVW_MAKE_SUBAREA  (1 << 3)
 #define K2_USE_FRAMEALIGN    (1 << 4)
+#define K2_MAKE_ALIGN_COM    (1 << 11)
 #define K2_REDUCED_Y_SCALE  100000.
 
 // Flags for SetupFrameAligning (bit 1 is apply gain ref, bit 7 is for early return)
-// (And bit 5 is for synchronous align/save, and bit 6 for apply defects, 8 for async in RAM)
+// (And bit 5 is for synchronous align/save, and bit 6 for apply defects, 
+// 8 for async in RAM, 11 for making an align com)
 #define K2FA_USE_HYBRID_SHIFTS       1
 #define K2FA_SMOOTH_SHIFTS     (1 << 2)
 #define K2FA_GROUP_REFINE      (1 << 3)
 #define K2FA_DEFER_GPU_SUM     (1 << 4)
 #define K2FA_MAKE_EVEN_ODD     (1 << 9)
-#define K2FA_PRESERVE_FLOATS   (1 << 10)
+#define K2FA_KEEP_PRECISION    (1 << 10)
+
+// Flags for MakeAlignComFile
+#define K2FA_WRITE_MDOC_TEXT          1
 
 // Flags for AcquireDSImage in lineSync argument
 #define DS_LINE_SYNC             1
@@ -74,7 +80,8 @@ enum {GS_ExecuteScript = 1, GS_SetDebugMode, GS_SetDMVersion, GS_SetCurrentCamer
       GS_SetK2Parameters, GS_ChunkHandshake, GS_SetupFileSaving, GS_GetFileSaveResult,
       GS_SetupFileSaving2, GS_GetDefectList, GS_SetK2Parameters2, GS_StopContinuousCamera,
       GS_GetPluginVersion, GS_GetLastError, GS_FreeK2GainReference, GS_IsGpuAvailable,
-      GS_SetupFrameAligning, GS_FrameAlignResults, GS_ReturnDeferredSum
+      GS_SetupFrameAligning, GS_FrameAlignResults, GS_ReturnDeferredSum, 
+      GS_MakeAlignComFile
 };
 
 #endif

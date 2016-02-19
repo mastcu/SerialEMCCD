@@ -109,9 +109,10 @@ static ArgDescriptor sFuncTable[] = {
   {GS_GetLastError,         0, 0, 0,   1, 0, 0,   FALSE},
   {GS_FreeK2GainReference,  1, 0, 0,   0, 0, 0,   FALSE},
   {GS_IsGpuAvailable,       1, 0, 0,   1, 0, 1,   FALSE},
-  {GS_SetupFrameAligning,   12, 0, 12, 1, 0, 0,   TRUE},
+  {GS_SetupFrameAligning,   12, 0, 8,  1, 0, 0,   TRUE},
   {GS_FrameAlignResults,    0, 0, 0,   1, 0, 13,  FALSE},
   {GS_ReturnDeferredSum,    3, 0, 0,   4, 0, 0,   FALSE},
+  {GS_MakeAlignComFile,     3, 0, 2,   1, 0, 0,   TRUE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -497,6 +498,10 @@ static int ProcessCommand(int numBytes)
 
   // Get the function code as the second element of the buffer
   if (numBytes < 8 || numBytes > sArgBufSize) {
+    sprintf(sMessageBuf, "Numbytes = %d, sArgBufSize = %d: %s\n", numBytes, 
+      sArgBufSize, numBytes < 8 ? "message too short" : 
+      "message too long (numBytes wrong?)");
+    gPlugInWrapper.ErrorToResult(sMessageBuf, "SerialEMSocket: ");
     SendArgsBack(numBytes < 8 ? -4 : -5);  // Inadequate length or too big
     return 1;
   }
@@ -653,11 +658,10 @@ static int ProcessCommand(int numBytes)
 
     case GS_SetupFrameAligning:
       gPlugInWrapper.SetupFrameAligning(sLongArgs[1], sDoubleArgs[0], sDoubleArgs[1], 
-        sDoubleArgs[2], sDoubleArgs[3], sDoubleArgs[4], sDoubleArgs[5], sLongArgs[2], 
+        sDoubleArgs[2], sDoubleArgs[3], sDoubleArgs[5], sLongArgs[2], 
         sLongArgs[3], sLongArgs[4], sLongArgs[5], sLongArgs[6], sLongArgs[7], 
         sLongArgs[8], sDoubleArgs[6], sDoubleArgs[7], sLongArgs[9], sLongArgs[10], 
-        sLongArgs[11], sDoubleArgs[8], sDoubleArgs[9], sDoubleArgs[10], sDoubleArgs[11], 
-        sLongArray, &sLongArgs[1]);
+        sLongArgs[11], sDoubleArgs[8], sLongArray, &sLongArgs[1]);
       SendArgsBack(0);
       break;
 
@@ -666,6 +670,12 @@ static int ProcessCommand(int numBytes)
         &sDoubleArgs[3], &sDoubleArgs[4], &sDoubleArgs[5], &sDoubleArgs[6], 
         &sDoubleArgs[7], &sDoubleArgs[8], &sDoubleArgs[9], &sLongArgs[1], 
         &sDoubleArgs[10], &sDoubleArgs[11], &sDoubleArgs[12]);
+      SendArgsBack(0);
+      break;
+
+    case GS_MakeAlignComFile:
+      gPlugInWrapper.MakeAlignComFile(sLongArgs[1], sLongArgs[2], sDoubleArgs[0], 
+        sDoubleArgs[1], sLongArray, &sLongArgs[1]);
       SendArgsBack(0);
       break;
 
