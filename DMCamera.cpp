@@ -223,6 +223,10 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 //                           (version 104)
 //      K2_RAW_COUNTING_4BIT  - Save non-normalized counting frames as 4-bit, not 8-bit
 //                           (version 104)
+//      K2_MAKE_DEFERRED_SUM  - Make a full sum and save it for return with 
+//                           ReturnDeferredSum (version 105)
+//      K2_SAVE_TIMES_100  - Save normalized frames times 100, in shorts for counting mode
+//                           or for super-res mode
 //   numGrabSum is relevant when doing an early return; it should be set from an unsigned
 //      int with the number of frames to sum in the low 16 bits and, for GMS >= 2.3.1,
 //      the number of frames to grab into a local stack in the high 16 bits.  The local
@@ -244,9 +248,11 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 // whether to set K2_ASYNC_IN_RAM (with or without an early return) and for setting the
 // number of frames to grab with an early return (with or without a RAM stack in DM).  
 // The RAM stack in DM is stored in native chip sizeX * sizeY * 2 bytes per frame 
-// regardless of mode; the grabbed stack is stored in twice that space for super-res; 
-// memory is freed from the RAM stack in DM as soon as the frame is accessed.  See
-// SerialEM code for handling of this.
+// regardless of mode; the grabbed stack is usually stored in twice that space for 
+// super-res; but if saving times 100, the super-res takes 4 times that space, or if
+// keeping precision in alignment, counting takes twice the RAM stack space and super-res
+// takes 4 times the RAM stack space. Memory is freed from the RAM stack in DM as soon as
+// the frame is accessed.  See SerialEM code for handling of this.
 //
 STDMETHODIMP CDMCamera::SetupFileSaving2(long rotationFlip, BOOL filePerImage, 
                                         double pixelSize, long flags, double numGrabSum,
@@ -279,6 +285,30 @@ STDMETHODIMP CDMCamera::IsGpuAvailable(long gpuNum, long *available, double *gpu
   return S_OK;
 }
 
+// Sets up frame alignment to be done in the plugin or in IMOD.
+// alignFlags are as defined in SEMCCDDefines.h:
+//   K2FA_USE_HYBRID_SHIFTS  - Use hybrid shifts when there are multiple filters
+//   K2_COPY_GAIN_REF        - APPLY a gain reference whose name is in strings
+//   K2FA_SMOOTH_SHIFTS      - Smooth shifts at end
+//   K2FA_GROUP_REFINE       - Refine with group sums
+//   K2FA_DEFER_GPU_SUM      - Defer summing on the GPU
+//   K2_SAVE_SYNCHRON        - Acquire stack synchronously with script calls
+//   K2_SAVE_DEFECTS         - Apply a defect list
+//   K2_EARLY_RETURN         - Return early, with no sum, or unaligned sum of subset
+//   K2_ASYNC_IN_RAM         - Acquire stack in DM asynchronously into RAM
+//   K2FA_MAKE_EVEN_ODD      - Make an FRC after computing sum
+//   K2FA_KEEP_PRECISION     - When aligning in plugin, pass floating point images to 
+//                             alignment routine; when aligning in IMOD, write floats
+//   K2_MAKE_ALIGN_COM       - Make an align com file
+// 
+//   nSumAndGrab is relevant when doing an early return; it should be set from an unsigned
+//      int with the number of frames to sum in the low 16 bits and, for GMS >= 2.3.1,
+//      the number of frames to grab into a local stack in the high 16 bits.
+//   strings should contain concatenated null-terminated strings as follows:
+//      full name of the gain reference to apply, if K2_COPY_GAIN_REF is set in flags
+//      full defect string, if K2_SAVE_DEFECTS is set
+//      full name of alignment command file, if K2_MAKE_ALIGN_COM is set
+//
 STDMETHODIMP CDMCamera::SetupFrameAligning(long aliBinning, double rad2Filt1, 
   double rad2Filt2, double rad2Filt3, double sigma2Ratio, 
   double truncLimit, long alignFlags, long gpuFlags, long numAllVsAll, long groupSize, 
