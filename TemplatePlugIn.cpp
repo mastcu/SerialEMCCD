@@ -176,6 +176,7 @@ struct ThreadData
   int iReadMode;
   double dFrameTime;
   BOOL bAlignFrames;
+  BOOL bSaveTimes100;
   char strFilterName[MAX_FILTER_NAME];
   int iHardwareProc;
   string strRootName;
@@ -731,9 +732,12 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     mTD.bMakeDeferredSum = true;
   if (saveFrames == SAVE_FRAMES)
     sLastSaveFloatScaling = mTD.fFloatScaling / (divideBy2 ? 2.f : 1.f);
+  mTD.bSaveTimes100 = saveFrames == SAVE_FRAMES && (mTD.iSaveFlags & K2_SAVE_TIMES_100);
 
-  // Set flag to keep precision when indicated or when it has no cost
-  mTD.bFaKeepPrecision = (!mTD.iNumGrabAndStack || mTD.bFaKeepPrecision) && 
+  // Set flag to keep precision when indicated or when it has no cost, but not if frames
+  // are being saved times 100
+  mTD.bFaKeepPrecision = (!mTD.iNumGrabAndStack || (mTD.bFaKeepPrecision && 
+    !mTD.bSaveTimes100)) && 
     mTD.bUseFrameAlign && sReadModes[mTD.iReadMode] != K2_LINEAR_READ_MODE && 
     processing == GAIN_NORMALIZED;
   m_bNextSaveResultsFromCopy = false;
@@ -2629,8 +2633,12 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
 {
   // Float super-res image is from software processing and needs special scaling
   // into bytes, set divide -1 as flag for this
-  if (td->isSuperRes && td->isFloat)
+  if (td->isSuperRes && td->isFloat && !td->bSaveTimes100)
     frameDivide = (td->bFaKeepPrecision && td->iNumGrabAndStack) ? -3 : -1;
+
+  // Multiply float scaling by 100 if flat is set and they are floats
+  if (td->bSaveTimes100)
+    td->fFloatScaling *= 100.f;
 
   // But if they are counting mode images in integer, they need to not be scaled
   // or divided by 2 if placed into shorts, and they may be packed to bytes
@@ -2669,7 +2677,7 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
     sWriteScaling = td->fFloatScaling;
     if (frameDivide > 0)
       sWriteScaling /= 2.;
-    else if (frameDivide == -1 ||frameDivide == -3 )
+    else if (frameDivide == -1 || frameDivide == -3 )
       sWriteScaling = SUPERRES_FRAME_SCALE;
   }
 
@@ -2775,6 +2783,8 @@ static int InitializeFrameAlign(ThreadData *td)
   if (td->bFaKeepPrecision)
     td->fAlignScaling = B3DCHOICE(td->isSuperRes && td->iNumGrabAndStack, 
       SUPERRES_FRAME_SCALE * SUPERRES_PRESERVE_SCALE, 1.f);
+  else if (td->iNumGrabAndStack && td->isFloat && td->bSaveTimes100)
+    td->fAlignScaling = td->fFloatScaling * divideScale;
   else if (td->iNumGrabAndStack && td->isFloat)
     td->fAlignScaling = B3DCHOICE(td->isSuperRes, 16.f, td->fSavedScaling * divideScale);
   else
@@ -3275,10 +3285,9 @@ static int WriteAlignComFile(ThreadData *td, string inputFile, bool ifMdoc)
   SplitExtension(inputFile, outputRoot, outputExt);
   if (ifMdoc) {
     temp = outputRoot;
-    outputExt;
     SplitExtension(temp, outputRoot, temp2);
     if (temp2.length())
-      outputExt = temp2 + outputExt;
+      outputExt = temp2;
   } else if (outputExt == ".tif")
     outputExt = ".mrc";
   comStr += "OutputImageFile " + outputRoot + "_ali" + outputExt + "\n";

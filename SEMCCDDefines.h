@@ -34,6 +34,7 @@ WRITE_COM_ERROR, OPEN_MDOC_ERROR, WRITE_MDOC_ERROR, COPY_MDOC_ERROR};
 #define K2_SAVE_4BIT_MRC_MODE  (1 << 12)
 #define K2_RAW_COUNTING_4BIT   (1 << 13)
 #define K2_MAKE_DEFERRED_SUM   (1 << 14)
+#define K2_SAVE_TIMES_100      (1 << 15)
 
 // Flags for SetK2Parameters
 #define K2_ANTIALIAS_MASK    7
