@@ -323,14 +323,15 @@ STDMETHODIMP CDMCamera::SetupFrameAligning(long aliBinning, double rad2Filt1,
   return S_OK;
 }
 
+// Return the various alignment results: distances, residual values, and FRC crossings
+// The FRC crossings and FRC at half nyquist are scaled by K2FA_FRC_INT_SCALE
 STDMETHODIMP CDMCamera::FrameAlignResults(double *rawDist, double *smoothDist, 
   double *resMean, double *maxResMax, double *meanRawMax, double *maxRawMax, 
-  double *crossHalf, double *crossQuarter, double *crossEighth, double *halfNyq, 
-  long *dumInt1, double *dumDbl1, double *dumDbl2, double *dumDbl3)
+  long *crossHalf, long *crossQuarter, long *crossEighth, long *halfNyq, 
+  long *dumInt1, double *dumDbl1, double *dumDbl2)
 {
   gPlugInWrapper.FrameAlignResults(rawDist, smoothDist, resMean, maxResMax, meanRawMax, 
-    maxRawMax, crossHalf, crossQuarter, crossEighth, halfNyq, dumInt1, dumDbl1, dumDbl2, 
-    dumDbl3);
+    maxRawMax, crossHalf, crossQuarter, crossEighth, halfNyq, dumInt1, dumDbl1, dumDbl2);
   return S_OK;
 }
 

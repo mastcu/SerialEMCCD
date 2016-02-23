@@ -53,6 +53,8 @@ WRITE_COM_ERROR, OPEN_MDOC_ERROR, WRITE_MDOC_ERROR, COPY_MDOC_ERROR};
 #define K2FA_MAKE_EVEN_ODD     (1 << 9)
 #define K2FA_KEEP_PRECISION    (1 << 10)
 
+#define K2FA_FRC_INT_SCALE     1000000.
+
 // Flags for MakeAlignComFile
 #define K2FA_WRITE_MDOC_TEXT          1
 

@@ -110,7 +110,7 @@ static ArgDescriptor sFuncTable[] = {
   {GS_FreeK2GainReference,  1, 0, 0,   0, 0, 0,   FALSE},
   {GS_IsGpuAvailable,       1, 0, 0,   1, 0, 1,   FALSE},
   {GS_SetupFrameAligning,   12, 0, 8,  1, 0, 0,   TRUE},
-  {GS_FrameAlignResults,    0, 0, 0,   1, 0, 13,  FALSE},
+  {GS_FrameAlignResults,    0, 0, 0,   5, 0, 8,   FALSE},
   {GS_ReturnDeferredSum,    3, 0, 0,   4, 0, 0,   FALSE},
   {GS_MakeAlignComFile,     3, 0, 2,   1, 0, 0,   TRUE},
   {-1, 0,0,0,0,0,0,FALSE}
@@ -271,7 +271,7 @@ static DWORD WINAPI SocketProc(LPVOID pParam)
 
   // Set the value to indicate we are through all the startup
   sStartupError = 0;
-  if (gPlugInWrapper.GetDebugVal() > 1)
+  if ((gPlugInWrapper.GetDebugVal() % 10) > 1)
     gPlugInWrapper.DebugToResult("Socket startup OK, going to start select loop\n");
   
   // Loop on listening for connections and accepting them or receiving commands
@@ -304,7 +304,7 @@ static DWORD WINAPI SocketProc(LPVOID pParam)
     sprintf(sMessageBuf, "Select returned with Ready channel: listener %d client %d\n",
       FD_ISSET(hListener, &readFds), 
       (sHClient != INVALID_SOCKET && FD_ISSET(sHClient, &readFds)) ? 1:0);
-    if (gPlugInWrapper.GetDebugVal() > 1)
+    if ((gPlugInWrapper.GetDebugVal() % 10) > 1)
       gPlugInWrapper.DebugToResult(sMessageBuf);
 
     // There is something to do.  Check the client first (Does ISSET Work?)
@@ -334,7 +334,7 @@ static DWORD WINAPI SocketProc(LPVOID pParam)
         if (!FinishGettingBuffer(numBytes, numExpected)) {
           sprintf(sMessageBuf, "SerialEMSocket: got %d bytes via recv on socket %d\n",
             numExpected, sHClient);
-          if (gPlugInWrapper.GetDebugVal() > 1)
+          if ((gPlugInWrapper.GetDebugVal() % 10) > 1)
             gPlugInWrapper.DebugToResult(sMessageBuf);
           sProcessingCommand = true;
           ProcessCommand(numExpected);
@@ -405,7 +405,7 @@ static int SendBuffer(char *buffer, int numBytes)
   int numToSend, numSent;
   sprintf(sMessageBuf, "In SendBuffer, socket %d, sending %d bytes\n", sHClient,
     numBytes);
-  if (gPlugInWrapper.GetDebugVal() > 1)
+  if ((gPlugInWrapper.GetDebugVal() % 10) > 1)
     gPlugInWrapper.DebugToResult(sMessageBuf);
   while (numTotalSent < numBytes) {
     numToSend = numBytes - numTotalSent;
@@ -658,7 +658,7 @@ static int ProcessCommand(int numBytes)
 
     case GS_SetupFrameAligning:
       gPlugInWrapper.SetupFrameAligning(sLongArgs[1], sDoubleArgs[0], sDoubleArgs[1], 
-        sDoubleArgs[2], sDoubleArgs[3], sDoubleArgs[5], sLongArgs[2], 
+        sDoubleArgs[2], sDoubleArgs[3], sDoubleArgs[4], sLongArgs[2], 
         sLongArgs[3], sLongArgs[4], sLongArgs[5], sLongArgs[6], sLongArgs[7], 
         sLongArgs[8], sDoubleArgs[6], sDoubleArgs[7], sLongArgs[9], sLongArgs[10], 
         sLongArgs[11], sDoubleArgs[8], sLongArray, &sLongArgs[1]);
@@ -667,9 +667,9 @@ static int ProcessCommand(int numBytes)
 
     case GS_FrameAlignResults:
       gPlugInWrapper.FrameAlignResults(&sDoubleArgs[0], &sDoubleArgs[1], &sDoubleArgs[2], 
-        &sDoubleArgs[3], &sDoubleArgs[4], &sDoubleArgs[5], &sDoubleArgs[6], 
-        &sDoubleArgs[7], &sDoubleArgs[8], &sDoubleArgs[9], &sLongArgs[1], 
-        &sDoubleArgs[10], &sDoubleArgs[11], &sDoubleArgs[12]);
+        &sDoubleArgs[3], &sDoubleArgs[4], &sDoubleArgs[5], &sLongArgs[1], 
+        &sLongArgs[2], &sLongArgs[3], &sLongArgs[4], &sLongArgs[5], 
+        &sDoubleArgs[6], &sDoubleArgs[7]);
       SendArgsBack(0);
       break;
 

@@ -354,8 +354,8 @@ public:
     char *refName, char *defects, char *comName, long *error);
   void FrameAlignResults(double *rawDist, double *smoothDist, 
     double *resMean, double *maxResMax, double *meanRawMax, double *maxRawMax, 
-    double *crossHalf, double *crossQuarter, double *crossEighth, double *halfNyq, 
-    long *dumInt1, double *dumDbl1, double *dumDbl2, double *dumDbl3);
+    long *crossHalf, long *crossQuarter, long *crossEighth, long *halfNyq, 
+    long *dumInt1, double *dumDbl1, double *dumDbl2);
   void MakeAlignComFile(long flags, long dumInt1, double dumDbl1, 
     double dumDbl2, char *mdocName, char *mdocFileOrText, long *error);
   int ReturnDeferredSum(short array[], long *arrSize, long *width, long *height); 
@@ -1570,8 +1570,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         SET_ERROR(IMAGE_NOT_FOUND);
       }
 
-      if (!doingStack && !(saveFrames && (needSum || td->bEarlyReturn)) && 
-        !td->bUseFrameAlign) {
+      // Get regular image if no frame alignment and getting a deferred sum in old API,
+      // or whenever not saving with an early return or need for a sum
+      if (!doingStack && !td->bUseFrameAlign && ((useOldAPI && td->bMakeDeferredSum) || 
+        !(saveFrames && (needSum || td->bEarlyReturn)))) {
           j = 20;
 
           // REGULAR OLD IMAGE
@@ -1590,10 +1592,21 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             DebugToResult(td->strTemp);
           }
           imageData = imageLp->get();   j++;
+          if (td->bMakeDeferredSum) {
+            td->array = td->tempBuf;
+            if (!(td->iAntialias || td->bMakeSubarea))
+              array = td->tempBuf;
+          }
           ProcessImage(imageData, array, td->dataSize, td->width, td->height, divideBy2, 
             transpose, td->byteSize, td->isInteger, td->isUnsignedInt, td->fFloatScaling);
           GainNormalizeSum(td, array);
           SubareaAndAntialiasReduction(td, array);
+          if (td->bMakeDeferredSum) {
+            sDeferredSum = (short *)td->array;
+            sValidDeferredSum = true;
+            td->tempBuf = NULL;
+            td->array = NULL;
+          }
           delete imageLp;
           imageLp = NULL;
 
@@ -1718,9 +1731,11 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             if (exposureDone && !td->iReadyToReturn && 
               td->iNumSummed >= td->iNumFramesToSum)
                 SetWatchedDataValue(td->iReadyToReturn, 1);
-          } else if (needSum && !td->bUseFrameAlign && td->bMakeDeferredSum) {
+          } else if (needSum && !td->bUseFrameAlign && td->bMakeDeferredSum && !useOldAPI) 
+          {
 
             // Keep adding into sumBuf if not doing frame align and deferred sum is wanted
+            // in the new API
             AddToSum(td, imageData, td->sumBuf);
           }
 
@@ -1845,7 +1860,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         procOut = td->tempBuf;
         sDeferredSum = procOut;
         td->tempBuf = NULL;
-     }
+      }
 
       // Return the full sum here after all temporary use of array is over
       if (td->bUseFrameAlign) {
@@ -1858,7 +1873,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           divideBy2, transpose, 4, !td->isFloat, false, td->fSavedScaling);
         GainNormalizeSum(td, procOut);
         if (td->iAntialias && td->bMakeDeferredSum) {
-          sDeferredSum = (short*)td->sumBuf;
+          sDeferredSum = (short *)td->sumBuf;
           td->array = sDeferredSum;
           td->sumBuf = NULL;
         }
@@ -1964,7 +1979,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   return errorRet;
 }
 
-// Do antialias reduction if it is called for
+// Do antialias reduction or extract subarea if it is called for, from array to td->array
 static void SubareaAndAntialiasReduction(ThreadData *td, void *array)
 {
   long width = td->width;
@@ -4512,6 +4527,8 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
   mTD.bFaMakeEvenOdd = (alignFlags & K2FA_MAKE_EVEN_ODD);
   mTD.bFaKeepPrecision = !makingCom && (alignFlags & K2FA_KEEP_PRECISION);
   mTD.bFaOutputFloats = makingCom && (alignFlags & K2FA_KEEP_PRECISION);
+  sprintf(m_strTemp, "SetupFrameAligning called with flags %x\n", alignFlags);
+  DebugToResult(m_strTemp);
   *error = ManageEarlyReturn(alignFlags, nSumAndGrab);
 #endif
 }
@@ -4521,8 +4538,8 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
  */
 void TemplatePlugIn::FrameAlignResults(double *rawDist, double *smoothDist, 
     double *resMean, double *maxResMax, double *meanRawMax, double *maxRawMax, 
-    double *crossHalf, double *crossQuarter, double *crossEighth, double *halfNyq, 
-    long *dumInt1, double *dumDbl1, double *dumDbl2, double *dumDbl3)
+    long *crossHalf, long *crossQuarter, long *crossEighth, long *halfNyq, 
+    long *dumInt1, double *dumDbl1, double *dumDbl2)
 {
   *rawDist = mTDcopy.fFaRawDist;
   *smoothDist = mTDcopy.fFaSmoothDist;
@@ -4530,10 +4547,10 @@ void TemplatePlugIn::FrameAlignResults(double *rawDist, double *smoothDist,
   *maxResMax = mTDcopy.fFaMaxResMax;
   *meanRawMax = mTDcopy.fFaMeanRawMax;
   *maxRawMax = mTDcopy.fFaMaxRawMax;
-  *crossHalf = mTDcopy.fFaCrossHalf;
-  *crossQuarter = mTDcopy.fFaCrossQuarter;
-  *crossEighth = mTDcopy.fFaCrossEighth;
-  *halfNyq = mTDcopy.fFaHalfNyq;
+  *crossHalf = B3DNINT(K2FA_FRC_INT_SCALE * mTDcopy.fFaCrossHalf);
+  *crossQuarter = B3DNINT(K2FA_FRC_INT_SCALE * mTDcopy.fFaCrossQuarter);
+  *crossEighth = B3DNINT(K2FA_FRC_INT_SCALE * mTDcopy.fFaCrossEighth);
+  *halfNyq = B3DNINT(K2FA_FRC_INT_SCALE * mTDcopy.fFaHalfNyq);
 }
 
 /*
@@ -5289,13 +5306,12 @@ void PlugInWrapper::SetupFrameAligning(long aliBinning, double rad2Filt1,
 
 void PlugInWrapper::FrameAlignResults(double *rawDist, double *smoothDist, 
   double *resMean, double *maxResMax, double *meanRawMax, double *maxRawMax, 
-  double *crossHalf, double *crossQuarter, double *crossEighth, double *halfNyq, 
-  long *dumInt1, double *dumDbl1, double *dumDbl2, double *dumDbl3)
+  long *crossHalf, long *crossQuarter, long *crossEighth, long *halfNyq, 
+  long *dumInt1, double *dumDbl1, double *dumDbl2)
 {
   mLastRetVal = 0;
   gTemplatePlugIn.FrameAlignResults(rawDist, smoothDist, resMean, maxResMax, meanRawMax, 
-    maxRawMax, crossHalf, crossQuarter, crossEighth, halfNyq, dumInt1, dumDbl1, dumDbl2, 
-    dumDbl3);
+    maxRawMax, crossHalf, crossQuarter, crossEighth, halfNyq, dumInt1, dumDbl1, dumDbl2);
 }
 
 void PlugInWrapper::MakeAlignComFile(long flags, long dumInt1, double dumDbl1, 

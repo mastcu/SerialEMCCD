@@ -63,8 +63,8 @@ public:
     long *strings, long *error);
   void FrameAlignResults(double *rawDist, double *smoothDist, 
     double *resMean, double *maxResMax, double *meanRawMax, double *maxRawMax, 
-    double *crossHalf, double *crossQuarter, double *crossEighth, double *halfNyq, 
-    long *dumInt1, double *dumDbl1, double *dumDbl2, double *dumDbl3);
+    long *crossHalf, long *crossQuarter, long *crossEighth, long *halfNyq, 
+    long *dumInt1, double *dumDbl1, double *dumDbl2);
   void MakeAlignComFile(long flags, long dumInt1, double dumDbl1, 
     double dumDbl2, long *strings, long *error);
   int ReturnDeferredSum(short array[], long *arrSize, long *width, long *height); 
