@@ -508,6 +508,10 @@ void TemplatePlugIn::Run()
 {
   int socketRet, wsaError;
   char buff[80];
+  static bool wasRun = false;
+  if (wasRun)
+    return;
+  wasRun = true;
 #ifndef GMS2
   DM::Window results = DM::GetResultsWindow( true );
 #endif
@@ -2111,6 +2115,7 @@ static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &e
   int refInd = td->isSuperRes ? 1 : 0;
   ImodImageFile *iiFile = NULL;
   int error = 0;
+  MrcHeader *hdr;
 #ifdef _WIN64
   if (!sK2GainRefData[refInd] || sK2GainRefTime[refInd] + 10. < td->curRefTime) {
     iiFile = iiOpen(td->strGainRefToCopy.c_str(), "rb");
@@ -2127,6 +2132,11 @@ static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &e
     if (!error) {
       try {
         sK2GainRefData[refInd] = new float[iiFile->nx * iiFile->nx];
+
+        // We are working with inverted images so the reference needs to be loaded in
+        // native inverted form
+        hdr = (MrcHeader *)iiFile->header;
+        hdr->yInverted = 0;
         error = iiReadSection(iiFile, (char *)sK2GainRefData[refInd], 0);
         if (error) {
           sprintf(td->strTemp, "error %d occurred reading the gain reference file",
@@ -3345,9 +3355,9 @@ static int WriteAlignComFile(ThreadData *td, string inputFile, bool ifMdoc)
 * GN single/sum  float               float                      float
 * GN frames      float               float                      float
 */
-static void  ProcessImage(void *imageData, void *array, int dataSize, long width, 
-                          long height, long divideBy2, long transpose, int byteSize, 
-                          bool isInteger, bool isUnsignedInt, float floatScaling)
+static void ProcessImage(void *imageData, void *array, int dataSize, long width, 
+                         long height, long divideBy2, long transpose, int byteSize, 
+                         bool isInteger, bool isUnsignedInt, float floatScaling)
 {
   int i, j;
   unsigned int *uiData;
