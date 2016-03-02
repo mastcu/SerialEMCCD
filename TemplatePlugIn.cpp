@@ -424,6 +424,10 @@ void TemplatePlugIn::Run()
 {
   int socketRet, wsaError;
   char buff[80];
+  static bool wasRun = false;
+  if (wasRun)
+    return;
+  wasRun = true;
 #ifndef GMS2
   DM::Window results = DM::GetResultsWindow( true );
 #endif
