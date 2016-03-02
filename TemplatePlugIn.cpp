@@ -1799,6 +1799,7 @@ static void GainNormalizeSum(ThreadData *td, void *array)
   float *refData;
   string errStr;
   ImodImageFile *iiFile = NULL;
+  MrcHeader *hdr;
   if (!td->bGainNormSum)
     return;
   if (td->refCopyReturnVal) {
@@ -1820,6 +1821,11 @@ static void GainNormalizeSum(ThreadData *td, void *array)
       if (!error) {
         try {
           sK2GainRefData[refInd] = new float[td->width * td->height];
+
+          // We are working with inverted images so the reference needs to be loaded in
+          // native inverted form
+          hdr = (MrcHeader *)iiFile->header;
+          hdr->yInverted = 0;
           error = iiReadSection(iiFile, (char *)sK2GainRefData[refInd], 0);
           if (error) {
             sprintf(td->strTemp, "error %d occurred reading the gain reference file",
