@@ -4339,7 +4339,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 
     // If the string is new, one file per image, new directory, or the file doesn't
     // exist, write the text
-    if (newDefects || filePerImage || newDir || !_stat(m_strTemp, &statbuf)) {
+    if (newDefects || filePerImage || newDir || _stat(m_strTemp, &statbuf)) {
       *error = WriteTextFile(m_strTemp, m_strDefectsToSave.c_str(), 
         (int)m_strDefectsToSave.length(), OPEN_DEFECTS_ERROR, WRITE_DEFECTS_ERROR, false);
       mTD.strLastDefectName = defectName;
