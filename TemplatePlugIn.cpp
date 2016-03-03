@@ -3571,8 +3571,11 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
       sprintf(mess, "Dividing floats by 2 with scaling by %f\n", floatScaling);
       DebugToResult(mess);
       flIn = (float *)imageData;
-      for (i = 0; i < width * height; i++)
-        outData[i] = (short)(flIn[i] * floatScaling / 2.f + 0.5f);
+      for (i = 0; i < width * height; i++) {
+        flTmp = flIn[i] * floatScaling / 2.f + 0.5f;
+        B3DCLAMP(flTmp, -32767.f, 32767.f);
+        outData[i] = (short)flTmp;
+      }
     }
 
   } else {
@@ -3657,10 +3660,9 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
         "scaling\n");
       flIn = (float *)imageData;
       for (i = 0; i < width * height; i++) {
-        if (flIn[i] >= 0)
-          usData[i] = (unsigned short)(flIn[i] * floatScaling + 0.5f);
-        else
-          usData[i] = 0;
+        flTmp = flIn[i] * floatScaling + 0.5f;
+        B3DCLAMP(flTmp, 0.f, 65535.f);
+        usData[i] = (unsigned short)flTmp;
       }
     }
   }
