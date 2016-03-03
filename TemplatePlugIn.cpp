@@ -3731,7 +3731,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 
     // If the string is new, one file per image, new directory, or the file doesn't
     // exist, write the text
-    if (newDefects || filePerImage || newDir || !_stat(m_strTemp, &statbuf)) {
+    if (newDefects || filePerImage || newDir || _stat(m_strTemp, &statbuf)) {
       fp = fopen(m_strTemp, "wt");
       if (!fp) {
         *error = OPEN_DEFECTS_ERROR;
