@@ -546,7 +546,7 @@ static void CorrectPixels2Ways(CameraDefects *param, void *array, int type, int 
 {
   int i, xx, yy;
   for (i = 0; i < (int)param->badPixelX.size(); i++) {
-    if (i < param->pixUseMean.size() && param->pixUseMean[i] == useMean) {
+    if (i < (int)param->pixUseMean.size() && param->pixUseMean[i] == useMean) {
       xx = param->badPixelX[i] / binning - left;
       yy = param->badPixelY[i] / binning - top;
       if (xx >= 0 && yy >= 0 && xx < sizeX && yy < sizeY) {
@@ -1285,6 +1285,21 @@ int CorDefParseDefects(const char *strng, int fromString, CameraDefects &defects
   camSizeX = camSizeY = 0;
   defects.wasScaled = 0;
   defects.K2Type = 0;
+  defects.badColumnStart.clear();
+  defects.badColumnWidth.clear();
+  defects.partialBadCol.clear();
+  defects.partialBadWidth.clear();
+  defects.partialBadStartY.clear();
+  defects.partialBadEndY.clear();
+  defects.badRowStart.clear();
+  defects.badRowHeight.clear();
+  defects.partialBadRow.clear();
+  defects.partialBadHeight.clear();
+  defects.partialBadStartX.clear();
+  defects.partialBadEndX.clear();
+  defects.badPixelX.clear();
+  defects.badPixelY.clear();
+  defects.pixUseMean.clear();
 
   if (!fromString) {
     fp = fopen(strng, "r");
@@ -1532,8 +1547,15 @@ void CorDefRotateCoordsCCW(int binning, int &camSizeX, int &camSizeY, int &imSiz
   SWAP_IN_TEMP(imSizeX, imSizeY, ttop);
 }
 
-// Make line pointers and get quick mean/sd for a full image 
+// Make line pointers and get quick mean/sd for a full image, nx dimension = nx
 void CorDefSampleMeanSD(void *array, int type, int nx, int ny, float *mean, float *sd)
+{
+  CorDefSampleMeanSD(array, type, nx, nx, ny, mean, sd);
+}
+
+// Make line pointers and get quick mean/sd for a full image, arbitrary nxdim
+void CorDefSampleMeanSD(void *array, int type, int nxdim, int nx, int ny, float *mean, 
+                        float *sd)
 {
   int dsize, callType;
   float sample;
@@ -1555,7 +1577,7 @@ void CorDefSampleMeanSD(void *array, int type, int nx, int ny, float *mean, floa
       callType = 6;
       break;
   }
-  linePtrs = makeLinePointers(array, nx, ny, dsize);
+  linePtrs = makeLinePointers(array, nxdim, ny, dsize);
   if (!linePtrs)
     return;
   sample = (float)B3DMIN(1., 30000. / (nx * ny));

@@ -280,6 +280,7 @@ static int GetTypeAndSizeInfo(ThreadData *td, DM::Image &image, int loop, int ou
                               bool doingStack);
 static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum, 
                             long &frameDivide, bool &needProc);
+static void SimulateSuperRes(ThreadData *td, void *image);
 static int InitializeFrameAlign(ThreadData *td);
 static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice);
 static int WriteAlignComFile(ThreadData *td, string inputFile, bool ifMdoc);
@@ -431,6 +432,7 @@ TemplatePlugIn::TemplatePlugIn()
 
   sDataMutexHandle = CreateMutex(0, 0, 0);
   sImageMutexHandle = CreateMutex(0, 0, 0);
+  srand((unsigned int)sDataMutexHandle);
 #if defined(_WIN64) && GMS_SDK_VERSION < 31
   sDFAcquireMutexHandle = CreateMutex(0, 0, 0);
 #endif
@@ -712,7 +714,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
               long divideBy2, long corrections)
 {
   int saveFrames = NO_SAVE;
-  int newProc, err, procIn, binAdj, heightAdj, widthAdj, scaleAdj;
+  int newProc, err, procIn, heightAdj, widthAdj, binAdj, scaleAdj, binWidth, binHeight;
   bool swapXY = mTD.iRotationFlip > 0 && mTD.iRotationFlip % 2 && m_bDoseFrac;
   string errStr, aliHead;
 
@@ -868,18 +870,25 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
           return BAD_ANTIALIAS_PARAM;
       }
       binning = 1;
-      DebugToResult("Set up antialias");
+      DebugToResult("Set up antialias\n");
   } else
     mTD.iAntialias = 0;
 
   if (mTD.bUseFrameAlign) {
+    if (binAdj > 0) {
+      binWidth = widthAdj / binAdj;
+      binHeight = heightAdj / binAdj;
+    } else {
+      binWidth = 2 * widthAdj;
+      binHeight = 2 * heightAdj;
+    }
     
     // For reduced framealign image, check final sizes here
-    if (binning > 1 && (mTD.iFinalWidth > widthAdj / binAdj || 
-      mTD.iFinalHeight > heightAdj / binAdj)) {
+    if ((binning > 1 && (mTD.iFinalWidth > binWidth || mTD.iFinalHeight > binHeight)) ||
+      mTD.iFinalWidth < 0.9 * binWidth || mTD.iFinalHeight < 0.9 * binHeight) {
         sprintf(m_strTemp, "Bad parameters for final width after frame align with "
           "reduction:\n reduction expected to be %d x %d, final width %d x %d\n",
-          widthAdj / binAdj, heightAdj / binAdj, mTD.iFinalWidth, mTD.iFinalHeight);
+          binWidth, binHeight, mTD.iFinalWidth, mTD.iFinalHeight);
         ProblemToResult(m_strTemp);
         return BAD_FRAME_REDUCE_PARAM;
     }
@@ -1718,6 +1727,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           } else {
             imageData = imageLp->get();   j++;
           }
+          SimulateSuperRes(td, imageData);
           td->outData = (short *)imageData;
           outForRot = (short *)td->tempBuf;
 
@@ -2787,6 +2797,73 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
       sLastSaveNeededRef = !td->refCopyReturnVal;
   }
   return 0;
+}
+
+/*
+ * Produces a simulated super-resolution frame if it is blank and the environment 
+ * variable is set
+ */
+static void SimulateSuperRes(ThreadData *td, void *image)
+{
+  float *fdata = (float *)image;
+  unsigned char *bdata = (unsigned char *)image;
+  short *sdata = (short *)image;
+  int *idata = (int *)image;
+  int ind, val, cumSum = 0, target;
+  int numTest = 1000;
+  const int numFill = 1000;
+  double mean = td->dFrameTime * 3.75 * 0.806;
+
+  if (td->isSuperRes && getenv("SEMCCD_SIM_SUPERRES") != NULL) {
+    int newVals[numFill];
+
+    // Check that there are a lot of 0's
+    if (td->isFloat) {
+      for (ind = 0; ind < numTest; ind++)
+        if (fdata[ind])
+          return;
+    } else if (td->byteSize == 4) {
+      for (ind = 0; ind < numTest; ind++)
+        if (idata[ind])
+          return;
+    } else if (td->byteSize == 2) {
+      for (ind = 0; ind < numTest; ind++)
+        if (sdata[ind])
+          return;
+    } else {
+      for (ind = 0; ind < numTest; ind++)
+        if (bdata[ind])
+          return;
+    }
+
+    // Fill value array with random numbers
+    target = B3DNINT(mean * numFill);
+    for (ind = 0; ind < numFill - 20; ind++) {
+      val = B3DNINT(rand() * 2. * mean / RAND_MAX);
+      cumSum += val;
+      newVals[ind] = val;
+    }
+    for (; ind < numFill; ind++) {
+      val = B3DMAX(0, (target - cumSum) / (numFill - ind));
+      cumSum += val;
+      newVals[ind] = val;
+    }
+
+    // Fill the image array
+    if (td->isFloat) {
+      for (ind = 0; ind < td->width * td->height; ind++)
+        fdata[ind] = (float)newVals[ind % numFill];
+    } else if (td->byteSize == 4) {
+      for (ind = 0; ind < td->width * td->height; ind++)
+        idata[ind] = newVals[ind % numFill];
+    } else if (td->byteSize == 2) {
+      for (ind = 0; ind < td->width * td->height; ind++)
+        sdata[ind] = (short)newVals[ind % numFill];
+    } else {
+      for (ind = 0; ind < td->width * td->height; ind++)
+        bdata[ind] = (unsigned char)newVals[ind % numFill];
+    }
+  }
 }
 
 /*
@@ -4472,6 +4549,8 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
   bool makingCom = (alignFlags & K2_MAKE_ALIGN_COM) != 0 && comName != NULL;
   float memory;
   gpuFlags = gpuFlags & 65535;
+  if (m_HAcquireThread)
+    WaitForAcquireThread(WAIT_FOR_THREAD);
   if (gpuFlags && m_iGpuAvailable < 0)
     m_iGpuAvailable = sFrameAli.gpuAvailable(gpuNum, &memory, sDebug);
   if (gpuFlags && m_iGpuAvailable <= 0) {
