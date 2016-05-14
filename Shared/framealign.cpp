@@ -27,6 +27,7 @@
 typedef void (*FgpuNoArgType)(void);
 typedef int (*FgpuTwoIntType)(int, int);
 typedef int (*ReturnIntType)(void);
+typedef void (*ReturnTwoIntType)(int *, int *);
 typedef void (*SetGroupSizeType)(int);
 typedef int (*GpuAvailableType)(int, float *, int);
 typedef int (*SetupSummingType)(int, int, int, int, int);
@@ -37,8 +38,7 @@ typedef int (*NewFilterMaskType)(float *);
 typedef int (*ShiftAddToAlignSumType)(int, float, float, int);
 typedef int (*CrossCorrelateType)(int, int, float *, int, int);
 typedef int (*ProcessAlignImageType)(float *, int, int);
-typedef int (*ReturnAlignFFTsType)(std::vector<float *> *, std::vector<float *> *,
-                                   float *, float *);
+typedef int (*ReturnAlignFFTsType)(float **, float **, float *, float *);
 typedef void (*SetPrintFuncType)(CharArgType func);
 
 static HMODULE sGpuModule;
@@ -55,6 +55,7 @@ static NewFilterMaskType sFgpuNewFilterMask;
 static ShiftAddToAlignSumType sFgpuShiftAddToAlignSum;
 static CrossCorrelateType sFgpuCrossCorrelate;
 static ProcessAlignImageType sFgpuProcessAlignImage;
+static ReturnTwoIntType sFgpuNumberOfAlignFFTs;
 static ReturnAlignFFTsType sFgpuReturnAlignFFTs;
 static FgpuNoArgType sFgpuCleanSumItems;
 static FgpuNoArgType sFgpuCleanAlignItems;
@@ -79,6 +80,7 @@ static SetPrintFuncType sFgpuSetPrintFunc;
 #define sFgpuShiftAddToAlignSum fgpuShiftAddToAlignSum
 #define sFgpuCrossCorrelate fgpuCrossCorrelate
 #define sFgpuProcessAlignImage fgpuProcessAlignImage
+#define sFgpuNumberOfAlignFFTs fgpuNumberOfAlignFFTs
 #define sFgpuReturnAlignFFTs fgpuReturnAlignFFTs
 #define sFgpuCleanSumItems fgpuCleanSumItems
 #define sFgpuCleanAlignItems fgpuCleanAlignItems
@@ -160,7 +162,11 @@ int FrameAlign::initialize(int binSum, int binAlign, float trimFrac, int numAllV
   int expectStack, aliFiltSize, minFiltSize = 128;
   int xReduceTemp = 0, yReduceTemp = 0;
   bool doBinPad = trimFrac != 0. || taperFrac != 0.;
-  bool justFullFilt = numFilters == 1 && !(gpuFlags & GPU_FOR_ALIGNING);
+
+  // Make just a full filter mask with high-frequency included if only one filter,
+  // no GPU, and not refining at end
+  bool justFullFilt = numFilters == 1 && !cumAlignAtEnd && 
+    (gpuFlags & GPU_FOR_ALIGNING) == 0;
   int niceGpuLimit = 5;
 
   mDebug = debug % 10;
@@ -339,7 +345,7 @@ int FrameAlign::initialize(int binSum, int binAlign, float trimFrac, int numAllV
       mWrapTemp = B3DMALLOC(float, (aliFiltSize + 2 ) * aliFiltSize);
       for (ind = 0; ind < numFilters; ind++) {
         mSubFiltMask[ind] = B3DMALLOC(float, (aliFiltSize + 2 ) * aliFiltSize);
-        if (testAndCleanup(!mSubFiltMask[ind] || !mCorrFiltTemp || !mTempSubFilt || 
+        if (testAndCleanup(!mSubFiltMask[ind] || !mCorrFiltTemp || !mTempSubFilt ||
                            !mWrapTemp))
           return 2;
       }
@@ -568,6 +574,7 @@ int FrameAlign::gpuAvailable(int nGPU, float *memory, int debug)
     GET_PROC(ShiftAddToAlignSumType, sFgpuShiftAddToAlignSum, fgpuShiftAddToAlignSum);
     GET_PROC(CrossCorrelateType, sFgpuCrossCorrelate, fgpuCrossCorrelate);
     GET_PROC(ProcessAlignImageType, sFgpuProcessAlignImage, fgpuProcessAlignImage);
+    GET_PROC(ReturnTwoIntType, sFgpuNumberOfAlignFFTs, fgpuNumberOfAlignFFTs);
     GET_PROC(ReturnAlignFFTsType, sFgpuReturnAlignFFTs, fgpuReturnAlignFFTs);
     GET_PROC(FgpuNoArgType, sFgpuCleanSumItems, fgpuCleanSumItems);
     GET_PROC(FgpuNoArgType, sFgpuCleanAlignItems, fgpuCleanAlignItems);
@@ -658,6 +665,7 @@ int FrameAlign::nextFrame(void *frame, int type, float *gainRef, int nxGain, int
   float xShift, yShift, val, nearXshift = 0., nearYshift = 0.;
   bool needExtract = true;
   bool addToFull = mSummingMode < 0 || (mSummingMode == 0 &&  !mDeferSumming);
+  bool filterSubarea = mCumAlignAtEnd || (mGpuFlags & GPU_FOR_ALIGNING) != 0;
   int useType = type;
   int numFrameForAVA = mNumAllVsAll + mGroupSize - 1;
   int numBinPadForAVA = mGroupSize > 1 ? mGroupSize : mNumAllVsAll;
@@ -910,22 +918,27 @@ int FrameAlign::nextFrame(void *frame, int type, float *gainRef, int nxGain, int
       // Take FFT and save in stack on GPU if needed; if there is an error here, try to
       // recover the stack or the sum and just turn off GPU aligning
       if (sFgpuProcessAlignImage(binArr, saving ? aliFrameInd : -1, groupInd)) {
-        if (sFgpuReturnAlignFFTs(&mSavedBinPad, &mSavedGroups, 
-                                 mNumAllVsAll ? NULL : mAlignSum,
+        if (prepareToFetchAlignFFTs(saving ? aliFrameInd : -1))
+          return 3;
+        if (sFgpuReturnAlignFFTs(mSavedBinPad.size() ? &mSavedBinPad[0] : NULL,
+                                 mSavedGroups.size() ? &mSavedGroups[0] : NULL,
+                                 mNumAllVsAll ? NULL : mAlignSum, 
                                  saving ? NULL : mWorkBinPad)) {
           cleanup();
           return 3;
         }
         mGpuAligning = false;
-        if (saving) {
-          if (aliFrameInd < mSavedBinPad.size()) {
-            tempBin = mSavedBinPad[aliFrameInd];
-          } else {
-            tempBin = B3DMALLOC(float, mAlignPix);
-            if (testAndCleanup(!tempBin))
-              return 1;
-            mSavedBinPad.push_back(tempBin);
+
+        // Grouping with no refine at end was saved as real space, so need to take FFTs
+        if (mGroupSize > 1 && !mCumAlignAtEnd) {
+          for (ind = 0; ind < (int)mSavedBinPad.size() - (saving ? 1 : 0); ind++) {
+            todfftc(mSavedBinPad[ind], mAlignXpad, mAlignYpad, 0);
+            for (ix = 0; ix < mAlignPix; ix++)
+              mSavedBinPad[ind][ix] *= mFullFiltMask[ix];
           }
+        }
+        if (saving) {
+          tempBin = mSavedBinPad[aliFrameInd];
           memcpy(tempBin, binArr, mAlignBytes);
           binArr = tempBin;
         }
@@ -1011,7 +1024,8 @@ int FrameAlign::nextFrame(void *frame, int type, float *gainRef, int nxGain, int
         nearXshift = mXnearShifts[ind - 1] - mXnearShifts[ref];
         nearYshift = mYnearShifts[ind - 1] - mYnearShifts[ref];
         if (alignTwoFrames(useInd + ref - ind, useInd, nearXshift, nearYshift,
-                           filt, xShift, yShift, mNumFilters > 1, mDumpCorrs)) {
+                           filt, xShift, yShift, filterSubarea || mNumFilters > 1,
+                           mDumpCorrs)) {
           cleanup();
           return 2;
         }
@@ -1029,7 +1043,7 @@ int FrameAlign::nextFrame(void *frame, int type, float *gainRef, int nxGain, int
     if (!mCumAlignAtEnd)
       useInd = -1;
     if (mNumFrames && alignTwoFrames(-1, useInd, nearXshift, nearYshift, 0, xShift,
-                                     yShift, false, mDumpCorrs)) {
+                                     yShift, filterSubarea, mDumpCorrs)) {
       cleanup();
       return 2;
     }
@@ -1173,11 +1187,17 @@ void FrameAlign::findAllVsAllAlignment(bool justForLimits)
     numData = row;
     
     // Do robust fitting if enough data, fall back to regular fit on error
-    maxZeroWgt = 0;//B3DMIN(0.2 * numData, numFrames - 3);
-    if (doRobust && robustRegress(mFitMat, numCol, 1, numInCol, numData, 2, solMat, 
+    maxZeroWgt = (int)B3DMIN(0.1 * numData, numFrames - 3);
+    if (doRobust) {
+      row = robustRegress(mFitMat, numCol, 1, numInCol, numData, 2, solMat, 
                                   numInCol, NULL, xMean, xSD, mFitWork, mKfactor, 
-                                  &numIter, maxIter, maxZeroWgt, maxChange, maxOscill))
-      doRobust = false;
+                          &numIter, maxIter, maxZeroWgt, maxChange, maxOscill);
+      if (row) {
+        if (mDebug)
+          utilPrint("robustRegress failed with error %d\n", row);
+        doRobust = false;
+      }
+    }
     if (!doRobust)
       multRegress(mFitMat, numCol, 1, numInCol, numData, 2, 0, solMat, numInCol, NULL,
                   xMean, xSD, mFitWork);
@@ -1337,7 +1357,7 @@ int FrameAlign::finishAlignAndSum(float refineRadius2, float refineSigma2,
   // If nothing is aligned, it is an error
   if (!mNumFrames)
     return 1;
-
+  
   // Finish up with all-vs-all
   if (mNumAllVsAll && mSummingMode >= 0) {
     findAllVsAllAlignment(false);
@@ -1422,7 +1442,10 @@ int FrameAlign::finishAlignAndSum(float refineRadius2, float refineSigma2,
     XCorrFilterPart(mFullFiltMask, mFullFiltMask, mAlignXpad, mAlignYpad, mFiltFunc,
                     mFiltDelta);
     if (mGpuAligning && sFgpuNewFilterMask(mFullFiltMask)) {
-      if (sFgpuReturnAlignFFTs(&mSavedBinPad, &mSavedGroups, NULL, NULL))
+      if (prepareToFetchAlignFFTs(-1))
+        return 3;
+      if (sFgpuReturnAlignFFTs(mSavedBinPad.size() ? &mSavedBinPad[0] : NULL,
+                               mSavedGroups.size() ? &mSavedGroups[0] : NULL, NULL, NULL))
         return 3;
       mGpuAligning = false;
     }
@@ -1442,7 +1465,8 @@ int FrameAlign::finishAlignAndSum(float refineRadius2, float refineSigma2,
       
     for (iter = 0; iter < mCumAlignAtEnd; iter++) {
       mGroupSize = 1;
-      sFgpuSetGroupSize(1);
+      if (mGpuAligning)
+        sFgpuSetGroupSize(1);
       refXshift.clear();
       refYshift.clear();
       if (iter) {
@@ -1480,8 +1504,11 @@ int FrameAlign::finishAlignAndSum(float refineRadius2, float refineSigma2,
           // Do that on the GPU or in memory
           if (mGpuAligning) {
             if (sFgpuSumIntoGroup(frame + mGroupSize - 1, 0)) {
-              if (sFgpuReturnAlignFFTs(&mSavedBinPad, &mSavedGroups, mAlignSum,
-                                       NULL))
+              if (prepareToFetchAlignFFTs(-1))
+                return 3;
+              if (sFgpuReturnAlignFFTs(mSavedBinPad.size() ? &mSavedBinPad[0] : NULL,
+                                       mSavedGroups.size() ? &mSavedGroups[0] : NULL,
+                                       mAlignSum, NULL))
                 return 3;
               mGpuAligning = false;
             }
@@ -1498,9 +1525,14 @@ int FrameAlign::finishAlignAndSum(float refineRadius2, float refineSigma2,
         // If on GPU, that now needs subtracting and filtering
         if (mGpuAligning) {
           if (sFgpuSubtractAndFilterAlignSum(useFrame, groupRefine)) {
-            if (sFgpuReturnAlignFFTs(&mSavedBinPad, &mSavedGroups, mAlignSum, NULL))
+            if (prepareToFetchAlignFFTs(-1))
+              return 3;
+            if (sFgpuReturnAlignFFTs(mSavedBinPad.size() ? &mSavedBinPad[0] : NULL,
+                                     mSavedGroups.size() ? &mSavedGroups[0] : NULL, 
+                                     mAlignSum, NULL))
               return 3;
             mGpuAligning = false;
+            binArr = groupRefine ? mSavedGroups[0] : mSavedBinPad[frame];
           }
         }
 
@@ -1697,12 +1729,12 @@ int FrameAlign::alignTwoFrames(int refInd, int aliInd, float nearXshift, float n
   float minExpDist = 4.;
   float widthRatioCrit = 0.8f;
   float *refArr, *binArr;
-  filterSubarea = filterSubarea || mGpuAligning;
-  float *corrTemp = filterSubarea ? mCorrFiltTemp : mCorrBinPad;
-  int subXoffset = filterSubarea ? B3DNINT(-nearXshift / mBinAlign) : 0;
-  int subYoffset = filterSubarea ? B3DNINT(-nearYshift / mBinAlign) : 0;
-  int aliXsize = filterSubarea ? mAliFiltSize : mAlignXpad;
-  int aliYsize = filterSubarea ? mAliFiltSize : mAlignYpad;
+  bool useSubarea = filterSubarea || mGpuAligning;
+  float *corrTemp = useSubarea ? mCorrFiltTemp : mCorrBinPad;
+  int subXoffset = useSubarea ? B3DNINT(-nearXshift / mBinAlign) : 0;
+  int subYoffset = useSubarea ? B3DNINT(-nearYshift / mBinAlign) : 0;
+  int aliXsize = useSubarea ? mAliFiltSize : mAlignXpad;
+  int aliYsize = useSubarea ? mAliFiltSize : mAlignYpad;
   std::vector<float *> *savedVec = mGroupSize > 1 ? &mSavedGroups : &mSavedBinPad;
 
   // Going to store shifts but they will be negative because we are getting shift to align
@@ -1717,13 +1749,22 @@ int FrameAlign::alignTwoFrames(int refInd, int aliInd, float nearXshift, float n
     if (mGpuAligning) {
 
       // For GPU alignment, it extracts the wrapped image with origin in center
+      // which is ready for filtering the subarea
       if (sFgpuCrossCorrelate(aliInd, refInd, mTempSubFilt, subXoffset,
                               subYoffset)) {
-        if (sFgpuReturnAlignFFTs(&mSavedBinPad, &mSavedGroups, 
+        if (prepareToFetchAlignFFTs(-1))
+          return 3;
+        if (sFgpuReturnAlignFFTs(mSavedBinPad.size() ? &mSavedBinPad[0] : NULL, 
+                                 mSavedGroups.size() ? &mSavedGroups[0] : NULL, 
                                  refInd == -1 ? mAlignSum : NULL,
                                  (refInd < -1 || aliInd < 0) ? mWorkBinPad : NULL))
           return 3;
         mGpuAligning = false;
+      } else if (!filterSubarea) {
+
+        // But if we are not filtering, need to wrap back into corr array
+        wrapImage(mTempSubFilt, aliXsize + 2, aliXsize, aliYsize, corrTemp, aliXsize + 2, 
+              aliXsize, aliYsize, 0, 0);
       }
     }
     
@@ -1836,7 +1877,6 @@ int FrameAlign::addToSums(float *fullArr, int binInd, int frameNum, int filtInd)
   // Shift full image and add into final sum if one is passed
   if (fullArr) {
     //dumpFFT(fullArr, mFullXpad, mFullYpad, "full pad to sum", 1);
-
     // Try to do sum on GPU if flag set
     if (mGpuSumming) {
       mWallStart = wallTime();
@@ -1931,6 +1971,33 @@ void FrameAlign::adjustAndPushShifts(int topInd, int filt, int useFilt)
     mXshifts[filt].push_back(mXfitShifts[useFilt][ind] - mCumulXdiff[filt]);
     mYshifts[filt].push_back(mYfitShifts[useFilt][ind] - mCumulYdiff[filt]);
   }
+}
+
+/*
+ * Determine how many frames need to be copied from GPU after a failure and allocate
+ * arrays here; the vector operations at least do not work when vector is shared with
+ * a DLL for SEMCCD
+ */
+int FrameAlign::prepareToFetchAlignFFTs(int aliFrameInd)
+{
+  int numBinPads, numGroups, ind;
+  float *tempBin;
+  sFgpuNumberOfAlignFFTs(&numBinPads, &numGroups);
+  if (aliFrameInd >= numBinPads)
+    numBinPads = aliFrameInd + 1;
+  for (ind = (int)mSavedBinPad.size(); ind < numBinPads; ind++) {
+    tempBin = B3DMALLOC(float, mAlignPix);
+    if (testAndCleanup(!tempBin))
+      return 1;
+    mSavedBinPad.push_back(tempBin);
+  }
+  for (ind = (int)mSavedGroups.size(); ind < numGroups; ind++) {
+    tempBin = B3DMALLOC(float, mAlignPix);
+    if (testAndCleanup(!tempBin))
+      return 1;
+    mSavedGroups.push_back(tempBin);
+  }
+  return 0;
 }
 
 /*

@@ -841,8 +841,8 @@ void CorDefFindTouchingPixels(CameraDefects &defects, int camSizeX, int camSizeY
       (defects.usableRight > 0 && defects.usableRight < camSizeX - 1 && 
       xx >= defects.usableRight) ||
       (defects.usableTop > 0 && yy <= defects.usableTop) ||
-      defects.usableBottom > 0 && defects.usableBottom < camSizeY - 1 && 
-      yy >= defects.usableBottom ||
+      (defects.usableBottom > 0 && defects.usableBottom < camSizeY - 1 && 
+      yy >= defects.usableBottom) ||
       CheckPointNearFullLines(xx, defects.badColumnStart, defects.badColumnWidth, xdiff) 
       || CheckPointNearFullLines(yy, defects.badRowStart, defects.badRowHeight, xdiff) ||
       CheckPointNearPartialLines(xx, yy, defects.partialBadCol, defects.partialBadWidth,
@@ -906,7 +906,7 @@ void CorDefMergeDefectLists(CameraDefects &defects, unsigned short *xyPairs,
     if ((defects.usableLeft > 0 && xx < defects.usableLeft) ||
       (defects.usableRight > 0 && xx > defects.usableRight) ||
       (defects.usableTop > 0 && yy < defects.usableTop) ||
-      defects.usableBottom > 0 && yy > defects.usableBottom ||
+      (defects.usableBottom > 0 && yy > defects.usableBottom) ||
       CheckIfPointInFullLines(xx, defects.badColumnStart, defects.badColumnWidth) ||
       CheckIfPointInFullLines(yy, defects.badRowStart, defects.badRowHeight) ||
       CheckIfPointInPartialLines(xx, yy, defects.partialBadCol, defects.partialBadWidth,
@@ -1557,6 +1557,13 @@ void CorDefSampleMeanSD(void *array, int type, int nx, int ny, float *mean, floa
 void CorDefSampleMeanSD(void *array, int type, int nxdim, int nx, int ny, float *mean, 
                         float *sd)
 {
+  CorDefSampleMeanSD(array, type, nxdim, nx, ny, 0, 0, nx, ny, mean, sd);
+}
+
+// Make line pointers and get quick mean/sd for arbitrary subarea, arbitrary nxdim
+void CorDefSampleMeanSD(void *array, int type, int nxdim, int nx, int ny, int ixStart,
+                        int iyStart, int nxUse, int nyUse, float *mean, float *sd)
+{
   int dsize, callType;
   float sample;
   unsigned char **linePtrs;
@@ -1581,7 +1588,8 @@ void CorDefSampleMeanSD(void *array, int type, int nxdim, int nx, int ny, float 
   if (!linePtrs)
     return;
   sample = (float)B3DMIN(1., 30000. / (nx * ny));
-  sampleMeanSD(linePtrs, callType, nx, ny, sample, 0, 0, nx, ny, mean, sd);
+  sampleMeanSD(linePtrs, callType, nx, ny, sample, ixStart, iyStart, nxUse, nyUse, mean,
+    sd);
   free(linePtrs);
 }
 

@@ -43,8 +43,8 @@ class FrameGPU {
   int crossCorrelate(int aliInd, int refInd, float *subarea, int subXoffset,
                      int subYoffset);
   int processAlignImage(float *binArr, int stackInd, int groupInd);
-  int returnAlignFFTs(std::vector<float *> *saved, std::vector<float *> *groups,
-                      float *alignSum, float *workArr);
+  void numberOfAlignFFTs(int *numBinPad, int *numGroups);
+  int returnAlignFFTs(float **saved, float **groups, float *alignSum, float *workArr);
   void cleanSumItems();
   void cleanAlignItems();
   void zeroTimers() {mWallCopy = mWallFFT = mWallShift = mWallFilt = mWallConj = 
@@ -126,9 +126,9 @@ extern "C" {
   DLL_EX_IM int fgpuCrossCorrelate(int aliInd, int refInd, float *subarea, int subXoffset,
                      int subYoffset);
   DLL_EX_IM int fgpuProcessAlignImage(float *binArr, int stackInd, int groupInd);
-  DLL_EX_IM int fgpuReturnAlignFFTs(std::vector<float *> *saved, 
-                                    std::vector<float *> *groups,
-                                    float *alignSum, float *workArr);
+  DLL_EX_IM void fgpuNumberOfAlignFFTs(int *numBinPad, int *numGroups);
+  DLL_EX_IM int fgpuReturnAlignFFTs(float **saved, float **groups, float *alignSum, 
+                                    float *workArr);
   DLL_EX_IM void fgpuCleanSumItems();
   DLL_EX_IM void fgpuCleanAlignItems();
   DLL_EX_IM void fgpuZeroTimers();

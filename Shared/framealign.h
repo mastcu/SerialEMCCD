@@ -73,6 +73,7 @@ class FrameAlign {
   float surroundingMean(void *frame, int type, float truncLimit, int ix, int iy);
   void frameShiftFromGroups(int frame, int filt, float &shiftX, float &shiftY);
   void getAllFrameShifts(FloatVec &frameXshift, FloatVec &frameYshift, int useFilt);
+  int prepareToFetchAlignFFTs(int aliFrameInd);
 
   CharArgType mPrintFunc;
   float *mFullEvenSum;

@@ -3286,6 +3286,7 @@ static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice)
     td->iErrorFromSave = FRAMEALI_FINISH_ALIGN;
     delete [] xShifts;
     delete [] yShifts;
+    sFrameAli.cleanup();
     return td->iErrorFromSave;
   }
 
