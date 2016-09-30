@@ -2908,7 +2908,8 @@ static int InitializeFrameAlign(ThreadData *td)
   ind = sFrameAli.initialize(td->iFinalBinning, td->iFaAliBinning, trimFrac, 
     td->iFaNumAllVsAll, td->iFaRefineIter, td->iFaHybridShifts, 
     (td->iFaDeferGpuSum | td->iFaSmoothShifts) ? 1 : 0, td->iFaGroupSize, td->width, 
-    td->height, fullTaperFrac, taperFrac, td->iFaAntialiasType, 0., radius2, sigma1, 
+    td->height, fullTaperFrac, taperFrac, 
+    B3DCHOICE(GMS_SDK_VERSION > 30, td->iFaAntialiasType, 0), 0., radius2, sigma1, 
     sigma2, numFilters, td->iFaShiftLimit, kFactor, maxMaxWeight, 0, td->iExpectedFrames, 
     td->iFaGpuFlags, B3DCHOICE(sDebug, B3DMAX(1, sEnvDebug), 0));
   td->fFaRawDist = td->fFaSmoothDist = 0.;
@@ -3213,15 +3214,24 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
         strerror(errno));
       ErrorToResult(td->strTemp);
       td->iErrorFromSave = SEEK_ERROR;
+      if (td->bFilePerImage) {
+        fclose(td->fp);
+        td->fp = NULL;
+      }
       return 1;
     }
 
-    if ((i = (int)b3dFwrite(td->outData, td->outByteSize * nxFile, nyout, td->fp)) != nyout) {
-      sprintf(td->strTemp, "Failed to write data past line %d of slice %d: %s\n", i, 
-        slice, strerror(errno));
-      ErrorToResult(td->strTemp);
-      td->iErrorFromSave = WRITE_DATA_ERROR;
-      return 1;
+    if ((i = (int)b3dFwrite(td->outData, td->outByteSize * nxFile, nyout, td->fp)) 
+      != nyout) {
+        sprintf(td->strTemp, "Failed to write data past line %d of slice %d: %s\n", 
+          B3DMAX(0, i), slice, strerror(errno));
+        ErrorToResult(td->strTemp);
+        td->iErrorFromSave = WRITE_DATA_ERROR;
+        if (td->bFilePerImage) {
+          fclose(td->fp);
+          td->fp = NULL;
+        }
+        return 1;
     }
 
     // Completely update and write the header regardless of whether one file/slice
@@ -3235,6 +3245,10 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
     if (mrc_head_write(td->fp, &td->hdata)) {
       ErrorToResult("Failed to write header\n");
       td->iErrorFromSave = HEADER_ERROR;
+      if (td->bFilePerImage) {
+        fclose(td->fp);
+        td->fp = NULL;
+      }
       return 1;
     }
   }
@@ -5535,4 +5549,21 @@ double wallTime(void) { return 0.;}
 void overrideWriteBytes(int inVal) {}
 void iiDelete(ImodImageFile *inFile) {}
 int imodBackupFile(const char *) {return 0;}
+#endif
+
+//  Functions needed to build without OpenMP-enabled FFTW
+#ifdef NO_OPENMP
+extern "C"
+{
+  int fftwf_init_threads(void);
+  void fftwf_plan_with_nthreads(int nthreads);
+}
+int fftwf_init_threads(void)
+{
+  return 1;
+}
+void fftwf_plan_with_nthreads(int nthreads)
+{
+}
+
 #endif
