@@ -2509,6 +2509,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
   int i, j, tsum, val;
   int nxFile = td->save4bit ? nxout / 2 : nxout;
   int use4bitMode = (td->save4bit && (td->iSaveFlags & K2_SAVE_4BIT_MRC_MODE)) ? 1 : 0;
+  bool openForFirstSum = false;
   short *sData, *sSum;
   unsigned short *usData, *usSum;
   unsigned char *bData, *packed;
@@ -2564,7 +2565,9 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
       }
     }
 
+    // Open a new file if this is the first sum to be saved
     // Increment number of frames done and index if necessary, zero the sum count
+    openForFirstSum = !td->outSumFrameIndex && !td->numOutSumsDoneAtIndex;
     td->numOutSumsDoneAtIndex++;
     if (td->numOutSumsDoneAtIndex == td->outSumFrameList[td->outSumFrameIndex]) {
       td->outSumFrameIndex++;
@@ -2574,7 +2577,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
   }
 
   // open file if needed
-  if (!slice || td->bFilePerImage) {
+  if (!slice || openForFirstSum || td->bFilePerImage) {
     if (td->bFilePerImage)
       sprintf(td->strTemp, "%s\\%s_%03d.%s", td->strSaveDir.c_str(),
       td->strRootName.c_str(), slice +1, td->bWriteTiff ? "tif" : "mrc");
