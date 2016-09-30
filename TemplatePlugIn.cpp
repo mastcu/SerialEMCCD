@@ -3003,6 +3003,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
   int nxFile = td->save4bit ? nxout / 2 : nxout;
   int use4bitMode = (td->save4bit && (td->iSaveFlags & K2_SAVE_4BIT_MRC_MODE)) ? 1 : 0;
   bool openForFirstSum = false;
+  static int singleSliceNum;
   short *sData, *sSum;
   unsigned short *usData, *usSum;
   unsigned char *bData, *packed;
@@ -3069,18 +3070,22 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
     td->numAddedToOutSum = 0;
   }
 
+  if (!slice || openForFirstSum)
+    singleSliceNum = 0;
+
   // open file if needed
   if (!slice || openForFirstSum || td->bFilePerImage) {
     if (td->bFilePerImage)
       sprintf(td->strTemp, "%s\\%s_%03d.%s", td->strSaveDir.c_str(),
-      td->strRootName.c_str(), slice +1, td->bWriteTiff ? "tif" : "mrc");
+      td->strRootName.c_str(), singleSliceNum + 1, td->bWriteTiff ? "tif" : "mrc");
     else
       sprintf(td->strTemp, "%s\\%s.%s", td->strSaveDir.c_str(), td->strRootName.c_str(), 
       td->bWriteTiff ? "tif" : "mrc");
+    singleSliceNum++;
     if (td->bWriteTiff) {
 
       // Set up Tiff output file structure first time
-      if (!slice) {
+      if (!slice || openForFirstSum) {
         td->iifile = iiNew();
         td->iifile->nz = 1; // Has no effect to set it higher
         td->iifile->format = IIFORMAT_LUMINANCE;
@@ -3203,7 +3208,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
     if (i) {
       td->iErrorFromSave = WRITE_DATA_ERROR;
       sprintf(td->strTemp, "Error (%d) writing section %d to TIFF file\n", i, 
-        slice);
+        fileSlice);
       ErrorToResult(td->strTemp);
       return 1;
     }
@@ -3213,7 +3218,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
     i = mrc_big_seek(td->fp, td->hdata.headerSize, nxFile * td->outByteSize, 
       nyout * fileSlice, SEEK_SET);
     if (i) {
-      sprintf(td->strTemp, "Error %d seeking for slice %d: %s\n", i, slice, 
+      sprintf(td->strTemp, "Error %d seeking for slice %d: %s\n", i, fileSlice, 
         strerror(errno));
       ErrorToResult(td->strTemp);
       td->iErrorFromSave = SEEK_ERROR;
@@ -3227,7 +3232,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
     if ((i = (int)b3dFwrite(td->outData, td->outByteSize * nxFile, nyout, td->fp)) 
       != nyout) {
         sprintf(td->strTemp, "Failed to write data past line %d of slice %d: %s\n", 
-          B3DMAX(0, i), slice, strerror(errno));
+          B3DMAX(0, i), fileSlice, strerror(errno));
         ErrorToResult(td->strTemp);
         td->iErrorFromSave = WRITE_DATA_ERROR;
         if (td->bFilePerImage) {
