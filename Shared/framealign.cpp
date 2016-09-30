@@ -613,38 +613,38 @@ int FrameAlign::gpuAvailable(int nGPU, float *memory, int debug)
 /*
  * MACROS for gain normalization and trunction
  */
-#define NORM_TRUNC(a, b)                                      \
-  case a:                                                     \
-  for (ix = 0; ix < mNx; ix++) {                              \
-    val = (b) * *gainp++;                                     \
-    if (val > truncLimit)                                     \
-      val = CorDefSurroundingMean(frame, type, mNx, mNy, truncLimit, ix, iy);  \
-    *fOut++ = val;                                            \
-  }                                                           \
+#define NORM_TRUNC(a, b)                                                \
+  case a:                                                               \
+  for (ix = 0; ix < nxt; ix++) {                                        \
+    val = (b) * gainp[ix];                                              \
+    if (val > truncLimit)                                               \
+      val = CorDefSurroundingMean(frame, type, nxt, nyt, truncLimit, ix, iy); \
+    fOut[base + ix] = val;                                              \
+  }                                                                     \
   break;
 
-#define NORM_ONLY(a, b)                         \
-  case a:                                       \
-  for (ix = 0; ix < mNx; ix++) {                \
-    val = (b) * *gainp++;                       \
-    *fOut++ = val;                              \
-  }                                             \
+#define NORM_ONLY(a, b)                                 \
+  case a:                                               \
+  for (ix = 0; ix < nxt; ix++) {                        \
+    val = (b) * gainp[ix];                              \
+    fOut[base + ix] = val;                              \
+  }                                                     \
   break;
 
-#define TRUNC_ONLY(a, b)                                      \
-  case a:                                                     \
-  for (ix = 0; ix < mNx; ix++) {                              \
-    val = (b);                                                \
-    if (val > truncLimit)                                     \
-      val = CorDefSurroundingMean(frame, type, mNx, mNy, truncLimit, ix, iy);  \
-    *fOut++ = val;                                            \
-  }                                                           \
+#define TRUNC_ONLY(a, b)                                                \
+  case a:                                                               \
+  for (ix = 0; ix < nxt; ix++) {                                        \
+    val = (b);                                                          \
+    if (val > truncLimit)                                               \
+      val = CorDefSurroundingMean(frame, type, nxt, nyt, truncLimit, ix, iy); \
+    fOut[base + ix] = val;                                              \
+  }                                                                     \
   break;
 
-#define JUST_COPY(a, b)                         \
-  case a:                                       \
-  for (ix = 0; ix < mNx; ix++)                  \
-    *fOut++ = (b);                              \
+#define JUST_COPY(a, b)                                 \
+  case a:                                               \
+  for (ix = 0; ix < nxt; ix++)                          \
+    fOut[base + ix] = (b);                              \
   break;
 
 /*
@@ -661,7 +661,8 @@ int FrameAlign::nextFrame(void *frame, int type, float *gainRef, int nxGain, int
   float *fullArr = mWorkFullSize;
   float *tempBin, *groupArr;
   int nxBin, nyBin, nxTaper, nyTaper, ind, ref, xOffset, yOffset, useInd;
-  int top, left, bottom, right, gainXoff, gainYoff, ix, iy, filt, useFilt;
+  int top, left, bottom, right, gainXoff, gainYoff, ix, iy, filt, useFilt, base;
+  int numThreads, maxThreads;
   float xShift, yShift, val, nearXshift = 0., nearYshift = 0.;
   bool needExtract = true;
   bool addToFull = mSummingMode < 0 || (mSummingMode == 0 &&  !mDeferSumming);
@@ -785,63 +786,76 @@ int FrameAlign::nextFrame(void *frame, int type, float *gainRef, int nxGain, int
       gainYoff = (nyGain - mNy) / 2;
     }
     fOut = fullArr;
-    for (iy = 0; iy < mNy; iy++) {
+    maxThreads = 1;
+    if (truncLimit > 0 && gainRef)
+      maxThreads = 6;
+    else if (truncLimit > 0 || gainRef)
+      maxThreads = 3;
+    numThreads = numOMPthreads(maxThreads);
+    int nxt = mNx;
+    int nyt = mNy;
+#pragma omp parallel for num_threads(numThreads)                        \
+  shared(nxt, nyt, gainRef, nxGain, gainXoff, gainYoff, bFrame, sFrame, usFrame, fFrame, \
+         fOut, sDark, usDark, type, frame, truncLimit)              \
+         private(base, iy, ix, gainp, val)
+    for (iy = 0; iy < nyt; iy++) {
+      base = iy * nxt;
       if (gainRef) {
         gainp = &gainRef[(iy + gainYoff) * nxGain + gainXoff];
         if (darkRef && truncLimit > 0) {
         
           // Dark and gain with truncation
           switch (type) {
-            NORM_TRUNC(MRC_MODE_BYTE, *bFrame++ - *sDark++);
-            NORM_TRUNC(MRC_MODE_SHORT, *sFrame++ - *sDark++);
-            NORM_TRUNC(MRC_MODE_USHORT, *usFrame++ - *usDark++);
-            NORM_TRUNC(MRC_MODE_FLOAT, *fFrame++ - *sDark++);
+            NORM_TRUNC(MRC_MODE_BYTE, bFrame[base + ix] - sDark[base + ix]);
+            NORM_TRUNC(MRC_MODE_SHORT, sFrame[base + ix] - sDark[base + ix]);
+            NORM_TRUNC(MRC_MODE_USHORT, usFrame[base + ix] - usDark[base + ix]);
+            NORM_TRUNC(MRC_MODE_FLOAT, fFrame[base + ix] - sDark[base + ix]);
           }
         } else if (truncLimit > 0) {
 
           // Gain norm with trunction
           switch (type) {
-            NORM_TRUNC(MRC_MODE_BYTE, *bFrame++);
-            NORM_TRUNC(MRC_MODE_SHORT, *sFrame++);
-            NORM_TRUNC(MRC_MODE_USHORT, *usFrame++);
-            NORM_TRUNC(MRC_MODE_FLOAT, *fFrame++);
+            NORM_TRUNC(MRC_MODE_BYTE, bFrame[base + ix]);
+            NORM_TRUNC(MRC_MODE_SHORT, sFrame[base + ix]);
+            NORM_TRUNC(MRC_MODE_USHORT, usFrame[base + ix]);
+            NORM_TRUNC(MRC_MODE_FLOAT, fFrame[base + ix]);
           }
         } else if (darkRef) {
 
           // Dark and Gain without truncation
           switch (type) {
-            NORM_ONLY(MRC_MODE_BYTE, *bFrame++ - *sDark++);
-            NORM_ONLY(MRC_MODE_SHORT, *sFrame++ - *sDark++);
-            NORM_ONLY(MRC_MODE_USHORT, *usFrame++ - *usDark++);
-            NORM_ONLY(MRC_MODE_FLOAT, *fFrame++ - *sDark++);
+            NORM_ONLY(MRC_MODE_BYTE, bFrame[base + ix] - sDark[base + ix]);
+            NORM_ONLY(MRC_MODE_SHORT, sFrame[base + ix] - sDark[base + ix]);
+            NORM_ONLY(MRC_MODE_USHORT, usFrame[base + ix] - usDark[base + ix]);
+            NORM_ONLY(MRC_MODE_FLOAT, fFrame[base + ix] - sDark[base + ix]);
           }
         } else {
 
           // Gain norm without truncation
           switch (type) {
-            NORM_ONLY(MRC_MODE_BYTE, *bFrame++);
-            NORM_ONLY(MRC_MODE_SHORT, *sFrame++);
-            NORM_ONLY(MRC_MODE_USHORT, *usFrame++);
-            NORM_ONLY(MRC_MODE_FLOAT, *fFrame++);
+            NORM_ONLY(MRC_MODE_BYTE, bFrame[base + ix]);
+            NORM_ONLY(MRC_MODE_SHORT, sFrame[base + ix]);
+            NORM_ONLY(MRC_MODE_USHORT, usFrame[base + ix]);
+            NORM_ONLY(MRC_MODE_FLOAT, fFrame[base + ix]);
           }
         }
       } else if (truncLimit > 0) {
 
         // Truncation only
         switch (type) {
-          TRUNC_ONLY(MRC_MODE_BYTE, *bFrame++);
-          TRUNC_ONLY(MRC_MODE_SHORT, *sFrame++);
-          TRUNC_ONLY(MRC_MODE_USHORT, *usFrame++);
-          TRUNC_ONLY(MRC_MODE_FLOAT, *fFrame++);
+          TRUNC_ONLY(MRC_MODE_BYTE, bFrame[base + ix]);
+          TRUNC_ONLY(MRC_MODE_SHORT, sFrame[base + ix]);
+          TRUNC_ONLY(MRC_MODE_USHORT, usFrame[base + ix]);
+          TRUNC_ONLY(MRC_MODE_FLOAT, fFrame[base + ix]);
         }
       } else {
 
         // Or copying to the float array for defect correction
         switch (type) {
-          JUST_COPY(MRC_MODE_BYTE, *bFrame++);
-          JUST_COPY(MRC_MODE_SHORT, *sFrame++);
-          JUST_COPY(MRC_MODE_USHORT, *usFrame++);
-          JUST_COPY(MRC_MODE_FLOAT, *fFrame++);
+          JUST_COPY(MRC_MODE_BYTE, bFrame[base + ix]);
+          JUST_COPY(MRC_MODE_SHORT, sFrame[base + ix]);
+          JUST_COPY(MRC_MODE_USHORT, usFrame[base + ix]);
+          JUST_COPY(MRC_MODE_FLOAT, fFrame[base + ix]);
         }
       }
     }
