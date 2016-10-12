@@ -1499,6 +1499,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       CM::SetSettling(acqParams, td->dK2Settling);  j++;
       CM::SetShutterIndex(acqParams, td->iK2Shutter);  j++;
       CM::SetReadMode(acqParams, sReadModes[td->iReadMode]);  j++;
+      CM::Validate_AcquisitionParameters(camera, acqParams);  j++;
       CM::PrepareCameraForAcquire(manager, camera, acqParams, dummyObj, retval);  j++;
       if (retval >= 0.001)
         Sleep((DWORD)(retval * 1000. + 0.5));
@@ -1516,7 +1517,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     }
     catch (exception exc) {
       sprintf(td->strTemp, "Caught an exception from call %d to start dose frac exposure:"
-        "\n  %s\n", j, exc.what());
+        "\n  %s\n%s", j, exc.what(), j == 13 ? "   in Validate_AcquisitionParameters\n" :
+        "");
       ErrorToResult(td->strTemp);
       try {
 #if GMS_SDK_VERSION < 31
