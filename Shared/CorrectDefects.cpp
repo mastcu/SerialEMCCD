@@ -769,12 +769,12 @@ void CorDefRotateFlipDefects(CameraDefects &defects, int rotationFlip, int camSi
     CorDefRotFlipCCDcoord(operation, camSizeX, camSizeY, xx2, yy2);
     if (operation % 2) {
       newDef.partialBadCol.push_back(B3DMIN(xx1, xx2));
-      newDef.partialBadWidth.push_back(defects.partialBadWidth[ind]);
+      newDef.partialBadWidth.push_back(defects.partialBadHeight[ind]);
       newDef.partialBadStartY.push_back(B3DMIN(yy1, yy2));
       newDef.partialBadEndY.push_back(B3DMAX(yy1, yy2));
     } else {
       newDef.partialBadRow.push_back(B3DMIN(yy1, yy2));
-      newDef.partialBadHeight.push_back(defects.partialBadWidth[ind]);
+      newDef.partialBadHeight.push_back(defects.partialBadHeight[ind]);
       newDef.partialBadStartX.push_back(B3DMIN(xx1, xx2));
       newDef.partialBadEndX.push_back(B3DMAX(xx1, xx2));
     }
