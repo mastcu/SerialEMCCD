@@ -1277,6 +1277,9 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     try {
 
       // If doing asynchronous save, now have to do the parameter setup and acquisition
+      // Add little bits to exposure and frame time because they might get clipped, and
+      // here fractional values are a bit less than true ones by float/double precision
+      // For frame time this was problem in a version of GMS 3.10 that required fixing
       j = 0;
       CM::CameraPtr camera = CM::GetCurrentCamera();  j++;
       CM::CameraManagerPtr manager = CM::GetCameraManager();  j++;
@@ -1286,7 +1289,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       j++;
 #if GMS_SDK_VERSION < 31
       k2dfaP = new K2_DoseFracAcquisition;
-      k2dfaP->SetFrameExposure(td->dFrameTime);  j++;
+      k2dfaP->SetFrameExposure(td->dFrameTime + 0.0001);  j++;
       k2dfaP->SetAlignOption(td->bAlignFrames);  j++;
       k2dfaP->SetHardwareProcessing(td->iReadMode ? sK2HardProcs[td->iHardwareProc / 2] : 0);
       j++;
@@ -1297,7 +1300,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       CM::SetHardwareCorrections(acqParams, CM::CCD::Corrections::from_bits(
         td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0));  j++;
       CM::SetAlignmentFilter(acqParams, filter);  j++;
-      CM::SetFrameExposure(acqParams, td->dFrameTime);  j++;
+      CM::SetFrameExposure(acqParams, td->dFrameTime + 0.0001);  j++;
       CM::SetDoAcquireStack(acqParams, 1);  j++;
       CM::SetStackFormat(acqParams, CM::StackFormat::Series);  j++;
       CM::SetDoAsyncReadout(acqParams, td->bAsyncToRAM ? 1 : 0);   j++;
