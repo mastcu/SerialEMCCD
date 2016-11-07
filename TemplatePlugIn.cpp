@@ -3382,7 +3382,7 @@ static int WriteAlignComFile(ThreadData *td, string inputFile, bool ifMdoc)
   comStr = td->strTemp;
   for (ind = 1; ind < 4; ind++) {
     if (td->fFaRadius2[ind] > 0) {
-      sprintf(td->strTemp, " %f");
+      sprintf(td->strTemp, " %f", td->fFaRadius2[ind]);
       comStr += td->strTemp;
     }
   }
