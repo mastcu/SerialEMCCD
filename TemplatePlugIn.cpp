@@ -3004,7 +3004,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
 {
 #ifdef _WIN64
   float tmean;
-  int i, j, tsum, val;
+  int i, j, tsum, val, didParallel;
   int nxFile = td->save4bit ? nxout / 2 : nxout;
   int use4bitMode = (td->save4bit && (td->iSaveFlags & K2_SAVE_4BIT_MRC_MODE)) ? 1 : 0;
   bool openForFirstSum = false;
@@ -3207,9 +3207,12 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
     td->iifile->amin = (float)tmin;
     td->iifile->amax = (float)tmax;
     td->iifile->amean = tmean / (float)(nxout * nyout);
+    i = tiffParallelWrite(td->iifile, td->outData, td->iTiffCompression, 1, 
+      B3DNINT(2.54e8 / td->dPixelSize), td->iTiffQuality, &didParallel);
+    if (i && didParallel)
+      i = tiffWriteSection(td->iifile, td->outData, td->iTiffCompression, 1, 
+        B3DNINT(2.54e8 / td->dPixelSize), td->iTiffQuality);
 
-    i = tiffWriteSection(td->iifile, td->outData, td->iTiffCompression, 1, 
-      B3DNINT(2.54e8 / td->dPixelSize), td->iTiffQuality);
     if (i) {
       td->iErrorFromSave = WRITE_DATA_ERROR;
       sprintf(td->strTemp, "Error (%d) writing section %d to TIFF file\n", i, 

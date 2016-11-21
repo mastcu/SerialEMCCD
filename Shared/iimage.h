@@ -48,6 +48,13 @@ extern "C" {
 #define IISTATE_UNUSED  3
 #define IISTATE_BUSY    4
 
+  /* Recognized values for the tiffCompression member of ImodImageFile, a 
+     copy of TIFF definitions.  Other compressions will have other values. */
+#define IICOMPRESSION_NONE  1
+#define IICOMPRESSION_LZW   5
+#define IICOMPRESSION_JPEG  7
+#define IICOMPRESSION_ZIP   8
+
   /* Error codes, used by check routines */
 #define IIERR_BAD_CALL  -1
 #define IIERR_NOT_FORMAT 1
@@ -61,6 +68,12 @@ extern "C" {
 #define IIHDF_EMAN       3
 #define IIHDF_CHIMERA    4
 #define IIHDF_UNKNOWN    5
+
+  /* Codes for data conversion type in "ReadSectionAny" functions */
+#define MRSA_NOPROC 0
+#define MRSA_BYTE   1
+#define MRSA_FLOAT  2
+#define MRSA_USHORT 3
 
   /* Flags for userData */
 #define IIFLAG_BYTES_SWAPPED   1
@@ -83,10 +96,7 @@ extern "C" {
 #define IIAXIS_Y 2
 #define IIAXIS_Z 3
 
-#define MRSA_NOPROC 0
-#define MRSA_BYTE   1
-#define MRSA_FLOAT  2
-#define MRSA_USHORT 3
+#define MAX_TIFF_THREADS 16
 
   /* DOC_CODE ImodImageFile structure */
   typedef struct  ImodImageFileStruct ImodImageFile;
@@ -109,7 +119,7 @@ extern "C" {
     int   newFile;    /* Newly created file */
     
     /* optional data to be set if input file supports it. */
-    float amin, amax, amean;
+    float amin, amax, amean, rms;
     float xscale, yscale, zscale;
     float xtrans, ytrans, ztrans;
     float xrot,   yrot,   zrot;
@@ -137,6 +147,8 @@ extern "C" {
     int  multipleSizes;      /* Flag that TIFF file has multiple sizes */
     int  rgbSamples;         /* Number of samples for RGB TIFF file */
     int  anyTiffPixSize;     /* Set non-0 to have TIFF pixel size put into [xyz]scale */
+    int  rawPaletteBytes;    /* Set non-zero to have palette image returned as bytes */
+    int  tiffCompression;    /* Compression type in tiff file */
     int  tileSizeX;          /* Tile size in X, or 0 if no tiles */
     int  tileSizeY;          /* Tile size in Y if tiles, strip size if not */
     int  lastWrittenZ;       /* Last Z written, needed if sequential writing only */
@@ -228,6 +240,7 @@ extern "C" {
     int seekEndY;
     int pixSize;
     int swapped;
+    int packed4bits;
     int bytesSinceCheck;
   } LineProcData;
 
@@ -240,13 +253,15 @@ extern "C" {
   void iiAddRawCheckFunction(IIRawCheckFunction func, const char *name);
   void iiDeleteRawCheckList();
   void iiRegisterQuitCheck(int (*func)(int));
-  int iiCheckForQuit();
+  int iiCheckForQuit(int param);
   ImodImageFile *iiNew(void);
   ImodImageFile *iiOpen(const char *filename, const char *mode);
   ImodImageFile *iiOpenNew(const char *filename, const char *mode, int fileKind);
   int  iiReopen(ImodImageFile *inFile);
   void iiClose(ImodImageFile *inFile);
   void iiDelete(ImodImageFile *inFile);
+  ImodImageFile *iiCopyOpen(ImodImageFile *inFile);
+  int iiOpenCopiesForThreads(ImodImageFile **fileCopies, int maxThreads);
   int iiFillMrcHeader(ImodImageFile *inFile, MrcHeader *hdata);
   void iiSyncFromMrcHeader(ImodImageFile *inFile, MrcHeader *hdata);
   int iiDefaultMinMaxMean(int type, float *amin, float *amax, float *amean);
@@ -273,6 +288,7 @@ extern "C" {
   int iiReadSectionByte(ImodImageFile *inFile, char *buf, int inSection);
   int iiReadSectionUShort(ImodImageFile *inFile, char *buf, int inSection);
   int iiReadSectionFloat(ImodImageFile *inFile, char *buf, int inSection);
+  int iiReadSectionAny(ImodImageFile *inFile, char *buf, int inSection, int convertTo);
   float iiReadPoint(ImodImageFile *inFile, int x, int y, int z);
   int iiLoadPCoord(ImodImageFile *inFile, int useMdoc, IloadInfo *li,
                    int nx, int ny, int nz);
@@ -319,21 +335,42 @@ extern "C" {
   void tiffDelete(ImodImageFile *inFile);
   void tiffSetMapping(int value);
   void tiffAddDescription(const char *text);
+  int tiffNumReadThreads(int nx, int ny, int compression, int maxThreads);
+  int tiffParallelRead(ImodImageFile **fileCopies, int maxThreads, int llx, int urx,
+                       int lly, int ury, int dataSize, char *readBuf, int izRead, 
+                       int convert);
+  int tiffParallelWrite(ImodImageFile *inFile, void *buf, int compression,
+                        int inverted, int resolution, int quality, int *didParallel);
+  int iiUseTiffThreads(ImodImageFile *inFile, int maxThreads);
+  int iiUseTiffThreadsForFP(FILE *fp, int maxThreads);
+  void iiCloseTiffCopies(ImodImageFile *inFile);
+  void iiCloseTiffCopiesForFP(FILE *fp);
   int iiLikeMRCCheck(ImodImageFile *inFile);
   void iiLikeMRCDelete(ImodImageFile *inFile);
   int iiSetupRawHeaders(ImodImageFile *inFile, RawImageInfo *info);
   int analyzeDM3(FILE *fp, char *filename, int dmformat, RawImageInfo *info, int *dmtype);
+  void iiAssumeDMfileMatches(int inVal);
 
   int iiHDFCheck(ImodImageFile *inFile);
   int iiHDFopenNew(ImodImageFile *inFile, const char *mode);
   int hdfWriteGlobalAdoc(ImodImageFile *inFile);
+  int hdfWriteDummySection(ImodImageFile *inFile, char *buf, int cz);
   int iiProcessReadLine(MrcHeader *hdata, IloadInfo *li, LineProcData *d);
   int iiInitReadSectionAny(MrcHeader *hdata, IloadInfo *li, unsigned char *buf,
                            LineProcData *d, int *freeMap, int *yEnd, const char *caller);
   void iiBestTileSize(int imSize, int *tileSize, int *numTiles, int multipleOf);
+  int iiTestIfHDF(const char *filename);
 
   /* This is here in case a program links with iiqimage */
   int iiQImageCheck(ImodImageFile *inFile);
+
+  /* some of what is in parallelwrite.c */
+  int parWrtInitialize(const char *filename, int nxin, int nyin);
+  int parWrtProperties(int *allSec, int *linesBound, int *nfiles);
+  int parWrtSetCurrent(int index);
+  void parWrtClose();
+  int parWrtRecloseHDF(ImodImageFile *iiFile, MrcHeader *hdata);
+  int parWrtFlushBuffers(ImodImageFile *iiFile, MrcHeader *hdata);
 
 #ifdef __cplusplus
 }

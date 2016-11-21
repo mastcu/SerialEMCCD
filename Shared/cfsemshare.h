@@ -113,7 +113,9 @@ extern "C" {
                           int nyrOut, float dxIn,float dyIn, float *temp);
   void fourierRingCorr(float *ffta, float *fftb, int nxReal, int ny, float *ringCorrs,
                        int maxRings, float deltaR, float *temp);
-
+  int fourierCropSizes(int size, float factor, float padFrac, int minPad, int niceLimit,
+                       int *fullPadSize, int *cropPadSize, float *actualFac);
+    
   /* taperpad.c */
   void sliceTaperOutPad(void *array, int type, int nxbox, int nybox, 
                         float *brray, int nxdim, int nx, int ny, int ifmean,
@@ -228,13 +230,6 @@ extern "C" {
                       float rInner, float rOuter, float xcen, float ycen,
                       float *cenmean, float *annmean, float *temp, 
                       float annPct, float *median);
-
-  /* parallelwrite.c */
-  int parWrtInitialize(char *filename, int nxin, int nyin);
-  int parWrtProperties(int *allSec, int *linesBound, int *nfiles);
-  int parWrtFindRegion(int secNum, int lineNum, int nlWrite, char **filename, 
-                       int *sections, int *startLines);
-  int parWrtSetCurrent(int index);
 
   /* statfuncs.f */
   double tValue(double signif, int ndf);
@@ -362,7 +357,30 @@ extern "C" {
   double splder(int derivOrder, int mOrder, int numVal, double tVal, double *x,
                 double *coeff, int *nearInd, double *work);
 
+  /* spectrumscaled */
+  int spectrumScaled(void *image, int type, int nx, int ny, void *spectrum, int padSize, 
+                     int finalSize, int bkgdGray, float truncDiam, int filtType,
+                     void (*twoDfft)(float *, int *, int *, int *));
 
+  /* extraheader.c */
+  int getExtraHeaderTilts(char *array, int numExtraBytes, int nbytes, int iflags, int nz,
+                           float * tilt, int *numTilts, int maxTilts, int *izPiece);
+  int getExtraHeaderItems(char *array, int numExtraBytes, int nbytes, int iflags, int nz,
+                           int itype, float *val1, float *val2, int *numVals, int maxVals,
+                           int *izPiece);
+  int getMetadataItems(int indAdoc, int iTypeAdoc, int nz, int iTypeData, float *val1,
+                        float *val2, int *numVals, int *numFound, int maxVals,
+                        int *izPiece);
+  int getMetadataByKey(int indAdoc, int TypeAdoc, int nz, char *key, int ivalType,
+                        float *val1, float *val2, float *val3, char **valString,
+                        int *numVals, int *numFound, int maxVals, int *izPiece);
+  int getExtraHeaderPieces(char *array, int numExtraBytes, int nbytes, int iflags,
+                            int nz, int *ixPiece, int *iyPiece, int *izPiece,
+                            int *numPieces, int maxPiece);
+  int getMetadataPieces(int index, int itype, int nz, int *ixPiece, int *iyPiece,
+                         int *izPiece, int maxPiece, int *numFound);
+  double SEMshortsToFloat(short low, short ihigh);
+    
 #ifdef __cplusplus
 }
 #endif
