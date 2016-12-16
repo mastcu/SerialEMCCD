@@ -555,8 +555,9 @@ int FrameAlign::gpuAvailable(int nGPU, float *memory, int debug)
     sGpuModule = LoadLibrary(GPU_DLL_NAME);
     if (!sGpuModule) {
       lastErr = GetLastError();
-      utilPrint("GPU is not available: error %d occurred trying to load %s\n",
-                lastErr, GPU_DLL_NAME);
+      if (lastErr != ERROR_MOD_NOT_FOUND)
+        utilPrint("GPU is not available: error %d occurred trying to load %s\n",
+                  lastErr, GPU_DLL_NAME);
       mGpuLibLoaded = 0;
       return 0;
     }
