@@ -63,6 +63,9 @@ void CorDefAddPartialBadCol(int *values,  UShortVec &partialBadCol,
 void CorDefRotateFlipDefects(CameraDefects &defects, int rotationFlip, int camSizeX,
                              int camSizeY);
 void CorDefFindTouchingPixels(CameraDefects &defects, int camSizeX, int camSizeY, int wasScaled);
+int CorDefFindDriftCorrEdges(void *array, int type, int nx, int ny, int analyzeLen,
+                             int maxWidth, float critMADNs, int &xLow, int &xHigh,
+                             int &yLow, int &yHigh);
 void CorDefSampleMeanSD(void *array, int type, int nxdim, int nx, int ny, int ixStart,
                         int iyStart, int nxUse, int nyUse, float *mean, float *sd);
 void CorDefSampleMeanSD(void *array, int type, int nxdim, int nx, int ny, float *mean, 

@@ -1431,6 +1431,178 @@ int CorDefParseDefects(const char *strng, int fromString, CameraDefects &defects
   return 0;
 }
 
+// Find edges of an image that are dark because drift correction was done without filling
+// the area outside and frames that were added in.  analyzeLen is the extent to analyze 
+// along each edge, maxWidth is the width to analyze.  The mean and SD are measured for
+// the difference between pixels in successive lines and the median and MADN are computed
+// for the ratio of mean to the SD of this difference.  critMADNs is the criterion number
+// of MADNs above the median for a difference to be taken as the start of the edge that 
+// needs correcting.  xLow, xHigh, yLow, and yHigh are returned with the limiting low and
+// and high good coordinates in X and Y.
+//
+int CorDefFindDriftCorrEdges(void *array, int type, int nx, int ny, int analyzeLen,
+                             int maxWidth, float critMADNs, int &xLow, int &xHigh,
+                             int &yLow, int &yHigh)
+{
+  double diffSumSq;
+  int diff, lineSum, diffSum, ix, iy, loop, idir, ind, wid, indAbove[4];
+  int xStart = B3DMAX(0, nx / 2 - analyzeLen / 2);
+  int yStart = B3DMAX(0, ny / 2 - analyzeLen / 2);
+  int xEnd = B3DMIN(nx, xStart + analyzeLen);
+  int yEnd = B3DMIN(ny, yStart + analyzeLen);
+  unsigned short *usData, *usNext;
+  short *sData, *sNext;
+  float maxBelow, ratioMedian, ratioMADN, minAbove;
+  float *lineMean, *diffMean, *diffSD, *diffRatio, *temp;
+  int *xLineSums, *xDiffSums;
+  double *xDiffSumSq;
+
+  if (type != SLICE_MODE_SHORT && type != SLICE_MODE_USHORT)
+    return 1;
+  lineMean = B3DMALLOC(float, 4 * maxWidth);
+  diffMean = B3DMALLOC(float, 4 * maxWidth);
+  diffSD = B3DMALLOC(float, 4 * maxWidth);
+  diffRatio = B3DMALLOC(float, 4 * maxWidth);
+  xLineSums = B3DMALLOC(int, 2 * maxWidth);
+  xDiffSums = B3DMALLOC(int, 2 * maxWidth);
+  xDiffSumSq = B3DMALLOC(double, 2 * maxWidth);
+  if (!lineMean || !diffMean || !diffSD || !xLineSums || !xDiffSums || !xDiffSumSq ||
+      !diffRatio) {
+    B3DFREE(lineMean);
+    B3DFREE(diffMean);
+    B3DFREE(diffSD);
+    B3DFREE(diffRatio);
+    B3DFREE(xLineSums);
+    B3DFREE(xDiffSums);
+    B3DFREE(xDiffSumSq);
+    return 2;
+  }
+  temp = (float *)xDiffSumSq;
+  memset(xLineSums, 0, 2 * maxWidth * sizeof(int));
+  memset(xDiffSums, 0, 2 * maxWidth * sizeof(int));
+  memset(xDiffSumSq, 0, 2 * maxWidth * sizeof(double));
+
+  // Do lines at Y levels, store their results first in arrays
+  for (wid = 0; wid < maxWidth; wid++) {
+    for (idir = 0; idir <= 1; idir++) {
+      iy = idir ? ny - 1 - wid : wid;
+      lineSum = diffSum = 0;
+      diffSumSq = 0.;
+      if (type == SLICE_MODE_SHORT) {
+        sData = (short *)array + iy * nx;
+        sNext = sData + (1 - 2 * idir) * nx;
+        for (ix = xStart; ix < xEnd; ix++) {
+          diff = sNext[ix] - sData[ix];
+          lineSum += sData[ix];
+          diffSum += diff;
+          diffSumSq += (double)diff * diff;
+        }
+      } else {
+        usData = (unsigned short *)array + iy * nx;
+        usNext = usData + idir * nx;
+        for (ix = xStart; ix < xEnd; ix++) {
+          diff = usNext[ix] - usData[ix];
+          lineSum += usData[ix];
+          diffSum += diff;
+          diffSumSq += (double)diff * diff;
+        }
+      }
+      ind = idir * maxWidth + wid;
+      sumsToAvgSDdbl((double)diffSum, diffSumSq, 1, xEnd - xStart, &diffMean[ind],
+                     &diffSD[ind]);
+      lineMean[ind] = (float)lineSum / (float)(xEnd - xStart);
+      diffRatio[ind] = diffMean[ind] / B3DMAX(0.1f, diffSD[ind]);
+    }
+  }
+
+  // Go across lines adding to the sums for each column in X
+  for (iy = yStart; iy < yEnd; iy++) {
+    for (loop = 0; loop < 2; loop++) {
+      idir = 1 - 2 * loop;
+      ix = loop ? nx - 1: 0;
+      if (type == SLICE_MODE_SHORT) {
+        sData = (short *)array + iy * nx;
+        for (wid = 0; wid < maxWidth; wid++) {
+          ind = wid + loop * maxWidth;
+          diff = sData[ix + idir] - sData[ix];
+          xLineSums[ind] += sData[ix];
+          xDiffSums[ind] += diff;
+          xDiffSumSq[ind] += (double)diff * diff;
+          ix += idir;
+        }
+      } else {
+        usData = (unsigned short *)array + iy * nx;
+        for (wid = 0; wid < maxWidth; wid++) {
+          ind = wid + loop * maxWidth;
+          diff = usData[ix + idir] - usData[ix];
+          xLineSums[ind] += usData[ix];
+          xDiffSums[ind] += diff;
+          xDiffSumSq[ind] += (double)diff * diff;
+          ix += idir;
+        }
+      }
+    }
+  }
+
+  // Get the mean and SD and ratio for each column
+  for (wid = 0; wid < 2 * maxWidth; wid++) {
+    ind = wid + 2 * maxWidth;
+    sumsToAvgSDdbl((double)xDiffSums[wid], xDiffSumSq[wid], 1, yEnd - yStart, 
+      &diffMean[ind], &diffSD[ind]);
+    lineMean[ind] = (float)xLineSums[wid] / (float)(yEnd - yStart);
+    diffRatio[ind] = diffMean[ind] / B3DMAX(0.1f, diffSD[ind]);
+  }
+
+  // Get the overall median and MADN
+  rsMedian(diffRatio, 4 * maxWidth, temp, &ratioMedian);
+  rsMADN(diffRatio, 4 * maxWidth, ratioMedian, temp, &ratioMADN);
+  maxBelow = -1.e10f;
+  minAbove = 1.e10f;
+  for (ind = 4 * maxWidth - 1; ind >= 0; ind--) {
+    temp[ind] = (diffRatio[ind] - ratioMedian) / ratioMADN;
+    if (temp[ind] < critMADNs)
+      ACCUM_MAX(maxBelow, temp[ind]);
+    else
+      ACCUM_MIN(minAbove, temp[ind]);
+  }
+  /* printf("Last ratio deviations below and above threshold = %.2f  %.2f MADNs\n", 
+     maxBelow, minAbove); */
+
+  // Find first line, if any, where the deviation exceeds the criterion
+  for (loop = 0; loop < 4; loop++) {
+    indAbove[loop] = -1;
+    for (wid = maxWidth - 1; wid >= 0; wid--) {
+      ind = wid + loop * maxWidth;
+      if (temp[ind] > critMADNs) {
+        indAbove[loop] = wid;
+        break;
+      }
+    }
+    /* if (indAbove[loop] >= 0) {
+      for (wid = 0; wid <= B3DMIN(maxWidth - 1, indAbove[loop] + 3); wid++) {
+        ind = wid + loop * maxWidth;
+        printf("%d  %2d  %7.1f  %7.1f  %7.1f  %7.2f  %7.2f\n", loop, wid, lineMean[ind],
+               diffMean[ind], diffSD[ind], diffRatio[ind], temp[ind]);
+               }
+               } */
+  }
+
+  // Just return the limits.  Correction by partial filling is problematic and not as 
+  // nice as the standard edge correction
+  yLow = indAbove[0] + 1;
+  yHigh = (ny - 1) - (indAbove[1] + 1);
+  xLow = indAbove[2] + 1;
+  xHigh = (nx - 1) - (indAbove[3] + 1);
+
+  B3DFREE(lineMean);
+  B3DFREE(diffMean);
+  B3DFREE(diffSD);
+  B3DFREE(diffRatio);
+  B3DFREE(xLineSums);
+  B3DFREE(xDiffSums);
+  B3DFREE(xDiffSumSq);
+  return 0;
+}
 
 ///////////////////////////////////////////////////////////////////////
 //  ROUTINES FOR MANIPULATING COORDINATES GIVEN ROTATION/FLIP PARAMETER

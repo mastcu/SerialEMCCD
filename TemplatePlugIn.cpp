@@ -826,7 +826,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   // and doing a nin-empty early return
   mTD.bGainNormSum = ((mTD.bUseFrameAlign && mTD.bEarlyReturn && mTD.iNumFramesToSum) ||
     ((mTD.iSaveFlags & K2_GAIN_NORM_SUM) != 0 && saveFrames == SAVE_FRAMES)) &&
-    newProc == NEWCM_DARK_SUBTRACTED && mTD.iReadMode > K2_LINEAR_READ_MODE && 
+    newProc != NEWCM_GAIN_NORMALIZED && mTD.iReadMode > K2_LINEAR_READ_MODE && 
     !mTD.strGainRefToCopy.empty();
   if (mTD.bGainNormSum) {
     scaleAdj = (divideBy2 ? 2 : 1) * 
@@ -894,7 +894,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     }
 
     // Make sure gain reference is available if needed
-    if (newProc == NEWCM_DARK_SUBTRACTED && mTD.iReadMode > K2_LINEAR_READ_MODE && 
+    if (newProc != NEWCM_GAIN_NORMALIZED && mTD.iReadMode > K2_LINEAR_READ_MODE && 
       !mTD.strGainRefToCopy.empty() && LoadK2ReferenceIfNeeded(&mTD, false, errStr)) {
         sprintf(mTD.strTemp, "%s\n", errStr.c_str());
         ErrorToResult(mTD.strTemp);
@@ -2948,7 +2948,7 @@ static int AlignOrSaveImage(ThreadData *td, short *outForRot, bool saveFrame,
   if (alignFrame) {
     DebugToResult("Passing frame to nextFrame\n");
     i = sFrameAli.nextFrame(td->outData, td->iFaDataMode, 
-      td->iK2Processing == NEWCM_DARK_SUBTRACTED ? sK2GainRefData[refInd] : NULL, 
+      td->iK2Processing != NEWCM_GAIN_NORMALIZED ? sK2GainRefData[refInd] : NULL, 
       sK2GainRefWidth[refInd], sK2GainRefHeight[refInd], NULL, 
       td->fAlignScaling * td->fFaTruncLimit, td->bCorrectDefects ? &sCamDefects : NULL, 
       td->iFaCamSizeX, td->iFaCamSizeY, 2 - refInd, 0., 0.);
@@ -4436,20 +4436,18 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
       dummy = (int)m_strDefectsToSave.find('\n') - 1;
       if (dummy > 0 && m_strDefectsToSave[dummy] == '\r')
         dummy--;
-      if (dummy > 3 && dummy < MAX_TEMP_STRING - 3 - (int)mTD.strSaveDir.length())
+      if (dummy > 3 && dummy < MAX_TEMP_STRING - 3 - (int)topDir.length())
         defectName = m_strDefectsToSave.substr(1, dummy);
     }
 
     if (!defectName.length()) {
-      sprintf(m_strTemp, "defects%d.txt", mTD.strSaveDir.c_str(),
-        (GetTickCount() / 1000) % 10000);
+      sprintf(m_strTemp, "defects%d.txt", (GetTickCount() / 1000) % 10000);
       defectName = m_strTemp;
     }
-    sprintf(m_strTemp, "%s\\%s", mTD.strSaveDir.c_str(), defectName.c_str());
+    sprintf(m_strTemp, "%s\\%s", topDir.c_str(), defectName.c_str());
 
-    // If the string is new, one file per image, new directory, or the file doesn't
-    // exist, write the text
-    if (newDefects || filePerImage || newDir || _stat(m_strTemp, &statbuf)) {
+    // If the string is new, new directory, or the file doesn't exist, write the text
+    if (newDefects || newDir || _stat(m_strTemp, &statbuf)) {
       *error = WriteTextFile(m_strTemp, m_strDefectsToSave.c_str(), 
         (int)m_strDefectsToSave.length(), OPEN_DEFECTS_ERROR, WRITE_DEFECTS_ERROR, false);
       mTD.strLastDefectName = defectName;
