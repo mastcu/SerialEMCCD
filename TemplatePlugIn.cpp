@@ -184,6 +184,7 @@ struct ThreadData
   string strGainRefToCopy;
   string strAlignComName;
   string strLastDefectName;
+  string strSaveExtension;
   bool bLastSaveHadDefects;
 
   // New non-internal items
@@ -1916,7 +1917,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
       if (!td->iErrorFromSave && td->bMakeAlignComFile) {
         td->iErrorFromSave = WriteAlignComFile(td, 
-          td->strRootName + (td->bWriteTiff ? ".tif" : ".mrc"), false);
+          td->strRootName + "." + td->strSaveExtension, false);
       }
     }
 
@@ -3085,7 +3086,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
       td->strRootName.c_str(), singleSliceNum + 1, td->bWriteTiff ? "tif" : "mrc");
     else
       sprintf(td->strTemp, "%s\\%s.%s", td->strSaveDir.c_str(), td->strRootName.c_str(), 
-      td->bWriteTiff ? "tif" : "mrc");
+      td->strSaveExtension.c_str());
     singleSliceNum++;
     if (td->bWriteTiff) {
 
@@ -3421,7 +3422,7 @@ static int WriteAlignComFile(ThreadData *td, string inputFile, bool ifMdoc)
     SplitExtension(temp, outputRoot, temp2);
     if (temp2.length())
       outputExt = temp2;
-  } else if (outputExt == ".tif")
+  } else if (outputExt == ".tif" || outputExt == ".mrcs")
     outputExt = ".mrc";
   comStr += "OutputImageFile " + outputRoot + "_ali" + outputExt + "\n";
 
@@ -4311,6 +4312,11 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   mTD.bWriteTiff = (flags & (K2_SAVE_LZW_TIFF | K2_SAVE_ZIP_TIFF)) != 0;
   mTD.iTiffCompression = (flags & K2_SAVE_ZIP_TIFF) ? 8 : 5;
   mTD.bSaveSummedFrames = (flags & K2_SAVE_SUMMED_FRAMES) != 0;
+  mTD.strSaveExtension = "mrc";
+  if (mTD.bWriteTiff)
+    mTD.strSaveExtension = "tif";
+  else if (flags & K2_MRCS_EXTENSION)
+    mTD.strSaveExtension = "mrcs";
 
   // Copy all the strings if they are changed
   if (CopyStringIfChanged(dirName, mTD.strSaveDir, newDir, error))
@@ -4409,7 +4415,8 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 
     // Check whether the file exists
     // If so, and the backup already exists, that is an error; otherwise back it up
-    sprintf(m_strTemp, "%s\\%s.mrc", mTD.strSaveDir.c_str(), mTD.strRootName.c_str());
+    sprintf(m_strTemp, "%s\\%s.%s", mTD.strSaveDir.c_str(), mTD.strRootName.c_str(),
+      mTD.strSaveExtension.c_str());
     if (! *error && !_stat(m_strTemp, &statbuf)) {
       topDir = string(m_strTemp) + '~';
       if (!_stat(topDir.c_str(), &statbuf) || imodBackupFile(m_strTemp))

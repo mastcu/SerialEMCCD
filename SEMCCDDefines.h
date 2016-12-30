@@ -35,6 +35,7 @@ WRITE_COM_ERROR, OPEN_MDOC_ERROR, WRITE_MDOC_ERROR, COPY_MDOC_ERROR};
 #define K2_RAW_COUNTING_4BIT   (1 << 13)
 #define K2_MAKE_DEFERRED_SUM   (1 << 14)
 #define K2_SAVE_TIMES_100      (1 << 15)
+#define K2_MRCS_EXTENSION      (1 << 16)
 
 // Flags for SetK2Parameters
 #define K2_ANTIALIAS_MASK    7
@@ -57,6 +58,9 @@ WRITE_COM_ERROR, OPEN_MDOC_ERROR, WRITE_MDOC_ERROR, COPY_MDOC_ERROR};
 
 // Flags for MakeAlignComFile
 #define K2FA_WRITE_MDOC_TEXT          1
+
+// DM's flag for drift correction
+#define OVW_DRIFT_CORR_FLAG   0x1000
 
 // Flags for AcquireDSImage in lineSync argument
 #define DS_LINE_SYNC             1
