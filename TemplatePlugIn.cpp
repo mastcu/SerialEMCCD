@@ -1286,6 +1286,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       CM::AcquisitionParametersPtr acqParams = CM::CreateAcquisitionParameters_FullCCD(camera,
         (CM::AcquisitionProcessing)td->iK2Processing, td->dK2Exposure + 0.001, td->iK2Binning, 
         td->iK2Binning);//, td->iK2Top, td->iK2Left, td->iK2Bottom, td->iK2Right);
+
+      // The above validated without knowing about dose-fractionation and rounded to 0.1,
+      // So set exposure time again and the the final validation will know about frames
+      CM::SetExposure(acqParams, td->dK2Exposure + 0.001);
       j++;
 #if GMS_SDK_VERSION < 31
       k2dfaP = new K2_DoseFracAcquisition;
