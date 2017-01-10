@@ -9,7 +9,7 @@
 //
 // Author: David Mastronarde
 //
-//  $Id$
+//  No ID line: it is shared among three different projects
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -281,6 +281,60 @@ static void CorrectEdge(void *array, int type, int numBad, int taper, int length
   }
 }
 
+// Macros for computing the column correction, with summing of one or two rows of
+// edge values for thicker columns
+// Arguments are MRC type, array, type for cast assignment, [type for cast to start sum],
+// and amount to add for rounding of integers
+#define CORRECT_ONE_TWO_COL(c, a, b, e)                                 \
+  case c:                                                               \
+  for (i = ystart; i <= yend; i++, ind += yStride, indLeft += yStride,  \
+         indRight += yStride)                                           \
+    a[ind] = (b)(fLeft * a[indLeft] + fRight * a[indRight] + e);        \
+  break;
+
+#define CORRECT_THREE_FOUR_COL(c, a, b, d, e)                           \
+  case c:                                                               \
+  a[ind] = (b)((fLeft * ((d)a[indLeft] + a[indLeft + yStride]) +        \
+                fRight * ((d)a[indRight] + a[indRight + yStride])) / 2. + e); \
+  ind += yStride;                                                       \
+  indLeft += yStride;                                                   \
+  indRight += yStride;                                                  \
+  for (i = ystart; i <= yend; i++, ind += yStride, indLeft += yStride,  \
+         indRight += yStride)                                           \
+    a[ind] = (b)((fLeft * ((d)a[indLeft - yStride] + a[indLeft] +       \
+                           a[indLeft + yStride]) +                      \
+                  fRight * ((d)a[indRight - yStride] + a[indRight] +    \
+                            a[indRight + yStride])) / 3. + e);          \
+  a[ind] = (b)((fLeft * ((d)a[indLeft - yStride] + a[indLeft]) +        \
+                fRight * ((d)a[indRight - yStride] + a[indRight])) / 2. + e); \
+  break;
+
+#define CORRECT_FIVE_PLUS_COL(c, a, b, d, e)                            \
+  case c:                                                               \
+  a[ind] = (b)((fLeft * ((d)a[indLeft] + a[indLeft + yStride] +         \
+                         a[indLeft - xStride] + a[indLeft + yStride - xStride]) + \
+                fRight * ((d)a[indRight] + a[indRight + yStride] +      \
+                          a[indRight + xStride] +                       \
+                          a[indRight + yStride + xStride])) / 4. + e);  \
+  ind += yStride;                                                       \
+  indLeft += yStride;                                                   \
+  indRight += yStride;                                                  \
+  for (i = ystart; i <= yend; i++, ind += yStride, indLeft += yStride,  \
+         indRight += yStride)                                           \
+    a[ind] = (b)((fLeft * ((d)a[indLeft - yStride] + a[indLeft] + a[indLeft + yStride] + \
+                           a[indLeft - xStride - yStride] + a[indLeft - xStride] + \
+                           a[indLeft - xStride + yStride]) +            \
+                  fRight * ((d)a[indRight - yStride] + a[indRight] +    \
+                            a[indRight + yStride] +                     \
+                            a[indRight + xStride - yStride] + a[indRight + xStride] + \
+                            a[indRight + xStride + yStride])) / 6. + e); \
+  a[ind] = (b)((fLeft * ((d)a[indLeft - yStride] + a[indLeft] +         \
+                         a[indLeft - xStride - yStride] + a[indLeft - xStride]) + \
+                fRight * ((d)a[indRight - yStride] + a[indRight] +      \
+                          a[indRight + xStride - yStride] +             \
+                          a[indRight + xStride])) / 4. + e);            \
+  break;
+
 // Correct a column defect which can be multiple columns
 static void CorrectColumn(void *array, int type, int nx, int xStride, int yStride, 
                        int indStart, int num, int ystart, int yend)
@@ -290,6 +344,7 @@ static void CorrectColumn(void *array, int type, int nx, int xStride, int yStrid
   float *fdata = (float *)array;
   unsigned char *bdata = (unsigned char *)array;
   double fLeft, fRight;
+  bool fivePlusOK;
   int ind, i, col, indLeft, indRight;
   
   // Adjust indStart or num if on edge of image; return if nothing left
@@ -306,7 +361,7 @@ static void CorrectColumn(void *array, int type, int nx, int xStride, int yStrid
 
   for (col = 0; col < num; col++) {
     
-    // Ste up fractions on left and right columns
+    // Set up fractions on left and right columns
     fRight = (col + 1.) / (num + 1.);
     fLeft = 1. - fRight;
 
@@ -317,6 +372,7 @@ static void CorrectColumn(void *array, int type, int nx, int xStride, int yStrid
       indLeft = indRight;
     if (indRight >= nx)
       indRight = indLeft;
+    fivePlusOK = indLeft > 0 && indRight < nx - 1;
     indLeft *= xStride;
     indRight *= xStride;
     ind = (indStart + col) * xStride;
@@ -324,34 +380,27 @@ static void CorrectColumn(void *array, int type, int nx, int xStride, int yStrid
     indLeft += yStride * ystart;
     indRight += yStride * ystart;
 
-    switch (type) {
-    case SLICE_MODE_BYTE:
-      for (i = ystart; i <= yend; i++, ind += yStride, indLeft += yStride, 
-        indRight += yStride)
-        bdata[ind] = (unsigned char)(fLeft * bdata[indLeft] +
-          fRight * bdata[indRight]);
-      break;
-
-    case SLICE_MODE_SHORT:
-      for (i = ystart; i <= yend; i++, ind += yStride, indLeft += yStride, 
-        indRight += yStride)
-        sdata[ind] = (short int)(fLeft * sdata[indLeft] +
-          fRight * sdata[indRight]);
-      break;
-
-    case SLICE_MODE_USHORT:
-      for (i = ystart; i <= yend; i++, ind += yStride, indLeft += yStride, 
-        indRight += yStride)
-        usdata[ind] = (unsigned short int)(fLeft * usdata[indLeft] +
-          fRight * usdata[indRight]);
-      break;
-
-    case SLICE_MODE_FLOAT:
-      for (i = ystart; i <= yend; i++, ind += yStride, indLeft += yStride, 
-        indRight += yStride)
-        fdata[ind] = (float)(fLeft * fdata[indLeft] +
-          fRight * fdata[indRight]);
-      break;
+    if (num >= 5 && yend - ystart >= 3 && fivePlusOK) {
+      switch (type) {
+        CORRECT_FIVE_PLUS_COL(SLICE_MODE_BYTE, bdata, unsigned char, int, 0.5);
+        CORRECT_FIVE_PLUS_COL(SLICE_MODE_SHORT, sdata, short int, int, 0.5);
+        CORRECT_FIVE_PLUS_COL(SLICE_MODE_USHORT, usdata, unsigned short int, int, 0.5);
+        CORRECT_FIVE_PLUS_COL(SLICE_MODE_FLOAT, fdata, float, float, 0.);
+      }
+    } else if (num >= 3 && yend - ystart >= 1) {
+      switch (type) {
+        CORRECT_THREE_FOUR_COL(SLICE_MODE_BYTE, bdata, unsigned char, int, 0.5);
+        CORRECT_THREE_FOUR_COL(SLICE_MODE_SHORT, sdata, short int, int, 0.5);
+        CORRECT_THREE_FOUR_COL(SLICE_MODE_USHORT, usdata, unsigned short int, int, 0.5);
+        CORRECT_THREE_FOUR_COL(SLICE_MODE_FLOAT, fdata, float, float, 0.);
+      }
+    } else {
+      switch (type) {
+        CORRECT_ONE_TWO_COL(SLICE_MODE_BYTE,  bdata, unsigned char, 0.5);
+        CORRECT_ONE_TWO_COL(SLICE_MODE_SHORT, sdata, short int, 0.5);
+        CORRECT_ONE_TWO_COL(SLICE_MODE_USHORT, usdata, unsigned short int, 0.5);
+        CORRECT_ONE_TWO_COL(SLICE_MODE_FLOAT, fdata, float, 0.);
+      }
     }
   }
 }
@@ -660,9 +709,10 @@ void CorDefFlipDefectsInY(CameraDefects *param, int camSizeX, int camSizeY, int 
   param->usableBottom = param->usableTop ? (yflip - param->usableTop) : 0;
   param->usableTop = tmp;
   for (i = 0; i < (int)param->badRowStart.size(); i++)
-    param->badRowStart[i] = yflip - param->badRowStart[i];
+    param->badRowStart[i] = yflip - (param->badRowStart[i] + param->badRowHeight[i] - 1);
   for (i = 0; i < (int)param->partialBadRow.size(); i++)
-    param->partialBadRow[i] = yflip - param->partialBadRow[i];
+    param->partialBadRow[i] = yflip - (param->partialBadRow[i] + 
+                                       param->partialBadHeight[i] - 1);
   for (i = 0; i < (int)param->partialBadCol.size(); i++) {
     tmp = yflip - param->partialBadEndY[i];
     param->partialBadEndY[i] = yflip - param->partialBadStartY[i];
@@ -725,7 +775,7 @@ void CorDefRotateFlipDefects(CameraDefects &defects, int rotationFlip, int camSi
   // Process rows
   for (ind = 0; ind < (int)defects.badRowStart.size(); ind++) {
     yy1 = defects.badRowStart[ind];
-    yy2 = xx1 + defects.badRowHeight[ind] - 1;
+    yy2 = yy1 + defects.badRowHeight[ind] - 1;
     xx1 = xx2 = 0;
     CorDefRotFlipCCDcoord(operation, camSizeX, camSizeY, xx1, yy1);
     CorDefRotFlipCCDcoord(operation, camSizeX, camSizeY, xx2, yy2);
@@ -762,7 +812,7 @@ void CorDefRotateFlipDefects(CameraDefects &defects, int rotationFlip, int camSi
   // Process partial bad rows
   for (ind = 0; ind < (int)defects.partialBadRow.size(); ind++) {
     yy1 = defects.partialBadRow[ind];
-    yy2 = xx1 + defects.partialBadHeight[ind] - 1;
+    yy2 = yy1 + defects.partialBadHeight[ind] - 1;
     xx1 = defects.partialBadStartX[ind];
     xx2 = defects.partialBadEndX[ind];
     CorDefRotFlipCCDcoord(operation, camSizeX, camSizeY, xx1, yy1);

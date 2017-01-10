@@ -6,7 +6,7 @@
  *  Copyright (C) 2016 by the Regents of the University of 
  *  Colorado.  See dist/COPYRIGHT for full copyright notice.
  *
- *  $Id$
+ *  No ID line: it is shared between 3 different projects
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -861,12 +861,12 @@ int FrameAlign::nextFrame(void *frame, int type, float *gainRef, int nxGain, int
       }
     }
 
-    // Defect correction
+    // Defect correction: pass one past edge on right and bottom
     if (camSizeX > 0) {
       left = (camSizeX / defBin- mNx) / 2;
       top = (camSizeY /defBin - mNy) / 2;
-      right = left + mNx - 1;
-      bottom = top + mNy - 1;
+      right = left + mNx;
+      bottom = top + mNy;
       CorDefCorrectDefects(defects, fullArr, MRC_MODE_FLOAT, defBin, top, left,
                            bottom, right);
     }
