@@ -110,6 +110,8 @@ static int sInverseTranspose[8] = {0, 258, 3, 257, 1, 256, 2, 259};
 static BOOL sDebug;
 static int sEnvDebug;
 
+static HANDLE sInstanceMutex;
+
 // Handle for mutexes for writing critical components of thread data and continuous image
 static HANDLE sDataMutexHandle;
 static HANDLE sImageMutexHandle;
@@ -531,10 +533,11 @@ void TemplatePlugIn::Run()
     sDebug = true;
     DebugToResult("SerialEMCCD: Error getting Digital Micrograph version\n");
   }
-  HANDLE hMutex = CreateMutex(NULL, FALSE, "SEMCCD-SingleInstance");
-  if (hMutex && GetLastError() == ERROR_ALREADY_EXISTS) {
+  sInstanceMutex = CreateMutex(NULL, FALSE, "SEMCCD-SingleInstance");
+  if (sInstanceMutex && GetLastError() == ERROR_ALREADY_EXISTS) {
     std::string str = "WARNING: THERE ARE TWO COPIES OF THE SERIALEMCCD PLUGIN LOADED!!!"
-      "\n\n"
+      "\n\n  Look in Task Manager for another hung copy of DigitalMicrograph.exe and "
+      "kill it.\n"
     "  Look in both C:\\ProgramData\\Gatan\\Plugins and C:\\Program Files\\Gatan\\Plugins"
     "\n  (or in C:\\Program Files\\Gatan\\DigitalMicrograph\\Plugins on Windows XP) for\n"
     "  copies of SEMCCD-GMS2...dll.\n  Shut down DigitalMicrograph and remove the extra "
@@ -582,6 +585,8 @@ void TemplatePlugIn::Cleanup()
 void TemplatePlugIn::End()
 {
   TerminateModuleUninitializeCOM();
+  if (sInstanceMutex)
+    CloseHandle(sInstanceMutex);
 }
 
 
