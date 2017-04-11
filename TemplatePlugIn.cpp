@@ -765,7 +765,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     SplitFilePath(mTD.strAlignComName, aliHead, errStr);
     if (RelativePath(aliHead, mTD.strSaveDir, errStr)) {
       sprintf(m_strTemp, "The command file %s and save directory %s are not on the same "
-        "drive", mTD.strAlignComName, mTD.strSaveDir);
+        "drive", mTD.strAlignComName.c_str(), mTD.strSaveDir.c_str());
       ProblemToResult(m_strTemp);
       return MAKECOM_NO_REL_PATH;
     }
