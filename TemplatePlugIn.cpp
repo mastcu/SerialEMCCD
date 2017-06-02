@@ -1487,6 +1487,9 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       // So set exposure time again and the the final validation will know about frames
       CM::SetExposure(acqParams, td->dK2Exposure + 0.001);
       j++;
+      /*sprintf(td->strTemp, "Got acqParams proc %d  exp %f bin %d\n", td->iK2Processing, 
+        td->dK2Exposure + 0.001, td->iK2Binning);*/
+      DebugToResult(td->strTemp);
 #if GMS_SDK_VERSION < 31
       k2dfaP = new K2_DoseFracAcquisition;
       k2dfaP->SetFrameExposure(td->dFrameTime + 0.0001);  j++;
@@ -1506,12 +1509,19 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       CM::SetDoAsyncReadout(acqParams, td->bAsyncToRAM ? 1 : 0);   j++;
       i = sInverseTranspose[td->iRotationFlip];
       CM::SetAcqTranspose(acqParams, (i & 1) != 0, (i & 2) != 0, (i & 256) != 0);  
+      /*sprintf(td->strTemp, "Set corr %d  filt %s frame %f asyncRAM %d transp %d\n", 
+        td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0,
+        filter.c_str(), td->dFrameTime + 0.0001,td->bAsyncToRAM ? 1 : 0, i);
+      DebugToResult(td->strTemp);*/
 #endif
 
       j = 10;
       CM::SetSettling(acqParams, td->dK2Settling);  j++;
       CM::SetShutterIndex(acqParams, td->iK2Shutter);  j++;
       CM::SetReadMode(acqParams, sReadModes[td->iReadMode]);  j++;
+      /*sprintf(td->strTemp, "Set settle %f  shutter %d mode %d\n", 
+        td->dK2Settling, td->iK2Shutter, sReadModes[td->iReadMode]);
+      DebugToResult(td->strTemp);*/
       CM::Validate_AcquisitionParameters(camera, acqParams);  j++;
       CM::PrepareCameraForAcquire(manager, camera, acqParams, dummyObj, retval);  j++;
       if (retval >= 0.001)
