@@ -313,13 +313,13 @@ STDMETHODIMP CDMCamera::SetupFrameAligning(long aliBinning, double rad2Filt1,
   double rad2Filt2, double rad2Filt3, double sigma2Ratio, 
   double truncLimit, long alignFlags, long gpuFlags, long numAllVsAll, long groupSize, 
   long shiftLimit, long antialiasType, long refineIter, double stopIterBelow, 
-  double refRad2, long nSumAndGrab, long dumInt1, long dumInt2, double dumDbl1, 
+  double refRad2, long nSumAndGrab, long frameStartEnd, long dumInt2, double dumDbl1, 
   long stringSize, long strings[], long *error)
 {
   gPlugInWrapper.SetupFrameAligning(aliBinning, rad2Filt1, rad2Filt2, rad2Filt3, 
     sigma2Ratio, truncLimit, alignFlags, gpuFlags, numAllVsAll, groupSize, 
-  shiftLimit, antialiasType, refineIter, stopIterBelow, refRad2, nSumAndGrab, dumInt1, 
-  dumInt2, dumDbl1, strings, error);
+  shiftLimit, antialiasType, refineIter, stopIterBelow, refRad2, nSumAndGrab,
+  frameStartEnd, dumInt2, dumDbl1, strings, error);
   return S_OK;
 }
 

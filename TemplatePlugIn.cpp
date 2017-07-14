@@ -227,6 +227,8 @@ struct ThreadData
   int numAddedToOutSum;
   int numOutSumsDoneAtIndex;
   int iExpectedFrames;
+  int iExpectedSlicesToWrite;
+  bool bHeaderNeedsWrite;
   bool bUseFrameAlign;
   bool bMakeAlignComFile;
   bool bFaKeepPrecision;
@@ -250,6 +252,8 @@ struct ThreadData
   float fFaRefRadius2;
   float fFaRawDist, fFaSmoothDist, fFaResMean, fFaMaxResMax, fFaMeanRawMax;
   float fFaMaxRawMax, fFaCrossHalf, fFaCrossQuarter, fFaCrossEighth, fFaHalfNyq;
+  bool bFaDoSubset;
+  int iFaSubsetStart, iFaSubsetEnd;
   
   // Items needed internally in save routine and its functions
   FILE *fp;
@@ -354,7 +358,7 @@ public:
     double rad2Filt2, double rad2Filt3, double sigma2Ratio, 
     double truncLimit, long alignFlags, long gpuFlags, long numAllVsAll, long groupSize, 
     long shiftLimit, long antialiasType, long refineIter, double stopIterBelow, 
-    double refRad2, long nSumAndGrab, long dumInt1, long dumInt2, double dumDbl1, 
+    double refRad2, long nSumAndGrab, long frameStartEnd, long dumInt2, double dumDbl1, 
     char *refName, char *defects, char *comName, long *error);
   void FrameAlignResults(double *rawDist, double *smoothDist, 
     double *resMean, double *maxResMax, double *meanRawMax, double *maxRawMax, 
@@ -728,8 +732,10 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   if (m_bSaveFrames && mTD.iReadMode >= 0 && m_bDoseFrac && mTD.strSaveDir.length() && 
     mTD.strRootName.length())
       saveFrames = SAVE_FRAMES;
-  if (saveFrames == NO_SAVE)
+  if (saveFrames == NO_SAVE) {
     mTD.bMakeAlignComFile = false;
+    mTD.bFaDoSubset = false;
+  }
   if (!(mTD.iReadMode >= 0 && m_bDoseFrac))
     mTD.bUseFrameAlign = false;
   if (m_bDoseFrac)
@@ -745,6 +751,15 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   if (saveFrames == SAVE_FRAMES)
     sLastSaveFloatScaling = mTD.fFloatScaling / (divideBy2 ? 2.f : 1.f);
   mTD.bSaveTimes100 = saveFrames == SAVE_FRAMES && (mTD.iSaveFlags & K2_SAVE_TIMES_100);
+
+  if (mTD.bFaDoSubset && (mTD.bUseFrameAlign || mTD.bMakeAlignComFile) && 
+    B3DMIN(mTD.iExpectedFrames, mTD.iFaSubsetEnd) + 1 - mTD.iFaSubsetStart < 2) {
+      sprintf(m_strTemp, "You must align a subset of at least 2 frames: expected "
+        "frames = %d, subset specified %d to %d\n", mTD.iExpectedFrames, 
+        mTD.iFaSubsetStart, mTD.iFaSubsetEnd);
+      ProblemToResult(m_strTemp);
+      return FRAMEALI_BAD_SUBSET;
+  }
 
   // Set flag to keep precision when indicated or when it has no cost, but not if frames
   // are being saved times 100
@@ -813,8 +828,9 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     }
   }
 
-  //sprintf(m_strTemp, "Entering GetImage with divideBy2 %d\n", divideBy2);
-  //DebugToResult(m_strTemp);
+  /*sprintf(m_strTemp, "Entering GetImage with divideBy2 %d  processing %d  newProc %d\n",
+    divideBy2, processing, newProc);
+  DebugToResult(m_strTemp);*/
   // Workaround for Downing camera problem, inexplicable wild values coming through
   if (divideBy2 > 1 || divideBy2 < -1)
     divideBy2 = 0;
@@ -1446,6 +1462,16 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     }
   }
 
+  // Get expected number of frames to be written
+  if (saveFrames) {
+    td->iExpectedSlicesToWrite = td->iExpectedFrames;
+    if (td->bSaveSummedFrames) {
+      td->iExpectedSlicesToWrite = 0;
+      for (i = 0; i < (int)td->outSumFrameList.size(); i++)
+        td->iExpectedSlicesToWrite += td->outSumFrameList[i];
+    }
+  }
+
   // Execute the command string as developed
   if (td->strCommand.length() > 0)
     retval = ExecuteScript((char *)td->strCommand.c_str());
@@ -1479,12 +1505,13 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       j = 0;
       CM::CameraPtr camera = CM::GetCurrentCamera();  j++;
       CM::CameraManagerPtr manager = CM::GetCameraManager();  j++;
-      CM::AcquisitionParametersPtr acqParams = CM::CreateAcquisitionParameters_FullCCD(camera,
-        (CM::AcquisitionProcessing)td->iK2Processing, td->dK2Exposure + 0.001, td->iK2Binning, 
-        td->iK2Binning);//, td->iK2Top, td->iK2Left, td->iK2Bottom, td->iK2Right);
+      CM::AcquisitionParametersPtr acqParams = CM::CreateAcquisitionParameters_FullCCD(
+        camera, (CM::AcquisitionProcessing)td->iK2Processing, td->dK2Exposure + 0.001, 
+        td->iK2Binning, td->iK2Binning);
+      //, td->iK2Top, td->iK2Left, td->iK2Bottom, td->iK2Right);
 
       // The above validated without knowing about dose-fractionation and rounded to 0.1,
-      // So set exposure time again and the the final validation will know about frames
+      // So set exposure time again and the final validation will know about frames
       CM::SetExposure(acqParams, td->dK2Exposure + 0.001);
       j++;
       /*sprintf(td->strTemp, "Got acqParams proc %d  exp %f bin %d\n", td->iK2Processing, 
@@ -1494,7 +1521,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       k2dfaP = new K2_DoseFracAcquisition;
       k2dfaP->SetFrameExposure(td->dFrameTime + 0.0001);  j++;
       k2dfaP->SetAlignOption(td->bAlignFrames);  j++;
-      k2dfaP->SetHardwareProcessing(td->iReadMode ? sK2HardProcs[td->iHardwareProc / 2] : 0);
+      k2dfaP->SetHardwareProcessing(td->iReadMode ? sK2HardProcs[td->iHardwareProc / 2] :
+        0);
       j++;
       k2dfaP->SetAsyncOption(true);  j++;
       if (td->bAlignFrames)
@@ -1662,7 +1690,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             continue;
           }
           stackAllReady = !td->bAsyncSave;
-          numSlices = td->bAsyncSave ? 0 : DM::ImageGetDimensionSize(image.get(), 2);   j++;
+          numSlices = td->bAsyncSave ? 0 : DM::ImageGetDimensionSize(image.get(), 2);  j++;
         }
 
         procWall = saveWall = getFrameWall = alignWall = 0.;
@@ -1962,8 +1990,19 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   if (td->iifile)
     iiDelete(td->iifile);
   td->iifile = NULL;
-  if (td->fp)
+  if (td->fp) {
+
+    // If there was failure in the last header write or the last image, write the header
+    // Also adjust the frames saved if that was just a header failure
+    if (td->bHeaderNeedsWrite) {
+      sprintf(td->strTemp, "Writing header in cleanup with nz = %d\n", td->hdata.nz);
+      DebugToResult(td->strTemp);
+      mrc_head_write(td->fp, &td->hdata);
+      if (fileSlice == td->iFramesSaved + 1)
+        td->iFramesSaved++;
+    }
     fclose(td->fp);
+  }
   td->fp = NULL;
 
   // Clean up all buffers
@@ -2965,7 +3004,8 @@ static int AlignOrSaveImage(ThreadData *td, short *outForRot, bool saveFrame,
   int nxout, nyout;
 
   // Align the frame
-  if (alignFrame) {
+  if (alignFrame && (!td->bFaDoSubset || 
+    (slice + 1 >= td->iFaSubsetStart && slice + 1 <= td->iFaSubsetEnd))) {
     DebugToResult("Passing frame to nextFrame\n");
     i = sFrameAli.nextFrame(td->outData, td->iFaDataMode, 
       td->iK2Processing != NEWCM_GAIN_NORMALIZED ? sK2GainRefData[refInd] : NULL, 
@@ -3127,6 +3167,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
       i = tiffOpenNew(td->iifile);
     } else {
       td->fp = fopen(td->strTemp, "wb");
+      td->bHeaderNeedsWrite = false;
     }
     if ((td->bWriteTiff && i) || (!td->bWriteTiff && !td->fp)) {
       j = errno;
@@ -3270,23 +3311,34 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
         return 1;
     }
 
-    // Completely update and write the header regardless of whether one file/slice
+    // Update the header data, setting to expected size the first slice and actual size 
+    // thereafter, but write the header only on first/only slice or last slice
     fileSlice++;
-    td->hdata.nz = td->hdata.mz = fileSlice;
+    td->bHeaderNeedsWrite = true;
+    if (fileSlice == 1)
+      td->hdata.nz = td->hdata.mz = (td->bFilePerImage ? 1 : td->iExpectedSlicesToWrite);
+    else
+      td->hdata.nz = td->hdata.mz = fileSlice;
     td->hdata.amin = (float)tmin;
     td->hdata.amax = (float)tmax;
     meanSum += tmean / B3DMAX(1.f, (float)(nxout * nyout));
     td->hdata.amean = meanSum / td->hdata.nz;
     mrc_set_scale(&td->hdata, td->dPixelSize, td->dPixelSize, td->dPixelSize);
-    if (mrc_head_write(td->fp, &td->hdata)) {
-      ErrorToResult("Failed to write header\n");
-      td->iErrorFromSave = HEADER_ERROR;
-      if (td->bFilePerImage) {
-        fclose(td->fp);
-        td->fp = NULL;
+    if ((fileSlice == 1 || finalFrame)) {
+      sprintf(td->strTemp, "Writing header with nz = %d\n", td->hdata.nz);
+      DebugToResult(td->strTemp);
+      if (mrc_head_write(td->fp, &td->hdata)) {
+        ErrorToResult("Failed to write header\n");
+        td->iErrorFromSave = HEADER_ERROR;
+        if (td->bFilePerImage) {
+          fclose(td->fp);
+          td->fp = NULL;
+        }
+        return 1;
       }
-      return 1;
     }
+    td->bHeaderNeedsWrite = !(td->bFilePerImage || finalFrame);
+
   }
       
   // Increment successful save count and close file if needed
@@ -3420,6 +3472,11 @@ static int WriteAlignComFile(ThreadData *td, string inputFile, bool ifMdoc)
     comStr += "RefineWithGroupSums 1\n";
   if (td->bFaOutputFloats)
     comStr += "ModeToOutput 2\n";
+  if (td->bFaDoSubset) {
+    sprintf(td->strTemp, "StartingEndingFrames %d %d\n", td->iFaSubsetStart,
+      td->iFaSubsetEnd);
+    comStr += td->strTemp;
+  }
 
   // get the relative path and make sure it is OK
   SplitFilePath(td->strAlignComName, aliHead, temp);
@@ -4302,8 +4359,8 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
     mTD.iFullSizeX = B3DNINT(fullSizes / K2_REDUCED_Y_SCALE);
     mTD.iFullSizeY = B3DNINT(fullSizes - K2_REDUCED_Y_SCALE * mTD.iFullSizeX);
   }
-  sprintf(m_strTemp, "SetK2Parameters called with save %s  flags 0x%x\n", 
-    m_bSaveFrames ? "Y":"N", flags);
+  sprintf(m_strTemp, "SetK2Parameters called with save %s  flags 0x%x  scaling %f\n", 
+    m_bSaveFrames ? "Y":"N", flags, scaling);
   DebugToResult(m_strTemp);
 }
 
@@ -4593,7 +4650,7 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
     double rad2Filt2, double rad2Filt3, double sigma2Ratio, 
     double truncLimit, long alignFlags, long gpuFlags, long numAllVsAll, long groupSize, 
     long shiftLimit, long antialiasType, long refineIter, double stopIterBelow, 
-    double refRad2, long nSumAndGrab, long dumInt1, long dumInt2, double dumDbl1, 
+    double refRad2, long nSumAndGrab, long frameStartEnd, long dumInt2, double dumDbl1, 
     char *refName, char *defects, char *comName, long *error)
 {
   string errStr;
@@ -4673,6 +4730,12 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
   mTD.bFaMakeEvenOdd = (alignFlags & K2FA_MAKE_EVEN_ODD);
   mTD.bFaKeepPrecision = !makingCom && (alignFlags & K2FA_KEEP_PRECISION);
   mTD.bFaOutputFloats = makingCom && (alignFlags & K2FA_KEEP_PRECISION);
+  mTD.bFaDoSubset = (alignFlags & K2FA_ALIGN_SUBSET);
+  if (mTD.bFaDoSubset) {
+    mTD.iFaSubsetStart = frameStartEnd & K2FA_SUB_START_MASK;
+    mTD.iFaSubsetEnd = frameStartEnd >> K2FA_SUB_END_SHIFT;
+  }
+    
   sprintf(m_strTemp, "SetupFrameAligning called with flags %x\n", alignFlags);
   DebugToResult(m_strTemp);
   *error = ManageEarlyReturn(alignFlags, nSumAndGrab);
@@ -5436,7 +5499,7 @@ void PlugInWrapper::SetupFrameAligning(long aliBinning, double rad2Filt1,
   double rad2Filt2, double rad2Filt3, double sigma2Ratio, 
   double truncLimit, long alignFlags, long gpuFlags, long numAllVsAll, long groupSize, 
   long shiftLimit, long antialiasType, long refineIter, double stopIterBelow, 
-    double refRad2, long nSumAndGrab, long dumInt1, long dumInt2, double dumDbl1, 
+    double refRad2, long nSumAndGrab, long frameStartEnd, long dumInt2, double dumDbl1, 
     long *strings, long *error)
 {
   mLastRetVal = 0;
@@ -5446,8 +5509,8 @@ void PlugInWrapper::SetupFrameAligning(long aliBinning, double rad2Filt1,
   char *comName = UnpackString((alignFlags & K2_MAKE_ALIGN_COM) != 0, strings, nextInd);
   gTemplatePlugIn.SetupFrameAligning(aliBinning, rad2Filt1, rad2Filt2, rad2Filt3, 
     sigma2Ratio, truncLimit, alignFlags, gpuFlags, numAllVsAll, groupSize, 
-    shiftLimit, antialiasType, refineIter, stopIterBelow, refRad2, nSumAndGrab, dumInt1, 
-    dumInt2, dumDbl1, refName, defects, comName, error);
+    shiftLimit, antialiasType, refineIter, stopIterBelow, refRad2, nSumAndGrab, 
+    frameStartEnd,  dumInt2, dumDbl1, refName, defects, comName, error);
 }
 
 void PlugInWrapper::FrameAlignResults(double *rawDist, double *smoothDist, 
