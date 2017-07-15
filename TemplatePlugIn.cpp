@@ -686,6 +686,13 @@ static double ExecuteScript(char *strScript)
  */
 double TemplatePlugIn::ExecuteClientScript(char *strScript, BOOL selectCamera)
 {
+  // Stop continuous mode, and if there was an acquire thread started, wait until it is 
+  // ready for acquisition for other shots
+  if (sContinuousArray)
+    StopContinuousCamera();
+  if (m_HAcquireThread)
+    WaitForAcquireThread(sContinuousArray ? WAIT_FOR_CONTINUOUS : WAIT_FOR_NEW_SHOT);
+
   mTD.strCommand.resize(0);
   if (selectCamera)
     AddCameraSelection();
