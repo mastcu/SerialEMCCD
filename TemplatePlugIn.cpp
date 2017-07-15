@@ -1990,6 +1990,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   if (td->iifile)
     iiDelete(td->iifile);
   td->iifile = NULL;
+#ifdef _WIN64
   if (td->fp) {
 
     // If there was failure in the last header write or the last image, write the header
@@ -2004,6 +2005,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     fclose(td->fp);
   }
   td->fp = NULL;
+#endif
 
   // Clean up all buffers
   delete [] td->rotBuf;
@@ -2189,8 +2191,8 @@ static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &e
   int refInd = td->isSuperRes ? 1 : 0;
   ImodImageFile *iiFile = NULL;
   int error = 0;
-  MrcHeader *hdr;
 #ifdef _WIN64
+  MrcHeader *hdr;
   if (!sK2GainRefData[refInd] || sK2GainRefTime[refInd] + 10. < td->curRefTime) {
     iiFile = iiOpen(td->strGainRefToCopy.c_str(), "rb");
     if (!iiFile) {
