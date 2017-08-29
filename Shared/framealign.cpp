@@ -217,11 +217,11 @@ int FrameAlign::initialize(int binSum, int binAlign, float trimFrac, int numAllV
   if (numAllVsAll != mNumAllVsAll || summingMode != mSummingMode || 
       cumAlignAtEnd != mCumAlignAtEnd || useHybrid != mUseHybrid ||
       groupSize != mGroupSizeInitial) {
-    for (ind = 0; ind < mSavedBinPad.size(); ind++)
+    for (ind = 0; ind < (int)mSavedBinPad.size(); ind++)
       B3DFREE(mSavedBinPad[ind]);
-    for (ind = 0; ind < mSavedFullSize.size(); ind++)
+    for (ind = 0; ind < (int)mSavedFullSize.size(); ind++)
       B3DFREE(mSavedFullSize[ind]);
-    for (ind = 0; ind < mSavedGroups.size(); ind++)
+    for (ind = 0; ind < (int)mSavedGroups.size(); ind++)
       B3DFREE(mSavedGroups[ind]);
     mSavedBinPad.clear();
     mSavedFullSize.clear();
@@ -301,7 +301,7 @@ int FrameAlign::initialize(int binSum, int binAlign, float trimFrac, int numAllV
 
   // Clean up extra arrays if no trimming now and there was previously
   if ((mTrimFrac || mTaperFrac) && !doBinPad) {
-    for (ind = 0; ind < mSavedBinPad.size(); ind++)
+    for (ind = 0; ind < (int)mSavedBinPad.size(); ind++)
       B3DFREE(mSavedBinPad[ind]);
     mSavedBinPad.clear();
     B3DFREE(mCorrBinPad);
@@ -319,7 +319,7 @@ int FrameAlign::initialize(int binSum, int binAlign, float trimFrac, int numAllV
     mCorrBinPad = B3DMALLOC(float, mAlignPix);
     if (testAndCleanup(!mAlignSum || !mWorkBinPad || !mSubFiltMask || !mCorrBinPad))
       return 2;
-    for (ind = 0; ind < mSavedBinPad.size(); ind++)
+    for (ind = 0; ind < (int)mSavedBinPad.size(); ind++)
       B3DFREE(mSavedBinPad[ind]);
     mSavedBinPad.clear();
   }
@@ -505,11 +505,11 @@ void FrameAlign::cleanup()
   B3DFREE(mWrapTemp);
   B3DFREE(mFitMat);
   B3DFREE(mFitWork);
-  for (ind = 0; ind < mSavedBinPad.size(); ind++)
+  for (ind = 0; ind < (int)mSavedBinPad.size(); ind++)
     B3DFREE(mSavedBinPad[ind]);
-  for (ind = 0; ind < mSavedFullSize.size(); ind++)
+  for (ind = 0; ind < (int)mSavedFullSize.size(); ind++)
     B3DFREE(mSavedFullSize[ind]);
-  for (ind = 0; ind < mSavedGroups.size(); ind++)
+  for (ind = 0; ind < (int)mSavedGroups.size(); ind++)
     B3DFREE(mSavedGroups[ind]);
   CLEAR_RESIZE(mSavedBinPad, float *, 0);
   CLEAR_RESIZE(mSavedFullSize, float *, 0);
@@ -758,7 +758,7 @@ int FrameAlign::nextFrame(void *frame, int type, float *gainRef, int nxGain, int
   // Substitute the save arrays for the working ones; create new and push if needed
   if (saving) {
     if (!mGpuAligning) {
-      if (aliFrameInd < mSavedBinPad.size()) {
+      if (aliFrameInd < (int)mSavedBinPad.size()) {
         binArr = mSavedBinPad[aliFrameInd];
       } else {
         binArr = B3DMALLOC(float, mAlignPix);
@@ -768,7 +768,7 @@ int FrameAlign::nextFrame(void *frame, int type, float *gainRef, int nxGain, int
       }
     }
     if (mSummingMode <= 0) {
-      if (sumFrameInd < mSavedFullSize.size()) {
+      if (sumFrameInd < (int)mSavedFullSize.size()) {
         fullArr = mSavedFullSize[sumFrameInd];
       } else {
         fullArr =  B3DMALLOC(float, (mFullXpad + 2) * mFullYpad);
@@ -1008,7 +1008,7 @@ int FrameAlign::nextFrame(void *frame, int type, float *gainRef, int nxGain, int
   useInd = aliFrameInd;
   if (mGroupSize > 1 && mNumFrames >= mGroupSize - 1) {
     if (!mGpuAligning) {
-      if (groupInd < mSavedGroups.size()) {
+      if (groupInd < (int)mSavedGroups.size()) {
         groupArr = mSavedGroups[groupInd];
       } else {
         groupArr = B3DMALLOC(float, mAlignPix);
