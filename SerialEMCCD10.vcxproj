@@ -787,10 +787,10 @@ regsvr32 /s SerialEMCCDps.dll
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/force:unresolved %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>DMPlugInBasic.lib;Foundation.lib;Ws2_32.lib;libiimod-64.lib;libifft.lib;libfftwf-3.3.lib;libcfshr-64.lib;libimxml-64.lib;libtiff-64.lib;libjpeg-64.lib;zlib-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>DMPlugInBasic.lib;Foundation.lib;Ws2_32.lib;libiimod-64.lib;libifft-FFTW3-64.lib;libcfshr-64.lib;libimxml-64.lib;libfftwf-3.3.lib;libtiff-64.lib;libjpeg-64.lib;zlib-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>.\$(OutDir)SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS_MINOR_VERSION)-64.dll</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
-      <AdditionalLibraryDirectories>.\Shared;$(GMS2-64_SDK)\lib\x64\Release;$(GMS2-64_SDK)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>..\SerialEMLibs;$(GMS2-64_SDK)\lib\x64\Release;$(GMS2-64_SDK)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreSpecificDefaultLibraries>LIBCMT;LIBCMTD;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <ModuleDefinitionFile>.\SerialEMCCD.def</ModuleDefinitionFile>
       <ProgramDatabaseFile>.\ReleaseMinDependency/SerialEMCCD.pdb</ProgramDatabaseFile>
