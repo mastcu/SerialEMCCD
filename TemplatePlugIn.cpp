@@ -692,10 +692,16 @@ double TemplatePlugIn::ExecuteClientScript(char *strScript, BOOL selectCamera)
 {
   // Stop continuous mode, and if there was an acquire thread started, wait until it is 
   // ready for acquisition for other shots
-  if (sContinuousArray)
+  int waitType = WAIT_FOR_NEW_SHOT;
+  if (sContinuousArray) {
     StopContinuousCamera();
-  if (m_HAcquireThread)
-    WaitForAcquireThread(sContinuousArray ? WAIT_FOR_CONTINUOUS : WAIT_FOR_NEW_SHOT);
+    waitType = WAIT_FOR_CONTINUOUS;
+  }
+  if (m_HAcquireThread) {
+    if (strstr(strScript, "HardwareDarkReference"))
+      waitType = WAIT_FOR_THREAD;
+    WaitForAcquireThread(waitType);
+  }
 
   mTD.strCommand.resize(0);
   if (selectCamera)
@@ -2972,11 +2978,12 @@ static int InitializeFrameAlign(ThreadData *td)
     radius2[ind] = td->fFaRadius2[ind];
     if (radius2[ind] <= 0)
       break;
-    sigma2[ind] = (float)(0.001 * B3DNINT(1000. * td->fFaSigmaRatio * radius2[ind]));
     numFilters++;
   }
   if (numFilters > 1)
     rsSortFloats(radius2, numFilters);
+  for (ind = 0; ind < 4; ind++)
+    sigma2[ind] = (float)(0.001 * B3DNINT(1000. * td->fFaSigmaRatio * radius2[ind]));
 
   ind = sFrameAli.initialize(td->iFinalBinning, td->iFaAliBinning, trimFrac, 
     td->iFaNumAllVsAll, td->iFaRefineIter, td->iFaHybridShifts, 
@@ -5060,6 +5067,11 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
     StopDSAcquisition();
 
   mTD.strCommand.resize(0);
+
+  // THIS DOESN'T WORK, SCRIPT DETACHES AND RUNNING IT RETURNS 0
+  // But beam scan control is NOT needed in GMS 3.2
+  //if (m_iDMVersion >= 50000 && controlScan)
+    //mTD.strCommand += "// $BACKGROUND$\n";
   mTD.strCommand += "Number exists, xsize, ysize, oldx, oldy, nbytes, idchan, idfirst\n";
   mTD.strCommand += "image imdel, imchan\n";
   mTD.strCommand += "String channame\n";
