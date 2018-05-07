@@ -11,10 +11,9 @@
 // For GMS2, GMS_MINOR_VERSION must be defined to a single digit below 3 (0, 1, 2) or to 
 // double digits for 3 onwards (30, 31, etc).  GMS_SDK_VERSION goes to 3 digits for GMS3
 // To build all versions starting with 31 - x64:
-// Define to 30, build 30 - x64 then switch to GMS2-32bit - Win32, build 30 - Win32
+// Define to 30, switch to GMS2-32bit - Win32, build 30 - Win32
 // Define to 0, build 0 - Win32
-// Define to 2, switch to GMS2-64bit - x64, build 2 - x64
-// Return to 31
+// Define to 31, switch to GMS2-64bit - x64, build 31 - x64
 #ifndef GMS_MINOR_VERSION
 #define GMS_MINOR_VERSION -1
 #endif
@@ -50,9 +49,6 @@ extern "C" int _forceMFCManifestCUR = 0;
 using namespace Gatan;
 
 #include "TemplatePlugIn.h"
-#if defined(_WIN64) && GMS_SDK_VERSION < 31
-#include "K2DoseFractionation.h"
-#endif
 #include <string>
 #include <vector>
 using namespace std ;
@@ -95,8 +91,8 @@ enum {WAIT_FOR_THREAD = 0, WAIT_FOR_RETURN, WAIT_FOR_NEW_SHOT, WAIT_FOR_CONTINUO
 
 // Mapping from program read modes (0-2) to values for K2.  The read mode index >= 0 is
 // the marker for a K2, so OveView diffraction mode is sent as -2 and not included here
-static int sReadModes[3] = {K2_LINEAR_READ_MODE, K2_COUNTING_READ_MODE, 
-K2_SUPERRES_READ_MODE};
+static int sReadModes[5] = {K2_LINEAR_READ_MODE, K2_COUNTING_READ_MODE, 
+K2_SUPERRES_READ_MODE, K2_LINEAR_READ_MODE, K3_COUNTING_READ_MODE};
 
 // Values to send to CM_SetHardwareCorrections or K2_SetHardwareProcessing given hardware
 // processing value of 0, 2, 4, 6 divided by 2
@@ -115,7 +111,6 @@ static HANDLE sInstanceMutex;
 // Handle for mutexes for writing critical components of thread data and continuous image
 static HANDLE sDataMutexHandle;
 static HANDLE sImageMutexHandle;
-static HANDLE sDFAcquireMutexHandle;
 static HANDLE sFrameReadyEvent = NULL;
 static int sJ;
 
@@ -440,9 +435,6 @@ TemplatePlugIn::TemplatePlugIn()
   sDataMutexHandle = CreateMutex(0, 0, 0);
   sImageMutexHandle = CreateMutex(0, 0, 0);
   srand((unsigned int)sDataMutexHandle);
-#if defined(_WIN64) && GMS_SDK_VERSION < 31
-  sDFAcquireMutexHandle = CreateMutex(0, 0, 0);
-#endif
 #ifdef _WIN64
   b3dSetStoreError(1);
   sFrameAli.setPrintFunc(framePrintFunc);
@@ -870,15 +862,11 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     mTD.fFloatScaling = (float)scaleAdj;
   }
 
-  // single frame doesn't work in older GMS for async saving; but don't know about newer
   mTD.iK2Processing = newProc;
-  if (saveFrames == SAVE_FRAMES && mTD.iExpectedFrames == 1 && GMS_SDK_VERSION < 31)
-    mTD.bAsyncSave = false;
 
-  // Also cancel asynchronous save if aligning and saving frames since we need to use
+  // Cancel asynchronous save if aligning and saving frames since we need to use
   // the old API, and that is set up to happen only through script calls
-  mTD.bUseOldAPI = saveFrames == SAVE_FRAMES && mTD.bAlignFrames && 
-    GMS_SDK_VERSION >= 31;
+  mTD.bUseOldAPI = saveFrames == SAVE_FRAMES && mTD.bAlignFrames;
   if (mTD.bUseOldAPI)
     mTD.bAsyncSave = false;
 
@@ -1022,19 +1010,14 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
   // Commands for K2 camera
   if (mTD.iReadMode >= 0) {
-    if (GMS_SDK_VERSION < 31) {
-      sprintf(m_strTemp, "K2_SetHardwareProcessing(camera, %d)\n", 
-        mTD.iReadMode ? sK2HardProcs[mTD.iHardwareProc / 2] : 0);
-    } else {
-      sprintf(m_strTemp, "CM_SetHardwareCorrections(acqParams, %d)\n"
-          "CM_SetDoAcquireStack(acqParams, %d)\n",
-          mTD.iReadMode ? sCMHardCorrs[mTD.iHardwareProc / 2] : 0, m_bDoseFrac ? 1 : 0);
-    }
+    sprintf(m_strTemp, "CM_SetHardwareCorrections(acqParams, %d)\n"
+      "CM_SetDoAcquireStack(acqParams, %d)\n",
+       mTD.iReadMode ? sCMHardCorrs[mTD.iHardwareProc / 2] : 0, m_bDoseFrac ? 1 : 0);
     mTD.strCommand += m_strTemp;
 
     if (m_bDoseFrac) {
 
-      if (GMS_SDK_VERSION < 31 || mTD.bUseOldAPI) {
+      if (mTD.bUseOldAPI) {
 
         // WORKAROUND to bug in frame time, save & set the global frame time, restore after
         sprintf(m_strTemp, "Object k2dfa = alloc(K2_DoseFracAcquisition)\n"
@@ -1062,7 +1045,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       }
 
       // Cancel the rotation/flip done by DM in GMS 2.3.1 rgardless of API
-      if (mTD.iRotationFlip && GMS_SDK_VERSION >= 31) {
+      if (mTD.iRotationFlip) {
         sprintf(m_strTemp, "CM_SetAcqTranspose(acqParams, %d)\n", 
           sInverseTranspose[mTD.iRotationFlip]);
         mTD.strCommand += m_strTemp;
@@ -1134,8 +1117,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
           "Image img := CM_AcquireImage(camera, acqParams)\n";
 //      "Image img := CM_CreateImageForAcquire(camera, acqParams, \"temp\")\n"
 //            "CM_AcquireDarkReference(camera, acqParams, img, NULL)\n";
-    } else if (mTD.iReadMode >= 0 && m_bDoseFrac && 
-      (GMS_SDK_VERSION < 31 || mTD.bUseOldAPI)) {
+    } else if (mTD.iReadMode >= 0 && m_bDoseFrac && mTD.bUseOldAPI) {
       mTD.strCommand += "Image stack\n"
         "Image img := k2dfa.DoseFrac_AcquireImage(camera, acqParams, stack)\n"
         "K2_DoseFrac_SetFrameExposure(camera, savedFrameTime)\n";
@@ -1152,7 +1134,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   sprintf(m_strTemp, "KeepImage(img)\n"
     "number retval = GetImageID(img)\n");
   mTD.strCommand += m_strTemp;
-  if (saveFrames == SAVE_FRAMES && (GMS_SDK_VERSION < 31 || mTD.bUseOldAPI)) {
+  if (saveFrames == SAVE_FRAMES && mTD.bUseOldAPI) {
     sprintf(m_strTemp, "KeepImage(stack)\n"
       "number stackID = GetImageID(stack)\n"
       //"Result(retval + \"  \" + stackID + \"\\n\")\n"
@@ -1276,7 +1258,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   // A thread is needed if doing asynchronous saving, or even for synchronous save with
   // an early return, but only for old version
   if (!retval && (mTD.bDoContinuous || ((saveFrames || mTD.bUseFrameAlign) && 
-    (mTD.bAsyncSave || (mTD.bEarlyReturn && GMS_SDK_VERSION < 31))))) {
+    mTD.bAsyncSave))) {
       *arrSize = *width = *height = 0;
       mTDcopy = mTD;
       mTDcopy.isTDcopy = true;
@@ -1315,18 +1297,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         retTD->arrSize = retWidth * retHeight;
   } else if (!retval) {
 
-    // Acquire a mutex to prevent thread from finishing up during a single shot
-#if defined(_WIN64) && GMS_SDK_VERSION < 31
-    if (m_HAcquireThread) {
-      WaitForSingleObject(sDFAcquireMutexHandle, DFACQUIRE_MUTEX_WAIT);
-      hasMutex = true;
-    }
-#endif
     retval = AcquireProc(&mTD);
- #if defined(_WIN64) && GMS_SDK_VERSION < 31
-    if (hasMutex)
-      ReleaseMutex(sDFAcquireMutexHandle);
-#endif
     useFinal = mTD.iAntialias || mTD.bMakeSubarea || mTD.bUseFrameAlign;
     retWidth = useFinal ? mTD.iFinalWidth : mTD.width;
     retHeight = useFinal ? mTD.iFinalHeight : mTD.height;
@@ -1426,11 +1397,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   int errorRet = 0;
 #ifdef _WIN64
   DM::ScriptObject dummyObj;
-#if GMS_SDK_VERSION < 31
-  K2_DoseFracAcquisition *k2dfaP = NULL;
-#else
   CM::ImageStackPtr stack;
-#endif
 #endif
 
   // Set these values to zero in case of error returns
@@ -1530,17 +1497,6 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       /*sprintf(td->strTemp, "Got acqParams proc %d  exp %f bin %d\n", td->iK2Processing, 
         td->dK2Exposure + 0.001, td->iK2Binning);*/
       DebugToResult(td->strTemp);
-#if GMS_SDK_VERSION < 31
-      k2dfaP = new K2_DoseFracAcquisition;
-      k2dfaP->SetFrameExposure(td->dFrameTime + 0.0001);  j++;
-      k2dfaP->SetAlignOption(td->bAlignFrames);  j++;
-      k2dfaP->SetHardwareProcessing(td->iReadMode ? sK2HardProcs[td->iHardwareProc / 2] :
-        0);
-      j++;
-      k2dfaP->SetAsyncOption(true);  j++;
-      if (td->bAlignFrames)
-        k2dfaP->SetFilter(filter);
-#else
       CM::SetHardwareCorrections(acqParams, CM::CCD::Corrections::from_bits(
         td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0));  j++;
       CM::SetAlignmentFilter(acqParams, filter);  j++;
@@ -1554,7 +1510,6 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0,
         filter.c_str(), td->dFrameTime + 0.0001,td->bAsyncToRAM ? 1 : 0, i);
       DebugToResult(td->strTemp);*/
-#endif
 
       j = 10;
       CM::SetSettling(acqParams, td->dK2Settling);  j++;
@@ -1568,15 +1523,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       if (retval >= 0.001)
         Sleep((DWORD)(retval * 1000. + 0.5));
 
-#if GMS_SDK_VERSION < 31
-      sumImage = k2dfaP->AcquireImage(camera, acqParams, image);
-      numLoop = 2;
-#else
       stack = CM::AcquireImageStack(camera, acqParams);   j++;
       numSlices = stack->GetNumFrames();
       stackAllReady = true;
       td->iNumFramesToSum = B3DMIN(td->iNumFramesToSum, numSlices);
-#endif
       DebugToResult("Returned from asynchronous start of acquire\n");
     }
     catch (exception exc) {
@@ -1585,15 +1535,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         "");
       ErrorToResult(td->strTemp);
       try {
-#if GMS_SDK_VERSION < 31
-        k2dfaP->Abort();
-        DM::DeleteImage(sumImage.get());
-        DM::DeleteImage(image.get());
-        delete k2dfaP;
-#else
         stack->Abort();
         // TODO: delete anything?
-#endif
       }
       catch (exception exc) {
       }
@@ -1604,7 +1547,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   } else if (saveOrFrameAlign) {
 
     // Synchronous dose-fractionation and saving: the stack is complete
-    if (GMS_SDK_VERSION < 31 || td->bUseOldAPI) {
+    if (td->bUseOldAPI) {
 
       // Old way: stack and image exist
       stackID = (int)((retval + 0.1) / ID_MULTIPLIER);
@@ -1694,7 +1637,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
         // STACK PROCESSING : check dimensions for an image
 
-        if (GMS_SDK_VERSION < 31 || !td->bAsyncSave) {
+        if (!td->bAsyncSave) {
           numDim = DM::ImageGetNumDimensions(image.get());   j++;
           if (numDim < 3) {
             td->iErrorFromSave = STACK_NOT_3D;
@@ -1714,14 +1657,6 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           if (td->bAsyncSave) {
             wallStart = wallTime();
             while (1) {
-#if GMS_SDK_VERSION < 31
-              stackAllReady = k2dfaP->IsDone();   j++;
-              numSlices = k2dfaP->GetNumFramesProcessed();   j++;
-              if (numSlices > slice || stackAllReady) {
-                exposureDone = true;
-                break;
-              }
-#else
               image = stack->GetNextFrame(&exposureDone);   j++;
               frameNeedsDelete = image.IsValid();
               if (frameNeedsDelete) {
@@ -1734,7 +1669,6 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
               }
               if (frameNeedsDelete || slice >= numSlices)
                 break;
-#endif
 
               // Sleep while processing events.  If it returns false, it is a quit,
               // so break and let the loop finish
@@ -1746,8 +1680,6 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             }
             sprintf(td->strTemp, "numSlices %d  isStackDone %s\n", numSlices,
               stackAllReady ? "Y":"N");
-            if (GMS_SDK_VERSION < 31)
-              DebugToResult(td->strTemp);
             if (slice >= numSlices || GetWatchedDataValue(td->iDMquitting) || 
               td->iErrorFromSave == QUIT_DURING_SAVE || 
               td->iErrorFromSave == DM_CALL_EXCEPTION)
@@ -1780,14 +1712,12 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             }
             if (!needTemp)
               td->tempBuf = (short *)array;
-            if (GMS_SDK_VERSION < 31)
-              SetWatchedDataValue(td->iReadyToAcquire, 1);
           }
           wallStart = wallTime();
 
           // Get data pointer
           imageLp = new GatanPlugIn::ImageDataLocker( image );   j++;
-          if (GMS_SDK_VERSION < 31 || !td->bAsyncSave) {
+          if (!td->bAsyncSave) {
             imageLp->GetImageData(2, slice, fData);   j++;
             imageData = fData.get_data();   j++;
           } else {
@@ -1984,14 +1914,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     // Delete image here in asynchronous case
     if (doingAsyncSave) {
       try {
-#if GMS_SDK_VERSION < 31
-        if (doingStack && !stackAllReady)
-          k2dfaP->Abort();
-        DM::DeleteImage(image.get());
-#else
         if (slice < numSlices)
           stack->Abort();
-#endif
       }
       catch (exception exc) {
       }
@@ -2033,19 +1957,13 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     delete [] td->grabStack;
   }
 
-  // Acquire mutex so that final cleanup does not occur during a single-shot
-#if defined(_WIN64) && GMS_SDK_VERSION < 31
-  if (td->isTDcopy) 
-    WaitForSingleObject(sDFAcquireMutexHandle, DFACQUIRE_MUTEX_WAIT);
-#endif
-
   // Delete image(s) before return if they can be found
   if (delImage && !doingAsyncSave) {
     if (DM::GetImageFromID(image, imageID))
       DM::DeleteImage(image.get());
     else 
       DebugToResult("Cannot find image for deleting it\n");
-    if (saveFrames && (GMS_SDK_VERSION < 31 || td->bUseOldAPI)) {
+    if (saveFrames && td->bUseOldAPI) {
       if (DM::GetImageFromID(image, stackID))
         DM::DeleteImage(image.get());
       else
@@ -2055,11 +1973,6 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 #ifdef _WIN64
   if (td->bUseFrameAlign)
     sFrameAli.cleanup();
-#endif
-#if defined(_WIN64) && GMS_SDK_VERSION < 31
-  delete k2dfaP;
-  if (td->isTDcopy) 
-    ReleaseMutex(sDFAcquireMutexHandle);
 #endif
 
   delete unbinnedArray;
@@ -2381,13 +2294,8 @@ static int RunContinuousAcquire(ThreadData *td)
     // Seems to be no way to set hardware correction in software for older GMS
     if (K2type) {
 #ifdef _WIN64
-#if GMS_SDK_VERSION < 31
-      K2_SetHardwareProcessing(camera, 
-        td->iReadMode ? sK2HardProcs[td->iHardwareProc / 2] : 0);
-#else
       CM::SetHardwareCorrections(acqParams, CM::CCD::Corrections::from_bits(
         td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0));
-#endif
       j++;
       CM::SetReadMode(acqParams, sReadModes[td->iReadMode]);
 #endif
@@ -2989,7 +2897,7 @@ static int InitializeFrameAlign(ThreadData *td)
     td->iFaNumAllVsAll, td->iFaRefineIter, td->iFaHybridShifts, 
     (td->iFaDeferGpuSum | td->iFaSmoothShifts) ? 1 : 0, td->iFaGroupSize, td->width, 
     td->height, fullTaperFrac, taperFrac, 
-    B3DCHOICE(GMS_SDK_VERSION > 30, td->iFaAntialiasType, 0), 0., radius2, sigma1, 
+    td->iFaAntialiasType, 0., radius2, sigma1, 
     sigma2, numFilters, td->iFaShiftLimit, kFactor, maxMaxWeight, 0, td->iExpectedFrames, 
     td->iFaGpuFlags, B3DCHOICE(sDebug, B3DMAX(1, sEnvDebug), 0));
   td->fFaRawDist = td->fFaSmoothDist = 0.;
@@ -4574,9 +4482,9 @@ int TemplatePlugIn::ManageEarlyReturn(int flags, int iSumAndGrab)
   mTD.iNumGrabAndStack = 0;
   if (mTD.bEarlyReturn) {
     mTD.iNumFramesToSum = iSumAndGrab & 65535;
-    mTD.iNumGrabAndStack = GMS_SDK_VERSION > 30 ? (iSumAndGrab >> 16) : 0;
+    mTD.iNumGrabAndStack = iSumAndGrab >> 16;
   }
-  if (mTD.bEarlyReturn && !mTD.bAsyncSave && GMS_SDK_VERSION > 30)
+  if (mTD.bEarlyReturn && !mTD.bAsyncSave)
     return EARLY_RET_WITH_SYNC;
   return 0;
 }
@@ -4618,7 +4526,7 @@ void TemplatePlugIn::GetFileSaveResult(long *numSaved, long *error)
 int TemplatePlugIn::GetDefectList(short xyPairs[], long *arrSize, 
                                   long *numPoints, long *numTotal)
 {
-#if defined(GMS2) && GMS_SDK_VERSION > 30
+#if defined(GMS2)
   unsigned short *pairs = (unsigned short *)xyPairs;
   long minRetSize = B3DMIN(2048, *arrSize);
   memset(xyPairs, 0, 2 * minRetSize);
