@@ -3040,6 +3040,10 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
   unsigned short *usData, *usSum;
   unsigned char *bData, *packed;
   unsigned char lowbyte;
+  float numSample = 500000.;
+  float sampleXtoYratio = 1.;
+  float fracX, fracY, sampleFrac;
+  int deltaX, deltaY, xstart, numSum = 0;
 
   // Sum frame first if flag is set, and there is a count
   if (td->bSaveSummedFrames && td->outSumFrameIndex < td->outSumFrameList.size()) {
@@ -3171,9 +3175,16 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
     meanSum = 0.;
   }
 
-  // Loop on the lines to compute mean accurately
+  // Loop on the lines to compute min/max/mean from samples
   tmean = 0.; 
-  for (i = 0; i < nyout; i++) {
+  sampleFrac = numSample / (nxout * nyout);
+  fracY = sqrt(sampleFrac / sqrt(sampleXtoYratio));
+  fracX = sampleFrac * fracY;
+  deltaX = (int)(fracX * nxout);
+  deltaY = (int)(fracY * nyout);
+  B3DCLAMP(deltaX, 1, nxout / 4);
+  B3DCLAMP(deltaY, 1, nyout / 4);
+  for (i = 0; i < nyout; i += deltaY) {
 
     // Get pointer to start of line
     if (td->outByteSize == 1) {
@@ -3185,31 +3196,36 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
 
     // Get min/max/sum and add to mean
     tsum = 0;
+    xstart = (i % 17) % deltaX;
     if (td->fileMode == MRC_MODE_USHORT) {
-      for (j = 0; j < nxout; j++) {
+      for (j = xstart; j < nxout; j += deltaX) {
         val = usData[j];
         tmin = B3DMIN(tmin, val);
         tmax = B3DMAX(tmax, val);
         tsum += val;
+        numSum++;
       }
     } else if (td->fileMode == MRC_MODE_SHORT) {
-      for (j = 0; j < nxout; j++) {
+      for (j = xstart; j < nxout; j += deltaX) {
         val = sData[j];
         tmin = B3DMIN(tmin, val);
         tmax = B3DMAX(tmax, val);
         tsum += val;
+        numSum++;
       }
     } else {
-      for (j = 0; j < nxout; j++) {
+      for (j = xstart; j < nxout; j += deltaX) {
         val = bData[j];
         tmin = B3DMIN(tmin, val);
         tmax = B3DMAX(tmax, val);
         tsum += val;
+        numSum++;
       }
-
     }
+    j += xstart % 3;
     tmean += tsum;
   }
+  tmean /= B3DMAX(1, numSum);
 
   // Pack 4-bit data into bytes; move into array if not there yet
   if (td->save4bit) {
@@ -3233,7 +3249,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
   if (td->bWriteTiff) {
     td->iifile->amin = (float)tmin;
     td->iifile->amax = (float)tmax;
-    td->iifile->amean = tmean / (float)(nxout * nyout);
+    td->iifile->amean = tmean;
     i = tiffParallelWrite(td->iifile, td->outData, td->iTiffCompression, 1, 
       B3DNINT(2.54e8 / td->dPixelSize), td->iTiffQuality, &didParallel);
     if (i && didParallel)
@@ -3282,7 +3298,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
     td->hdata.nz = td->hdata.mz = fileSlice;
     td->hdata.amin = (float)tmin;
     td->hdata.amax = (float)tmax;
-    meanSum += tmean / B3DMAX(1.f, (float)(nxout * nyout));
+    meanSum += tmean;
     td->hdata.amean = meanSum / td->hdata.nz;
     mrc_set_scale(&td->hdata, td->dPixelSize, td->dPixelSize, td->dPixelSize);
     if (mrc_head_write(td->fp, &td->hdata)) {
