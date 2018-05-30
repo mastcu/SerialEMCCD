@@ -780,6 +780,7 @@ regsvr32 /s SerialEMCCDps.dll
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <CompileAs>Default</CompileAs>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -1219,6 +1220,10 @@ regsvr32 /s SerialEMCCDps.dll
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS2-NOMP-64|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="Shared\rotateflip.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|Win32'">NotUsing</PrecompiledHeader>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="SocketPathway.cpp">
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|x64'">WIN32;NDEBUG;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release MinDependency|x64'">WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY</PreprocessorDefinitions>
@@ -1329,6 +1334,7 @@ regsvr32 /s SerialEMCCDps.dll
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Release MinSize|x64'">MinSpace</Optimization>
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release MinSize|x64'">%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release MinSize|x64'">WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_DLL</PreprocessorDefinitions>
+      <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">true</OpenMPSupport>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

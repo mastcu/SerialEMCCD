@@ -153,6 +153,13 @@ STDMETHODIMP CDMCamera::SelectCamera(long camera)
 	return S_OK;
 }
 
+// Set the read mode and the scaling factor
+// For K2, pass 0, 1, or 2 for linear, counting, super-res
+// For K3, pass 3 or 4 for linear or super-res: this is THE signal that it is a K3
+// For K3, the offset to be subtracted for linear mode must be supplied with the scaling.
+// The offset is supposed to be 8192 per frame
+// The offset per ms is thus nominally (8192 per frame) / (1.502 frames per ms)
+// pass scaling = trueScaling + 10 * nearestInt(offsetPerMs)
 STDMETHODIMP CDMCamera::SetReadMode(long mode, double scaling)
 {
 	gPlugInWrapper.SetReadMode(mode, scaling);
@@ -170,13 +177,27 @@ STDMETHODIMP CDMCamera::SetK2Parameters(long readMode, double scaling, long hard
 
 // This new version was added to set rotation/flip for dose fractionation shots that
 // are NOT saving frames, so that DM can be kept from doing the operation for GMS >= 2.3.1
+// readMode and scaling are sent to SetReadMode
+// hardwareProc should be 0, 2, 4, the original values sent to K2_SetHardwareProcessing
+//   it is translated for the replacement function CM_SetHardwareCorrections
+// doseFrac enables dose fractionation mode
+// frameTime is the frame time for any dose frac operation
+// alignFrames should be on only for frame alignment in DM, NOT the framealign operation
+// saveFrames enables saving frames
+// rotationFlip is the standard SerialEM RotationAndFlip value
+// when aligning in DM, pass a null-terminated filter name in filter, filtSize is # of
+// longs passed
 //   flags are as defined in SEMCCDDefines.h:
 //     the first three bits have an antialias filter type + 1 for antialias reduction
 //         In this case reducedSizes must have the size to be reduced to as the
 //         width plus height * K2_REDUCED_Y_SCALE  (version 101)
 //     K2_OVW_MAKE_SUBAREA  - Make a subarea from a full-frame image.  In this case 
-//         must have the full unbinned size of the camera as width plus 
+//         fullSizes must have the full unbinned size of the camera chip as width plus 
 //         height * K2_REDUCED_Y_SCALE  (version 104)
+//     K2_USE_FRAMEALIGN  - Align frames with framealign; SetupFrameAligning must also
+//         be called
+//     K2_MAKE_ALIGN_COM  - Make a com file for alignment; SetupFrameAligning must also
+//         be called
 STDMETHODIMP CDMCamera::SetK2Parameters2(long readMode, double scaling, long hardwareProc,
   BOOL doseFrac, double frameTime, BOOL alignFrames, BOOL saveFrames, long rotationFlip,
   long flags, double reducedSizes, double fullSizes, double dummy3, double dummy4, 
@@ -227,6 +248,9 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 //                           ReturnDeferredSum (version 105)
 //      K2_SAVE_TIMES_100  - Save normalized frames times 100, in shorts for counting mode
 //                           or for super-res mode
+//      K2_MRCS_EXTENSION  - Save MRC file with extension .mrcs
+//      K2_SAVE_SUPER_REDUCED  - Reduce normalized super-resolution frames by 2 before
+//                               saving and save as shorts/ushorts
 //   numGrabSum is relevant when doing an early return; it should be set from an unsigned
 //      int with the number of frames to sum in the low 16 bits and, for GMS >= 2.3.1,
 //      the number of frames to grab into a local stack in the high 16 bits.  The local
@@ -238,7 +262,7 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 //      root name for files
 //      full name of the gain reference, if K2_COPY_GAIN_REF is set in flags
 //      full defect string, if K2_SAVE_DEFECTS is set
-//      command to run, if K2_RUN_COMMAND is set
+//      command to run, if K2_RUN_COMMAND is set  (NOT SUPPORTED!)
 //      if K2_SAVE_SUMMED_FRAMES is set, pairs of values; the first value in each pair is
 //           the number of summed frames to save of a certain size, the second value is
 //           the number of frames to sum into each of those saved sums

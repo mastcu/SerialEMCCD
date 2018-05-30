@@ -19,3 +19,9 @@ set GMS_MINOR_VERSION=31
 set GMS2-64_SDK=C:\Users\mast\Documents\Scope\DMSDKs\DMSDK%GMS_MAJOR_VERSION%.%GMS_MINOR_VERSION%-64
 msbuild /t:Rebuild /p:Configuration=GMS2-64bit /p:Platform=x64 SerialEMCCD10.vcxproj
 if %errorlevel% neq 0 exit /b %errorlevel%
+
+set GMS_MAJOR_VERSION=3
+set GMS_MINOR_VERSION=01
+set GMS2-64_SDK=C:\Users\mast\Documents\Scope\DMSDKs\DMSDK%GMS_MAJOR_VERSION%.%GMS_MINOR_VERSION%-64
+msbuild /t:Rebuild /p:Configuration=GMS2-64bit /p:Platform=x64 SerialEMCCD10.vcxproj
+if %errorlevel% neq 0 exit /b %errorlevel%
