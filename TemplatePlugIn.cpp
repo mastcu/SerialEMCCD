@@ -920,6 +920,21 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       }
       binning = 1;
       DebugToResult("Set up antialias\n");
+
+      // For K3, take advantage of hardware binning by 2 or 4 and reduce final binning
+      // to apply
+      if (mTD.K3type && mTD.bDoContinuous) {
+        if (mTD.iFinalBinning % 4 == 0 && mTD.iReadMode == K2_LINEAR_READ_MODE) {
+          binning = 4;
+          mTD.iFinalBinning /= 4;
+        } else if (mTD.iFinalBinning % 2 == 0) {
+          binning = 2;
+          mTD.iFinalBinning /= 2;
+        }
+        if (mTD.iFinalBinning == 1)
+          mTD.iAntialias = 0;
+      }
+
   } else
     mTD.iAntialias = 0;
 
@@ -1054,7 +1069,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   // Commands for K2 camera
   if (mTD.iReadMode >= 0) {
     if (mTD.K3type) {
-      mTD.strCommand += "CM_SetExposurePrecedence(acqParams, 1)\n";
+      mTD.strCommand += "CM_SetExposurePrecedence(acqParams, 0)\n";
     } else {
       sprintf(m_strTemp, "CM_SetHardwareCorrections(acqParams, %d)\n",
         mTD.iReadMode ? sCMHardCorrs[mTD.iHardwareProc / 2] : 0);
@@ -1558,7 +1573,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       } 
 #if GMS_SDK_VERSION >= 300
       if (td->K3type) {
-        CM::SetExposurePrecedence(acqParams, Gatan::Camera::ExposurePrecedence::EXPOSURE);
+        CM::SetExposurePrecedence(acqParams, 
+          Gatan::Camera::ExposurePrecedence::FRAME_EXPOSURE);
         j++;
       }
 #endif
@@ -1585,15 +1601,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       DebugToResult(td->strTemp);*/
       double actualExposure;
       CM::GetExposure(acqParams, &actualExposure);
-      sprintf(td->strTemp, "Set to exp %f  frame %f, before validation, exp %f frame %f\n",
-        td->dK2Exposure + 0.001, td->dFrameTime + 0.0001, actualExposure,
-        CM::GetFrameExposure(acqParams));
-      DebugToResult(td->strTemp);
       CM::Validate_AcquisitionParameters(camera, acqParams);  j++;
       CM::GetExposure(acqParams, &actualExposure);
-      sprintf(td->strTemp, "After validation, exposure %f  frame %f\n", actualExposure,
-        CM::GetFrameExposure(acqParams));
-      DebugToResult(td->strTemp);
       CM::PrepareCameraForAcquire(manager, camera, acqParams, dummyObj, retval);  j++;
       if (retval >= 0.001)
         Sleep((DWORD)(retval * 1000. + 0.5));
@@ -2321,7 +2330,7 @@ static int RunContinuousAcquire(ThreadData *td)
   int outLimit = td->arrSize;
   int j, transpose, nxout, nyout, maxTime = 0, retval = 0, rotationFlip = 0;
   int tleft, ttop, tbot, tright, width, height, finalWidth, finalHeight, boost;
-  int tsizeX, tsizeY, tfullX, tfullY;
+  int tsizeX, tsizeY, tfullX, tfullY, totalBinning;
   double delay;
   short *procOutArray = sContinuousArray;
   short *redOutArray;
@@ -2528,7 +2537,7 @@ static int RunContinuousAcquire(ThreadData *td)
       sJ++;
       ProcessImage(imageData, procOutArray, td->dataSize, td->width, td->height, 
         td->divideBy2, td->transpose, td->byteSize, td->isInteger, td->isUnsignedInt, 
-        td->fFloatScaling, td->fLinearOffset); sJ++;
+        td->fFloatScaling, td->iK2Binning * td->iK2Binning * td->fLinearOffset); sJ++;
       delete imageLp; sJ++;
       imageLp = NULL; sJ++;
 
@@ -2544,6 +2553,7 @@ static int RunContinuousAcquire(ThreadData *td)
         tleft = td->iLeft;
         ttop = td->iTop;
         tbot = td->iBottom;
+        totalBinning = (td->iAntialias ? td->iFinalBinning : 1) * td->iK2Binning;
         if (rotationFlip) {
           tfullX = td->iFullSizeX;
           tfullY = td->iFullSizeY;
@@ -2551,16 +2561,18 @@ static int RunContinuousAcquire(ThreadData *td)
           tsizeY = tbot - ttop;
           CorDefUserToRotFlipCCD(rotationFlip, 1, tfullX, tfullY, tsizeX, tsizeY, ttop,
             tleft, tbot, tright);
-          boost = (td->K3type && td->isSuperRes) ? 2 : 1;
-          finalWidth = boost * (tright - tleft) /(td->iAntialias ? td->iFinalBinning : 1);
-          finalHeight = boost * (tbot - ttop) / (td->iAntialias ? td->iFinalBinning : 1);
         }
+        boost = (td->K3type && td->isSuperRes) ? 2 : 1;
+        finalWidth = boost * (tright - tleft) / totalBinning;
+        finalHeight = boost * (tbot - ttop) / totalBinning;
+
         sprintf(td->strTemp, "ccont %p  procOut %p to %p fw %d fh %d size %d\n", 
           sContinuousArray, procOutArray, rotationFlip ? redOutArray : sContinuousArray, 
           finalWidth, finalHeight, finalWidth * finalHeight); 
         DebugToResult(td->strTemp);      
         SubareaAndAntialiasReduction(td, procOutArray, 
-          rotationFlip ? redOutArray : sContinuousArray, ttop, tleft, tbot, tright,
+          rotationFlip ? redOutArray : sContinuousArray, ttop / td->iK2Binning, 
+          tleft / td->iK2Binning, tbot / td->iK2Binning, tright / td->iK2Binning,
           finalWidth, finalHeight, !rotationFlip);
 
         // These are the conditions under which that routine set the td->finals;
@@ -2924,6 +2936,8 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
   // Set the byte size for a grab stack if any
   td->iGrabByteSize = td->outByteSize;
   td->iFaDataMode = td->fileMode;
+  if (td->K3type && td->bSaveSuperReduced)
+    td->iFaDataMode = MRC_MODE_BYTE;
   if (td->bFaKeepPrecision && !td->K3type) {
     td->iGrabByteSize = td->isCounting ? 4 : 2;
     td->iFaDataMode = MRC_MODE_FLOAT;
@@ -3105,6 +3119,8 @@ static int InitializeFrameAlign(ThreadData *td)
     td->fAlignScaling = td->fFloatScaling * divideScale;
   else if (td->iNumGrabAndStack && td->isFloat)
     td->fAlignScaling = B3DCHOICE(td->isSuperRes, 16.f, td->fSavedScaling * divideScale);
+  else if (td->K3type)
+    td->fAlignScaling = divideScale;
   else
     td->fAlignScaling = 1.;
 
@@ -3660,6 +3676,7 @@ static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice)
   }
 
   // Get it scaled to integers and trimmed down to an expected size
+  // K3 data were never passed in to nextFrame before processing
   ProcessImage(aliSum, procOut, 2, nxOut, nyOut, td->divideBy2, 0, 4, false, false, 
     finalScale, td->fLinearOffset);
   ix = (nxOut - td->iFinalWidth) / 2;
@@ -3862,7 +3879,7 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
   // or if bytes are passed in
   if ((dataSize == byteSize && !divideBy2 && floatScaling == 1.) || 
     (byteSize == 1 && !isUnsignedInt) || divideBy2 == -2 || 
-    (byteSize == 1 && isUnsignedInt && divideBy2 > 0)) {
+    (byteSize == 1 && isUnsignedInt && divideBy2 > 0 && dataSize == 1)) {
     
     // If they are signed bytes, need to copy with truncation
     if (byteSize == 1 && !isUnsignedInt) {
