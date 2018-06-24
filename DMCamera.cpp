@@ -198,6 +198,8 @@ STDMETHODIMP CDMCamera::SetK2Parameters(long readMode, double scaling, long hard
 //         be called
 //     K2_MAKE_ALIGN_COM  - Make a com file for alignment; SetupFrameAligning must also
 //         be called
+//     K2_TAKE_BINNED_FRAMES - For K3 only, acquire frames with binning by 2 to get 
+//         K2-style counting mode frames.
 STDMETHODIMP CDMCamera::SetK2Parameters2(long readMode, double scaling, long hardwareProc,
   BOOL doseFrac, double frameTime, BOOL alignFrames, BOOL saveFrames, long rotationFlip,
   long flags, double reducedSizes, double fullSizes, double dummy3, double dummy4, 

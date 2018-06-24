@@ -214,6 +214,7 @@ struct ThreadData
   bool bUseOldAPI;
   bool isSuperRes;
   bool isCounting;
+  bool areFramesSuperRes;
   int iAntialias;
   int iFinalBinning;
   int iFinalWidth;
@@ -225,6 +226,7 @@ struct ThreadData
   bool bSaveSummedFrames;
   bool bSaveSuperReduced;
   bool bMakeSubarea;
+  bool bTakeBinnedFrames;
   vector<short> outSumFrameList;
   vector<short> numFramesInOutSum;
   int outSumFrameIndex;
@@ -288,8 +290,10 @@ static int AlignOrSaveImage(ThreadData *td, short *outForRot, bool saveImage,
   float &meanSum, double *procWall, double &saveWall, double &alignWall, 
   double &wallStart);
 static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, int slice, 
-  bool finalFrame, int &fileSlice, int &tmin, int &tmax, float &meanSum, double *procWall,
-  double &saveWall, double &wallStart);
+  bool finalFrame, bool openForFirstSum, int &fileSlice, int &tmin, int &tmax, 
+  float &meanSum, double *procWall, double &saveWall, double &wallStart);
+static int SumFrameIfNeeded(ThreadData *td, bool finalFrame, bool &openForFirstSum,
+  double *procWall, double &wallStart);
 static int GetTypeAndSizeInfo(ThreadData *td, DM::Image &image, int loop, int outLimit,
                               bool doingStack);
 static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum, 
@@ -749,6 +753,10 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   bool swapXY = mTD.iRotationFlip > 0 && mTD.iRotationFlip % 2 && m_bDoseFrac;
   string errStr, aliHead;
 
+  // Save incoming processing and strip the continuous flags
+  procIn = processing;
+  processing &= 7;
+
   // Process flags to do with saving/aligning for consistency
   if (m_bSaveFrames && mTD.iReadMode >= 0 && m_bDoseFrac && mTD.strSaveDir.length() && 
     mTD.strRootName.length())
@@ -783,6 +791,10 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       return FRAMEALI_BAD_SUBSET;
   }
 
+  mTD.bTakeBinnedFrames = mTD.bTakeBinnedFrames && mTD.K3type && mTD.isSuperRes &&
+    (processing == GAIN_NORMALIZED);
+  mTD.areFramesSuperRes = mTD.isSuperRes && !mTD.bTakeBinnedFrames;
+
   // Set flag to keep precision when indicated or when it has no cost, but not if frames
   // are being saved times 100
   mTD.bFaKeepPrecision = (!mTD.iNumGrabAndStack || (mTD.bFaKeepPrecision && 
@@ -808,11 +820,9 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     }
   }
 
-  // Strip continuous mode information from processing, set flag to do it if no conflict
+  // Get continuous mode information from processing, set flag to do it if no conflict
   mTD.bDoContinuous = false;
-  if (processing > 7) {
-    procIn = processing;
-    processing &= 7;
+  if (procIn > 7) {
     if (saveFrames == NO_SAVE && !mTD.bUseFrameAlign) {
       mTD.bDoContinuous = true;
       if (sContinuousArray) {
@@ -895,7 +905,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   // height/widthAdj are adjusted for a rotation to be applied to acquire
   // binAdj is an adjusted binning (of chip coords) for testing these sizes against final
   // size; it is 0 for full SR image
-  binAdj = binning / (mTD.isSuperRes ? 2 : 1);
+  binAdj = binning / (mTD.areFramesSuperRes ? 2 : 1);
   heightAdj = swapXY ? right - left : bottom - top;
   widthAdj = swapXY ? bottom - top : right - left;
   mTD.iFinalBinning = binning;
@@ -1020,7 +1030,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   // Set up acquisition parameters
   if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
     sprintf(m_strTemp, "Object acqParams = CM_CreateAcquisitionParameters_FullCCD"
-      "(camera, %d, %g, %d, %d)\n", newProc, exposure + 0.0005, binning, binning);
+      "(camera, %d, %g, %d, %d)\n", newProc, exposure + 0.0005, 
+      mTD.bTakeBinnedFrames ? 2 : binning, mTD.bTakeBinnedFrames ? 2 : binning);
     mTD.strCommand += m_strTemp;
     if (!m_bDoseFrac && !mTD.bMakeSubarea) {
       sprintf(m_strTemp, "CM_SetBinnedReadArea(camera, acqParams, %d, %d, %d, %d)\n",
@@ -1497,7 +1508,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     try {
       i = 1;
       if (td->iReadMode >= 0)
-        i = td->isSuperRes ? 4 : 1;
+        i = (td->areFramesSuperRes) ? 4 : 1;
       if (td->bMakeSubarea)
         outLimit = td->iFullSizeX * td->iFullSizeY * i;
       else
@@ -1558,7 +1569,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       CM::AcquisitionParametersPtr acqParams;
       acqParams = CM::CreateAcquisitionParameters_FullCCD(
         camera, (CM::AcquisitionProcessing)td->iK2Processing, td->dK2Exposure + 0.001, 
-        td->iK2Binning, td->iK2Binning);
+        td->bTakeBinnedFrames ? 2 : td->iK2Binning, 
+        td->bTakeBinnedFrames ? 2 : td->iK2Binning);
           //, td->iK2Top, td->iK2Left, td->iK2Bottom, td->iK2Right);
       // The above validated without knowing about dose-fractionation and rounded to 0.1,
       // So set exposure time again and the final validation will know about frames
@@ -1882,7 +1894,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           if (needProc && (!alignBeforeProc || td->saveFrames) && !copiedToProc) {
             ProcessImage(imageData, procOut, td->dataSize, td->width, td->height, 
               frameDivide, transpose, td->byteSize, td->isInteger, td->isUnsignedInt,
-              td->fFloatScaling, td->fFrameOffset, (td->isSuperRes ? 2 : 1) +
+              td->fFloatScaling, td->fFrameOffset, (td->areFramesSuperRes ? 2 : 1) +
               (td->K3type ? 1 : 0));
             td->outData = (short *)td->tempBuf;
             outForRot = td->rotBuf;
@@ -2102,7 +2114,7 @@ static void SubareaAndAntialiasReduction(ThreadData *td, void *array, void *outA
   redWidth = redWidth > 0 ? redWidth : td->iFinalWidth;
   redHeight = redHeight > 0 ? redHeight : td->iFinalHeight;
   if (td->bMakeSubarea) {
-    int boost = (td->K3type && td->isSuperRes) ? 2 : 1;
+    int boost = (td->K3type && td->areFramesSuperRes) ? 2 : 1;
     top = boost * (top < 0 ? td->iTop : top);
     left = boost * (left < 0 ? td->iLeft : left);
     bottom = boost * (bottom < 0 ? td->iBottom : bottom);
@@ -2330,7 +2342,7 @@ static int RunContinuousAcquire(ThreadData *td)
   int outLimit = td->arrSize;
   int j, transpose, nxout, nyout, maxTime = 0, retval = 0, rotationFlip = 0;
   int tleft, ttop, tbot, tright, width, height, finalWidth, finalHeight, boost;
-  int tsizeX, tsizeY, tfullX, tfullY, totalBinning;
+  int tsizeX, tsizeY, tfullX, tfullY, totalBinning, coordBinning;
   double delay;
   short *procOutArray = sContinuousArray;
   short *redOutArray;
@@ -2360,7 +2372,7 @@ static int RunContinuousAcquire(ThreadData *td)
   // acquired binned image, or full chip size for K3 or SR K2
   if (td->bMakeSubarea || td->iAntialias) {
     outLimit = td->iFullSizeX * td->iFullSizeY;
-    if (K2type && td->isSuperRes)
+    if (K2type && td->areFramesSuperRes)
       outLimit *= 4;
   }
   sprintf(td->strTemp, "fullX %d fullY %d  size %d  final %d %d  sub %d anti %d\n",  
@@ -2553,7 +2565,8 @@ static int RunContinuousAcquire(ThreadData *td)
         tleft = td->iLeft;
         ttop = td->iTop;
         tbot = td->iBottom;
-        totalBinning = (td->iAntialias ? td->iFinalBinning : 1) * td->iK2Binning;
+        totalBinning = K2type ? (td->iK2Binning * td->iFinalBinning) : 1;
+        coordBinning = K2type ? td->iK2Binning : 1;
         if (rotationFlip) {
           tfullX = td->iFullSizeX;
           tfullY = td->iFullSizeY;
@@ -2562,7 +2575,7 @@ static int RunContinuousAcquire(ThreadData *td)
           CorDefUserToRotFlipCCD(rotationFlip, 1, tfullX, tfullY, tsizeX, tsizeY, ttop,
             tleft, tbot, tright);
         }
-        boost = (td->K3type && td->isSuperRes) ? 2 : 1;
+        boost = (td->K3type && td->areFramesSuperRes) ? 2 : 1;
         finalWidth = boost * (tright - tleft) / totalBinning;
         finalHeight = boost * (tbot - ttop) / totalBinning;
 
@@ -2571,8 +2584,8 @@ static int RunContinuousAcquire(ThreadData *td)
           finalWidth, finalHeight, finalWidth * finalHeight); 
         DebugToResult(td->strTemp);      
         SubareaAndAntialiasReduction(td, procOutArray, 
-          rotationFlip ? redOutArray : sContinuousArray, ttop / td->iK2Binning, 
-          tleft / td->iK2Binning, tbot / td->iK2Binning, tright / td->iK2Binning,
+          rotationFlip ? redOutArray : sContinuousArray, ttop / coordBinning, 
+          tleft / coordBinning, tbot / coordBinning, tright / coordBinning,
           finalWidth, finalHeight, !rotationFlip);
 
         // These are the conditions under which that routine set the td->finals;
@@ -2879,6 +2892,8 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
                             long &frameDivide, bool &needProc)
 {
   bool gainNormed = td->iK2Processing == NEWCM_GAIN_NORMALIZED;
+  bool sumBinnedFrames = td->bTakeBinnedFrames && td->bSaveSummedFrames;
+
   // Float super-res image is from software processing and needs special scaling
   // into bytes, set divide -1 as flag for this
   if (td->isSuperRes && td->isFloat && !td->bSaveTimes100)
@@ -2906,12 +2921,13 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
 
   // Set # of bytes in the saving output
   td->outByteSize = 2;
-  if ((td->byteSize == 1 || frameDivide < 0) && !td->bSaveSuperReduced) {
+  if ((td->byteSize == 1 || frameDivide < 0) && !td->bSaveSuperReduced &&
+    !sumBinnedFrames) {
     td->fileMode = MRC_MODE_BYTE;
     td->outByteSize = 1;
   } else if ((frameDivide > 0 && td->byteSize != 2) || 
     (td->dataSize == td->byteSize && !td->isUnsignedInt) ||
-    (td->bSaveSuperReduced && td->divideBy2 > 0))
+    ((td->bSaveSuperReduced || sumBinnedFrames) && td->divideBy2 > 0))
     td->fileMode = MRC_MODE_SHORT;
   else
     td->fileMode = MRC_MODE_USHORT;
@@ -2936,7 +2952,7 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
   // Set the byte size for a grab stack if any
   td->iGrabByteSize = td->outByteSize;
   td->iFaDataMode = td->fileMode;
-  if (td->K3type && td->bSaveSuperReduced)
+  if (td->K3type && (td->bSaveSuperReduced || td->bTakeBinnedFrames))
     td->iFaDataMode = MRC_MODE_BYTE;
   if (td->bFaKeepPrecision && !td->K3type) {
     td->iGrabByteSize = td->isCounting ? 4 : 2;
@@ -3173,6 +3189,7 @@ static int AlignOrSaveImage(ThreadData *td, short *outForRot, bool saveFrame,
   int width, height, nxout, nyout, numThreads, filtType;
   float scaling;
   bool rotating = td->iFrameRotFlip % 2 != 0;
+  bool openForFirstSum = false;
 
   // Align the frame
   if (alignFrame && (!td->bFaDoSubset || 
@@ -3207,6 +3224,10 @@ static int AlignOrSaveImage(ThreadData *td, short *outForRot, bool saveFrame,
           bData[i] = (unsigned char)(usData[i] >> SUPERRES_PRESERVE_SHIFT);
       }
     }
+
+   // Now sum the processed frame and return if sum not full
+   if (SumFrameIfNeeded(td, finalFrame, openForFirstSum, procWall, wallStart))
+      return 0;
 
     // Next reduce super-res data by 2 if requested
     // Copy data to rotBuf and reduce back to outData
@@ -3244,38 +3265,28 @@ static int AlignOrSaveImage(ThreadData *td, short *outForRot, bool saveFrame,
     AccumulateWallTime(procWall[1], wallStart);
 
     // Save the image to file; keep going on error if need a sum
-    i = PackAndSaveImage(td, td->tempBuf, nxout, nyout, slice, 
-      finalFrame, fileSlice, tmin, tmax, meanSum, procWall, saveWall, wallStart);
+    i = PackAndSaveImage(td, td->tempBuf, nxout, nyout, slice, finalFrame, 
+      openForFirstSum, fileSlice, tmin, tmax, meanSum, procWall, saveWall, wallStart);
   }
 #endif
   return i;
 }
 
 /*
- * Opens file if needed, gets min/max/mean, packs image if needed, saves image to file
+ * Tests whether frame summing is being done, accumulates a frame into the buffer and 
+ * returns 1 if the summed frame is incomplete, otherwise either adjusts the outData 
+ * pointer to point to the summed buffer or packs the sum into bytes in outData
  */
-static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, int slice, 
-  bool finalFrame, int &fileSlice, int &tmin, int &tmax, float &meanSum, double *procWall,
-  double &saveWall, double &wallStart)
+static int SumFrameIfNeeded(ThreadData *td, bool finalFrame, bool &openForFirstSum,
+  double *procWall, double &wallStart)
 {
-#ifdef _WIN64
-  float tmean;
-  int i, j, tsum, val, didParallel;
-  int nxFile = td->save4bit ? ((nxout + 1) / 2) : nxout;
-  int use4bitMode = (td->save4bit && (td->iSaveFlags & K2_SAVE_4BIT_MRC_MODE)) ? 1 : 0;
-  bool openForFirstSum = false;
-  static int singleSliceNum;
+  int i, j, numThreads = 1, nxout = td->width, nyout = td->height;
   short *sData, *sSum;
+  unsigned char *bData;
   unsigned short *usData, *usSum;
-  unsigned char *bData, *packed;
-  unsigned char lowbyte;
-  float numSample = 500000.;
-  float sampleXtoYratio = 1.;
-  float fracX, fracY, sampleFrac;
-  int deltaX, deltaY, xstart, numSum = 0;
-  int numThreads = 1;
+  bool bytesPassedIn = td->bTakeBinnedFrames || td->bSaveSuperReduced;
 
-  // Sum frame first if flag is set, and there is a count
+    // Sum frame first if flag is set, and there is a count
   if (td->bSaveSummedFrames && td->outSumFrameIndex < td->outSumFrameList.size()) {
     if (td->numFramesInOutSum[td->outSumFrameIndex] > 1) {
 
@@ -3285,38 +3296,38 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
         memset(td->outSumBuf, 0, 2 * nxout * nyout);
 
       // Super-res summing can be usefully parallelized
-      if (td->isSuperRes)
+      if (td->areFramesSuperRes)
         numThreads = numOMPthreads(td->K3type ? 6 : 2);
       if (numThreads > 1) {
 #pragma omp parallel for num_threads(numThreads) \
   shared(td, nxout, nyout)  \
   private(i, j, sSum, usSum, usData, sData, bData)
-      for (i = 0; i < nyout; i++) {
-        sSum = ((short *)td->outSumBuf) + i * nxout;
-        usSum = (unsigned short *)sSum;
-        if (td->fileMode == MRC_MODE_USHORT) {
-          usData = ((unsigned short *)td->outData) + i * nxout;
-          for (j = 0; j < nxout; j++)
-            *(usSum++) += *(usData++);
-        } else if (td->fileMode == MRC_MODE_SHORT) {
-          sData = td->outData + i * nxout;
-          for (j = 0; j < nxout; j++)
-            *(sSum++) += *(sData++);
-        } else {
-          bData = ((unsigned char *)td->outData) + i * nxout;
-          for (j = 0; j < nxout; j++)
-            *(usSum++) += *(bData++);
+        for (i = 0; i < nyout; i++) {
+          sSum = ((short *)td->outSumBuf) + i * nxout;
+          usSum = (unsigned short *)sSum;
+          if (td->fileMode == MRC_MODE_USHORT && !bytesPassedIn) {
+            usData = ((unsigned short *)td->outData) + i * nxout;
+            for (j = 0; j < nxout; j++)
+              *(usSum++) += *(usData++);
+          } else if (td->fileMode == MRC_MODE_SHORT && !bytesPassedIn) {
+            sData = td->outData + i * nxout;
+            for (j = 0; j < nxout; j++)
+              *(sSum++) += *(sData++);
+          } else {
+            bData = ((unsigned char *)td->outData) + i * nxout;
+            for (j = 0; j < nxout; j++)
+              *(usSum++) += *(bData++);
+          }
         }
-      }
       } else {
         for (i = 0; i < nyout; i++) {
           sSum = ((short *)td->outSumBuf) + i * nxout;
           usSum = (unsigned short *)sSum;
-          if (td->fileMode == MRC_MODE_USHORT) {
+          if (td->fileMode == MRC_MODE_USHORT && !bytesPassedIn) {
             usData = ((unsigned short *)td->outData) + i * nxout;
             for (j = 0; j < nxout; j++)
               *(usSum++) += *(usData++);
-          } else if (td->fileMode == MRC_MODE_SHORT) {
+          } else if (td->fileMode == MRC_MODE_SHORT && !bytesPassedIn) {
             sData = td->outData + i * nxout;
             for (j = 0; j < nxout; j++)
               *(sSum++) += *(sData++);
@@ -3333,22 +3344,18 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
       if (td->numAddedToOutSum < td->numFramesInOutSum[td->outSumFrameIndex] && 
         !finalFrame) {
         AccumulateWallTime(procWall[2], wallStart);
-
-        return 0;
+        return 1;
       }
 
-      // Otherwise, copy data back to outData
-      sSum = (short *)td->outSumBuf;
-      usSum = (unsigned short *)td->outSumBuf;
-      if (td->fileMode == MRC_MODE_USHORT) {
-        usData = (unsigned short *)td->outData;
-        for (i = 0; i < nxout * nyout; i++)
-          *(usData++) = *(usSum++);
-      } else if (td->fileMode == MRC_MODE_SHORT) {
-        sData = td->outData;
-        for (i = 0; i < nxout * nyout; i++)
-          *(sData++) = *(sSum++);
+      // Otherwise, get the data into outData one way or another
+      // Data to now be reduced is expected to still be bytes, not fileMode
+      // Binned frames are now expected to be fileMode (1/6) but the buffer is not big 
+      // enough, so set outData instead.  This can be done instead of copying in all cases
+      if ((td->fileMode != MRC_MODE_BYTE && !td->bSaveSuperReduced) ||
+        td->bTakeBinnedFrames) {
+          td->outData = td->outSumBuf;
       } else {
+        usSum = (unsigned short *)td->outSumBuf;
         bData = (unsigned char *)td->outData;
         for (i = 0; i < nxout * nyout; i++) {
           *(bData++) = (unsigned char)B3DMIN(255, *usSum);
@@ -3368,6 +3375,31 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
     }
     td->numAddedToOutSum = 0;
   }
+  return 0;
+}
+
+/*
+ * Opens file if needed, gets min/max/mean, packs image if needed, saves image to file
+ */
+static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, int slice, 
+  bool finalFrame, bool openForFirstSum, int &fileSlice, int &tmin, int &tmax, 
+  float &meanSum, double *procWall, double &saveWall, double &wallStart)
+{
+#ifdef _WIN64
+  float tmean;
+  int i, j, tsum, val, didParallel;
+  int nxFile = td->save4bit ? ((nxout + 1) / 2) : nxout;
+  int use4bitMode = (td->save4bit && (td->iSaveFlags & K2_SAVE_4BIT_MRC_MODE)) ? 1 : 0;
+  static int singleSliceNum;
+  short *sData;
+  unsigned short *usData;
+  unsigned char *bData, *packed;
+  unsigned char lowbyte;
+  float numSample = 500000.;
+  float sampleXtoYratio = 1.;
+  float fracX, fracY, sampleFrac;
+  int deltaX, deltaY, xstart, numSum = 0;
+  int numThreads = 1;
 
   if (!slice || openForFirstSum)
     singleSliceNum = 0;
@@ -3502,7 +3534,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
   // Pack 4-bit data into bytes; move into array if not there yet
   // Super-res can be usefully parallelized
   if (td->save4bit) {
-    if (td->isSuperRes)
+    if (td->areFramesSuperRes)
       numThreads = td->K3type ? 8 : 3;
     numThreads = numOMPthreads(numThreads);
     if (numThreads > 1) {
@@ -4319,7 +4351,7 @@ static void AddToSum(ThreadData *td, void *data, void *sumArray)
   int ix, iy, numThreads = 1, width = td->width;
   int *outData = (int *)sumArray;
   float *flIn, *flOut;
-  if (td->isSuperRes)
+  if (td->areFramesSuperRes)
      numThreads = numOMPthreads(td->K3type ? 8 : 2);
 #pragma omp parallel for num_threads(numThreads) \
   shared(width, data, sumArray, td) \
@@ -4601,6 +4633,8 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
   mTD.bAlignFrames = alignFrames && !mTD.bUseFrameAlign;
   mTD.bMakeAlignComFile = doseFrac && saveFrames && (flags & K2_MAKE_ALIGN_COM) != 0 &&
     mTD.strAlignComName.size() > 0;
+  mTD.bTakeBinnedFrames = doseFrac && (saveFrames || mTD.bUseFrameAlign) && 
+    (flags & K2_TAKE_BINNED_FRAMES) != 0;
   if (rotationFlip >= 0)
     mTD.iRotationFlip = rotationFlip;
   if (alignFrames) {
