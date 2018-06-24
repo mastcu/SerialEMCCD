@@ -282,6 +282,15 @@ regsvr32 /s SerialEMCCDps.dll
 				</FileConfiguration>
 			</File>
 			<File
+				RelativePath=".\Shared\rotateflip.c">
+				<FileConfiguration
+					Name="Release MinDependency|Win32">
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"/>
+				</FileConfiguration>
+			</File>
+			<File
 				RelativePath="SerialEMCCD.cpp">
 				<FileConfiguration
 					Name="Debug|Win32">
