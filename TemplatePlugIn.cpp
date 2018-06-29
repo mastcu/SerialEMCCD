@@ -407,6 +407,7 @@ public:
   int StopContinuousCamera();
   void SetDebugMode(BOOL inVal) {sDebug = inVal;};
   void FreeK2GainReference(long which);
+  int WaitUntilReady(long which);
   void ClearSpecialFlags() {mTD.iAntialias = 0; mTD.bGainNormSum = false;
     mTD.bMakeSubarea = false;};
   int ManageEarlyReturn(int flags, int iSumAndGrab);
@@ -5547,6 +5548,15 @@ void TemplatePlugIn::FreeK2GainReference(long which)
   }
 }
 
+// Wait until ready fror single shot or dose fractionation shot
+int TemplatePlugIn::WaitUntilReady(long which)
+{
+  if (m_HAcquireThread && WaitForAcquireThread(which ? WAIT_FOR_THREAD : 
+    WAIT_FOR_NEW_SHOT))
+      return 1;
+  return 0;
+}
+
 // Returns a relative path from fromDIR to toDir in relPath, returns 1 if no possible
 static int RelativePath(string fromDir, string toDir, string &relPath)
 {
@@ -5931,6 +5941,11 @@ int PlugInWrapper::GetDebugVal()
 void PlugInWrapper::FreeK2GainReference(long which)
 {
   gTemplatePlugIn.FreeK2GainReference(which);
+}
+
+int PlugInWrapper::WaitUntilReady(long which)
+{
+  return gTemplatePlugIn.WaitUntilReady(which);
 }
 
 char *PlugInWrapper::UnpackString(bool doIt, long *strings, int &nextInd)

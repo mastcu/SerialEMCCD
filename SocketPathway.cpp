@@ -113,6 +113,7 @@ static ArgDescriptor sFuncTable[] = {
   {GS_FrameAlignResults,    0, 0, 0,   5, 0, 8,   FALSE},
   {GS_ReturnDeferredSum,    3, 0, 0,   4, 0, 0,   FALSE},
   {GS_MakeAlignComFile,     3, 0, 2,   1, 0, 0,   TRUE},
+  {GS_WaitUntilReady,       1, 0, 0,   0, 0, 0,   FALSE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -718,6 +719,10 @@ static int ProcessCommand(int numBytes)
     case GS_FreeK2GainReference:
       gPlugInWrapper.FreeK2GainReference(sLongArgs[1]);
       SendArgsBack(0);
+      break;
+
+    case GS_WaitUntilReady:
+      SendArgsBack(gPlugInWrapper.WaitUntilReady(sLongArgs[1]));
       break;
 
     case GS_GetDMCapabilities:

@@ -428,6 +428,13 @@ STDMETHODIMP CDMCamera::FreeK2GainReference(long which)
 	return S_OK;
 }
 
+STDMETHODIMP CDMCamera::WaitUntilReady(long which)
+{
+  if (gPlugInWrapper.WaitUntilReady(which))
+    return E_FAIL;
+	return S_OK;
+}
+
 STDMETHODIMP CDMCamera::GetDMCapabilities(BOOL *canSelectShutter, BOOL *canSetSettling,
 											BOOL *openShutterWorks)
 {

@@ -98,5 +98,6 @@ public:
   int GetDebugVal();
   int mLastRetVal;
   void FreeK2GainReference(long which);
+  int WaitUntilReady(long which);
   char *UnpackString(bool doIt, long *strings, int &nextInd);
 };

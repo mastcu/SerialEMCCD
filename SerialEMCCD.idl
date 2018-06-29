@@ -53,6 +53,7 @@ import "ocidl.idl";
 		[id(38), helpstring("method FrameAlignResults")] HRESULT FrameAlignResults([out]double *rawDist, [out]double *smoothDist, [out]double *resMean, [out]double *maxResMax, [out]double *meanRawMax, [out]double *maxRawMax, [out]long *crossHalf, [out]long *crossQuarter, [out]long *crossEighth, [out]long *halfNyq, [out]long *frameStartEnd, [out]double *dumDbl1, [out]double *dumDbl2);
 		[id(39), helpstring("method ReturnDeferredSum")] HRESULT ReturnDeferredSum([out, size_is(*arrSize)]short array[], [in, out]long *arrSize, [in, out]long *width, [out]long *height);
     [id(40), helpstring("method MakeAlignComFile")] HRESULT MakeAlignComFile([in]long flags, [in]long dumInt1, [in]double dumDbl1, [in]double dumDbl2, [in]long stringSize, [in, size_is(stringSize)]long strings[], [out]long *error);
+		[id(41), helpstring("method WaitUntilReady")] HRESULT WaitUntilReady([in]long which);
 
     // Add new functions at the end.  Be sure to build 32 and 64-bit versions before
     // trying to run through COM from 64-bit, since both proxy-stubs are needed
