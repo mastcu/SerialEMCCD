@@ -3720,7 +3720,7 @@ static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice)
   DebugToResult(td->strTemp);
   if (ix < 0 || iy < 0) {
     ErrorToResult("Unswapped sizes were sent\n");
-  } else if (ix > 0 || iy > 0) {
+  } else if (nxOut > td->iFinalWidth || nyOut > td->iFinalHeight) {
     extractWithBinning(procOut, SLICE_MODE_SHORT, nxOut, ix, ix + td->iFinalWidth - 1, iy,
     iy + td->iFinalHeight - 1, 1, procOut, 0, &err, &nyOut);
   }
