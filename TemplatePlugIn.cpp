@@ -4957,11 +4957,13 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
   gpuFlags = gpuFlags & 65535;
   if (m_HAcquireThread)
     WaitForAcquireThread(WAIT_FOR_THREAD);
-  if (gpuFlags && m_iGpuAvailable < 0)
-    m_iGpuAvailable = sFrameAli.gpuAvailable(gpuNum, &memory, sDebug);
-  if (gpuFlags && m_iGpuAvailable <= 0) {
-    *error = NO_GPU_AVAILABLE;
-    return;
+  if (!makingCom) {
+    if (gpuFlags && m_iGpuAvailable < 0)
+      m_iGpuAvailable = sFrameAli.gpuAvailable(gpuNum, &memory, sDebug);
+    if (gpuFlags && m_iGpuAvailable <= 0) {
+      *error = NO_GPU_AVAILABLE;
+      return;
+    }
   }
 
   // If correcting defects, see if the string has changed since last saved or parsed
