@@ -575,6 +575,8 @@ void TemplatePlugIn::Run()
   }
 
   overrideWriteBytes(0);
+  if (getenv("IMOD_ALL_BIG_TIFF") == NULL)
+    overrideAllBigTiff(1);
 }
 
 ///
@@ -2288,7 +2290,7 @@ static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &e
 
     if (!error) {
       try {
-        sK2GainRefData[refInd] = new float[iiFile->nx * iiFile->nx];
+        sK2GainRefData[refInd] = new float[iiFile->nx * iiFile->ny];
 
         // We are working with inverted images so the reference needs to be loaded in
         // native inverted form
@@ -4670,7 +4672,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 {
   struct _stat statbuf;
   FILE *fp;
-  string topDir;
+  string topDir, stdStr;
   char *strForTok, *token;
   int ind1, ind2, newDir, dummy, newDefects = 0, created = 0;
   mTD.iRotationFlip = rotationFlip;
@@ -4767,7 +4769,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     sprintf(m_strTemp, "Trying to create %s\n", topDir.c_str());
     DebugToResult(m_strTemp);
     if (_mkdir(topDir.c_str()))
-      *error = DIR_CREATE_ERROR;
+      *error = DIR_NOT_EXIST;
     created = 1;
   } else if ( !(statbuf.st_mode & _S_IFDIR)) {
     *error = SAVEDIR_IS_FILE;
@@ -4788,8 +4790,8 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     sprintf(m_strTemp, "%s\\%s.%s", mTD.strSaveDir.c_str(), mTD.strRootName.c_str(),
       mTD.strSaveExtension.c_str());
     if (! *error && !_stat(m_strTemp, &statbuf)) {
-      topDir = string(m_strTemp) + '~';
-      if (!_stat(topDir.c_str(), &statbuf) || imodBackupFile(m_strTemp))
+      stdStr = string(m_strTemp) + '~';
+      if (!_stat(stdStr.c_str(), &statbuf) || imodBackupFile(m_strTemp))
         *error = FILE_ALREADY_EXISTS;
     }
 
@@ -4825,6 +4827,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 
     // If the string is new, new directory, or the file doesn't exist, write the text
     if (newDefects || newDir || _stat(m_strTemp, &statbuf)) {
+      errno = 0;
       *error = WriteTextFile(m_strTemp, m_strDefectsToSave.c_str(), 
         (int)m_strDefectsToSave.length(), OPEN_DEFECTS_ERROR, WRITE_DEFECTS_ERROR, false);
       mTD.strLastDefectName = defectName;
@@ -4834,7 +4837,9 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     mTD.bLastSaveHadDefects = defects && (flags & K2_SAVE_DEFECTS);
 
   if (*error) {
-    sprintf(m_strTemp, "SetupFileSaving error is %d\n", *error);
+    stdStr = string(m_strTemp);
+    sprintf(m_strTemp, "SetupFileSaving error is %d for file: %s : %s\n", *error, 
+      stdStr.c_str(), strerror(errno));
     DebugToResult(m_strTemp);
   }
 }
@@ -4955,6 +4960,9 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
   bool makingCom = (alignFlags & K2_MAKE_ALIGN_COM) != 0 && comName != NULL;
   float memory;
   gpuFlags = gpuFlags & 65535;
+  sprintf(m_strTemp, "SetupFrameAligning called with flags %x  gpuFlags %x  %s\n", 
+    alignFlags, gpuFlags, comName ? comName : "");
+  DebugToResult(m_strTemp);
   if (m_HAcquireThread)
     WaitForAcquireThread(WAIT_FOR_THREAD);
   if (!makingCom) {
