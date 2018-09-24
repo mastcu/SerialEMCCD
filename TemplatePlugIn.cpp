@@ -3281,8 +3281,8 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
       return 1;
     }
 
-    if ((i = (int)b3dFwrite(td->outData, td->outByteSize * nxFile, nyout, td->fp)) 
-      != nyout) {
+    if ((i = (int)b3dFwrite(td->outData, td->outByteSize * nxFile, nyout, td->fp)) != 
+      nyout) {
         sprintf(td->strTemp, "Failed to write data past line %d of slice %d: %s\n", 
           B3DMAX(0, i), fileSlice, strerror(errno));
         ErrorToResult(td->strTemp);
