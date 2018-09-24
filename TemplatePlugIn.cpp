@@ -1283,7 +1283,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       retval = WaitForAcquireThread(mTD.bEarlyReturn ? WAIT_FOR_RETURN : WAIT_FOR_THREAD);
       mTD.iErrorFromSave = mTDcopy.iErrorFromSave;
       mTD.iFramesSaved = mTDcopy.iFramesSaved;
-      useFinal = mTDcopy.iAntialias || mTDcopy.bMakeSubarea || mTDcopy.bUseFrameAlign;
+      useFinal = mTDcopy.iAntialias || mTDcopy.bMakeSubarea || mTDcopy.bUseFrameAlign &&
+        !mTD.bEarlyReturn;
       retWidth = useFinal ? retTD->iFinalWidth : retTD->width;
       retHeight = useFinal ? retTD->iFinalHeight : retTD->height;
       sprintf(m_strTemp, "Back from thread, retval %d errfs %d  #saved %d w %d h %d\n",
