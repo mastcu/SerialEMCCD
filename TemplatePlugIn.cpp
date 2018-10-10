@@ -229,6 +229,7 @@ struct ThreadData
   bool bTakeBinnedFrames;
   vector<short> outSumFrameList;
   vector<short> numFramesInOutSum;
+  vector<int> savedFrameList;
   int outSumFrameIndex;
   int numAddedToOutSum;
   int numOutSumsDoneAtIndex;
@@ -261,6 +262,7 @@ struct ThreadData
   bool bFaDoSubset;
   int iFaSubsetStart, iFaSubsetEnd;
   bool K3type;
+  float fFrameThresh;
   
   // Items needed internally in save routine and its functions
   FILE *fp;
@@ -360,7 +362,7 @@ public:
     double frameTime, BOOL alignFrames, BOOL saveFrames, long rotationFlip, long flags, 
     double dummy1, double dummy2, double dummy3, double dummy4, char *filter);
   void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, long flags,
-    double dummy1, double dummy2, double dummy3, double dummy4, char *dirName, 
+    double nSumAndGrab, double frameThresh, double dummy3, double dummy4, char *dirName, 
     char *rootName, char *refName, char *defects, char *command, char *sumList, 
     long *error);
   void GetFileSaveResult(long *numSaved, long *error);
@@ -574,9 +576,11 @@ void TemplatePlugIn::Run()
     ErrorToResult(buff, "SerialEMCCD: ");
   }
 
+#ifdef _WIN64
   overrideWriteBytes(0);
   if (getenv("IMOD_ALL_BIG_TIFF") == NULL)
     overrideAllBigTiff(1);
+#endif
 }
 
 ///
@@ -1477,7 +1481,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   bool saveOrFrameAlign = saveFrames || td->bUseFrameAlign;
   bool useOldAPI = GMS_SDK_VERSION < 31 || td->bUseOldAPI;
   bool alignBeforeProc = td->bFaKeepPrecision && !td->iNumGrabAndStack;
-  int slice = 0;
+  int stackSlice = 0, usedSlice = 0;
   int errorRet = 0;
 #ifdef _WIN64
   DM::ScriptObject dummyObj;
@@ -1506,6 +1510,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   td->numAddedToOutSum = 0;
   td->outSumFrameIndex = 0;
   td->numOutSumsDoneAtIndex = 0;
+  td->savedFrameList.clear();
 
   // Get array for unbinned image with antialias reduction, or for subarea
   if (td->iAntialias || td->bMakeSubarea || td->bUseFrameAlign) {
@@ -1747,7 +1752,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             continue;
           }
           stackAllReady = !td->bAsyncSave;
-          numSlices = td->bAsyncSave ? 0 : DM::ImageGetDimensionSize(image.get(), 2);  j++;
+          numSlices = td->bAsyncSave ? 0 : DM::ImageGetDimensionSize(image.get(), 2); j++;
         }
 
         saveWall = getFrameWall = alignWall = 0.;
@@ -1764,11 +1769,11 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
                 double elapsed = 0.;
                 bool elapsedRet = stack->GetElapsedExposureTime(elapsed);
                 sprintf(td->strTemp, "Got frame %d of %d   exp done %d  "
-                  "elapsed %s %.2f\n", slice + 1, numSlices, exposureDone ? 1:0, 
+                  "elapsed %s %.2f\n", stackSlice + 1, numSlices, exposureDone ? 1:0, 
                   elapsedRet ? "T" : "F", elapsed);
                 DebugToResult(td->strTemp);
               }
-              if (frameNeedsDelete || slice >= numSlices)
+              if (frameNeedsDelete || stackSlice >= numSlices)
                 break;
 
               // Sleep while processing events.  If it returns false, it is a quit,
@@ -1781,12 +1786,12 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             }
             sprintf(td->strTemp, "numSlices %d  isStackDone %s\n", numSlices,
               stackAllReady ? "Y":"N");
-            if (slice >= numSlices || GetWatchedDataValue(td->iDMquitting) || 
+            if (stackSlice >= numSlices || GetWatchedDataValue(td->iDMquitting) || 
               td->iErrorFromSave == QUIT_DURING_SAVE || 
               td->iErrorFromSave == DM_CALL_EXCEPTION)
               break;
           }
-          if (slice)
+          if (stackSlice)
             AccumulateWallTime(getFrameWall, wallStart);
           else
             wallStart = wallTime();
@@ -1795,10 +1800,11 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             SetWatchedDataValue(td->iReadyToReturn, 1);
 #endif
 
-          if (!slice) {
+          if (!stackSlice) {
 
             // First slice initialization and checks
-            // Sets byteSize, isInteger, isUnsignedInt, isFloat, signedBytes and width/height
+            // Sets byteSize, isInteger, isUnsignedInt, isFloat, signedBytes and 
+            // width/height
             if (GetTypeAndSizeInfo(td, image, loop, outLimit, doingStack)) {
               td->iErrorFromSave = WRONG_DATA_TYPE;
               if (td->bUseFrameAlign)
@@ -1821,19 +1827,61 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           // Get data pointer
           imageLp = new GatanPlugIn::ImageDataLocker( image );   j++;
           if (!td->bAsyncSave) {
-            imageLp->GetImageData(2, slice, fData);   j++;
+            imageLp->GetImageData(2, stackSlice, fData);   j++;
             imageData = fData.get_data();   j++;
           } else {
             imageData = imageLp->get();   j++;
           }
+
+#ifdef _WIN64
+          if (stackSlice > 0 && (stackSlice < numSlices - 1 || !stackAllReady) && 
+            (td->iSaveFlags & K2_SKIP_BELOW_THRESH) && td->fFrameThresh > 0.) {
+            int imType, numSample = 2500, sampXstart, sampYstart, sampXuse, sampYuse;
+            float sampMean = 2 * td->fFrameThresh, sampSD, fracSamp;
+            unsigned char **imLinePtrs = makeLinePointers(imageData, td->width, 
+              td->height, td->byteSize);
+            if (td->byteSize == 1)
+              imType = 0;
+            else if (td->isFloat) {
+              imType = 6;
+            } else {
+              if (td->byteSize == 2)
+                imType = td->isUnsignedInt ? 2 : 3;
+              else
+                imType = 7;
+            }
+            sampXstart = td->width / 10;
+            sampYstart = td->height / 10;
+            sampXuse = 8 * td->width / 10;
+            sampYuse = 8 * td->height / 10;
+            fracSamp = (float)numSample / (float)(td->width * td->height);
+            if (imLinePtrs)
+              sampleMeanSD(imLinePtrs, imType, td->width, td->height, fracSamp,
+                sampXstart, sampYstart, sampXuse, sampYuse, &sampMean, &sampSD);
+            free(imLinePtrs);
+            if (sampMean * sWriteScaling < td->fFrameThresh) {
+              sprintf(td->strTemp, "Skipping frame %d with mean = %.2f\n", 
+                  stackSlice + 1, sampMean * sWriteScaling);
+              DebugToResult(td->strTemp);
+              stackSlice++;
+              delete imageLp;
+              imageLp = NULL;
+              DeleteImageIfNeeded(td, image, &frameNeedsDelete);
+              continue;
+            }
+          }
+          if ((td->iSaveFlags & K2_SKIP_BELOW_THRESH) && td->fFrameThresh > 0.)
+            td->savedFrameList.push_back(stackSlice);
+#endif
+
           SimulateSuperRes(td, imageData);
           td->outData = (short *)imageData;
           outForRot = (short *)td->tempBuf;
 
           // Add to return sum if needed in sum, and process the sum now if it is done
-          if (needSum && slice < td->iNumFramesToSum) {
+          if (needSum && usedSlice < td->iNumFramesToSum) {
             AddToSum(td, imageData, td->sumBuf);
-            if (td->bEarlyReturn && slice == td->iNumFramesToSum - 1) {
+            if (td->bEarlyReturn && usedSlice == td->iNumFramesToSum - 1) {
                 ProcessImage(td->sumBuf, array, td->dataSize, td->width, td->height,
                   divideBy2, transpose, 4, !td->isFloat, false, td->fSavedScaling, 
                   td->fFrameOffset * td->iNumFramesToSum);
@@ -1857,8 +1905,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           // For frame alignment with high precision data, pass the float frame for
           // alignment now if there is no grabbing at all or if it is counting
           if (alignBeforeProc) {
-            i = AlignOrSaveImage(td, td->outData, false, true, slice, false, fileSlice,
-              tmin, tmax, meanSum, procWall, saveWall, alignWall, wallStart);
+            i = AlignOrSaveImage(td, td->outData, false, true, usedSlice, false, 
+              fileSlice, tmin, tmax, meanSum, procWall, saveWall, alignWall, wallStart);
             if (i) {
               errorRet = td->iErrorFromSave;
               break;
@@ -1866,9 +1914,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           }
 
           // If grabbing frames at this point, allocate the frame, copy over if not proc
+          // Don't worry about stackSlice / usedSlice: grabbing is forbidden with skipping
           procOut = td->tempBuf;
           copiedToProc = false;
-          grabInd = slice - (numSlices - td->iNumGrabAndStack);
+          grabInd = stackSlice - (numSlices - td->iNumGrabAndStack);
           if (grabInd >= 0) {
             try {
               td->grabStack[grabInd] = new char[td->width * td->height * 
@@ -1908,30 +1957,31 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           // If just grabbing, set slice number first time, skip other steps
           if (grabInd >= 0) {
             if (!grabInd) {
-              grabSlice = slice;
+              grabSlice = stackSlice;
               DebugToResult("Starting to grab frames from rest of stack\n");
             }
           } else {
 
             i = AlignOrSaveImage(td, outForRot, td->saveFrames == SAVE_FRAMES, 
-              td->bUseFrameAlign && !alignBeforeProc, slice, 
-              stackAllReady && slice == numSlices - 1, fileSlice, tmin, tmax, meanSum,
-              procWall, saveWall, alignWall, wallStart);
+              td->bUseFrameAlign && !alignBeforeProc, usedSlice, 
+              stackAllReady && stackSlice == numSlices - 1, fileSlice, tmin, tmax,
+              meanSum, procWall, saveWall, alignWall, wallStart);
             if (td->iErrorFromSave == FRAMEALI_NEXT_FRAME)
               errorRet = td->iErrorFromSave;
 
             // Save the image to file; keep going on error if need a sum
-            if (errorRet || (i && !(needSum && slice < td->iNumFramesToSum)))
+            if (errorRet || (i && !(needSum && usedSlice < td->iNumFramesToSum)))
               break;
 
           }
 
           // Increment slice, clean up image at end of slice loop
-          slice++;
+          stackSlice++;
+          usedSlice++;
           delete imageLp;
           imageLp = NULL;
           DeleteImageIfNeeded(td, image, &frameNeedsDelete);
-        } while (slice < numSlices || !stackAllReady);  // End of slice loop
+        } while (stackSlice < numSlices || !stackAllReady);  // End of slice loop
         AccumulateWallTime(procWall[1], wallStart);
 
         DeleteImageIfNeeded(td, image, &frameNeedsDelete);
@@ -1983,7 +2033,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
       // Return the full sum here after all temporary use of array is over
       if (td->bUseFrameAlign) {
-        i = FinishFrameAlign(td, procOut, slice);
+        i = FinishFrameAlign(td, procOut, usedSlice);
         if (i)
           errorRet = td->iErrorFromSave;
         AccumulateWallTime(alignWall, wallStart);
@@ -2032,7 +2082,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     // Delete image here in asynchronous case
     if (doingAsyncSave) {
       try {
-        if (slice < numSlices)
+        if (stackSlice < numSlices)
           stack->Abort();
       }
       catch (exception exc) {
@@ -2060,6 +2110,23 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     fclose(td->fp);
   }
   td->fp = NULL;
+
+  // Save list of frames actually saved if thresholding used
+  if (td->savedFrameList.size()) {
+    string listString;
+    for (i = 0; i < (int)td->savedFrameList.size(); i++) {
+      sprintf(td->strTemp, "%d\n", td->savedFrameList[i]);
+      listString += td->strTemp;
+    }
+    sprintf(td->strTemp, "%s\\%s_saved.txt", td->strSaveDir.c_str(),
+      td->strRootName.c_str());
+    i = WriteTextFile(td->strTemp, listString.c_str(), (int)listString.size(), 
+      OPEN_SAVED_LIST_ERR, WRITE_SAVED_LIST_ERR, false);
+    if (i && !errorRet)
+      errorRet = i;
+    td->savedFrameList.clear();
+  }
+
 #endif
 
   // Clean up all buffers
@@ -3291,7 +3358,7 @@ static int SumFrameIfNeeded(ThreadData *td, bool finalFrame, bool &openForFirstS
   bool bytesPassedIn = td->bTakeBinnedFrames || td->bSaveSuperReduced;
 
     // Sum frame first if flag is set, and there is a count
-  if (td->bSaveSummedFrames && td->outSumFrameIndex < td->outSumFrameList.size()) {
+  if (td->bSaveSummedFrames && td->outSumFrameIndex < (int)td->outSumFrameList.size()) {
     if (td->numFramesInOutSum[td->outSumFrameIndex] > 1) {
 
       // If there is just one frame in this sum, just go on and use it,
@@ -3584,6 +3651,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
       ErrorToResult(td->strTemp);
       return 1;
     }
+    fileSlice++;
   } else {
 
     // Seek to slice then write it
@@ -4666,7 +4734,7 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
  */
 void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage, 
                                      double pixelSize, long flags, double nSumAndGrab, 
-                                     double dummy2, double dummy3, double dummy4, 
+                                     double frameThresh, double dummy3, double dummy4, 
                                      char *dirName, char *rootName, char *refName,
                                      char *defects, char *command, char *sumList, 
                                      long *error)
@@ -4676,6 +4744,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   string topDir, stdStr;
   char *strForTok, *token;
   int ind1, ind2, newDir, dummy, newDefects = 0, created = 0;
+  int iSumAndGrab = (int)(nSumAndGrab + 0.1);
   mTD.iRotationFlip = rotationFlip;
   mTD.iFrameRotFlip = (flags & K2_SKIP_FRAME_ROTFLIP) ? 0 : rotationFlip;
   B3DCLAMP(mTD.iRotationFlip, 0, 7);
@@ -4690,6 +4759,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     mTD.strSaveExtension = "tif";
   else if (flags & K2_MRCS_EXTENSION)
     mTD.strSaveExtension = "mrcs";
+  mTD.fFrameThresh = (float)frameThresh;
 
   // Copy all the strings if they are changed
   if (CopyStringIfChanged(dirName, mTD.strSaveDir, newDir, error))
@@ -4737,8 +4807,14 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     }
   }
 
+  // Forbid grab stack when skipping frames below threshold
+  if ((iSumAndGrab >> 16) > 0 && (flags & K2_SKIP_BELOW_THRESH) != 0 && frameThresh > 0.){
+    *error = GRAB_AND_SKIP_ERR;
+    return;
+  }
+
   // Get number of frames to sum from low 16 bits and number to stack fast from high
-  *error = ManageEarlyReturn(flags, (int)(nSumAndGrab + 0.1));
+  *error = ManageEarlyReturn(flags, iSumAndGrab);
   if (*error)
     return;
   mTD.bMakeDeferredSum = mTD.bEarlyReturn && (flags & K2_MAKE_DEFERRED_SUM) != 0;
@@ -5042,8 +5118,6 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
     mTD.iFaSubsetEnd = frameStartEnd >> K2FA_SUB_END_SHIFT;
   }
     
-  sprintf(m_strTemp, "SetupFrameAligning called with flags %x\n", alignFlags);
-  DebugToResult(m_strTemp);
   *error = ManageEarlyReturn(alignFlags, nSumAndGrab);
 #endif
 }
@@ -5776,8 +5850,8 @@ void PlugInWrapper::SetK2Parameters(long readMode, double scaling, long hardware
 }
 
 void PlugInWrapper::SetupFileSaving(long rotationFlip, BOOL filePerImage, 
-                                    double pixelSize, long flags, double dummy1, 
-                                    double dummy2, double dummy3, double dummy4, 
+                                    double pixelSize, long flags, double nSumAndGrab, 
+                                    double frameThresh, double dummy3, double dummy4, 
                                     long *names, long *error)
 {
   char *cnames = (char *)names;
@@ -5788,9 +5862,9 @@ void PlugInWrapper::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   char *command = UnpackString((flags & K2_RUN_COMMAND) != 0, names, nextInd);
   char *sumList = UnpackString((flags & K2_SAVE_SUMMED_FRAMES) != 0, names, nextInd);
   mLastRetVal = 0;
-  gTemplatePlugIn.SetupFileSaving(rotationFlip, filePerImage, pixelSize, flags, dummy1,
-    dummy2, dummy3, dummy4, cnames, &cnames[rootind], refName, defects, command, sumList,
-    error);
+  gTemplatePlugIn.SetupFileSaving(rotationFlip, filePerImage, pixelSize, flags, 
+    nSumAndGrab, frameThresh, dummy3, dummy4, cnames, &cnames[rootind], refName, defects, 
+    command, sumList, error);
 }
 
 void PlugInWrapper::GetFileSaveResult(long *numSaved, long *error)
@@ -5974,7 +6048,6 @@ char *PlugInWrapper::UnpackString(bool doIt, long *strings, int &nextInd)
 // Dummy functions for 32-bit.
 #ifndef _WIN64
 double wallTime(void) { return 0.;}
-void overrideWriteBytes(int inVal) {}
 void iiDelete(ImodImageFile *inFile) {}
 int imodBackupFile(const char *) {return 0;}
 int numOMPthreads(int optimal) {return 1;}

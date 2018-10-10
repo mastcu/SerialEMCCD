@@ -50,7 +50,7 @@ public:
     double frameTime, BOOL alignFrames, BOOL saveFrames, long rotationFlip, long flags, 
     double dummy1, double dummy2, double dummy3, double dummy4, char *filter);
   void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, long flags,
-    double dummy1, double dummy2, double dummy3, double dummy4, long *names,
+    double nSumAndGrab, double frameThresh, double dummy3, double dummy4, long *names,
     long *error);
   void GetFileSaveResult(long *numSaved, long *error);
   int GetDefectList(short xyPairs[], long *arrSize, long *numPoints, 

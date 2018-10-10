@@ -253,11 +253,15 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 //      K2_MRCS_EXTENSION  - Save MRC file with extension .mrcs
 //      K2_SAVE_SUPER_REDUCED  - Reduce normalized super-resolution frames by 2 before
 //                               saving and save as shorts/ushorts
+//      K2_SKIP_BELOW_THRESH  - Ignore frames that would have a mean when saved below the
+//                              value in frameThresh
 //   numGrabSum is relevant when doing an early return; it should be set from an unsigned
 //      int with the number of frames to sum in the low 16 bits and, for GMS >= 2.3.1,
 //      the number of frames to grab into a local stack in the high 16 bits.  The local
 //      stack is needed because a single-shot cannot be done in GMS 2.3.1 until the stack
-//      in DM has been fully accessed. 
+//      in DM has been fully accessed.  The number of frames to grab must be 0 if
+//      skipping frames below a threshold.
+//   frameThresh is relevant if K2_SKIP_BELOW_THRESH is set and is ignored otherwise
 //   nameSize should contain the number of longs passed in names
 //   names should contain concatenated null-terminated strings as follows:
 //      directory name
@@ -277,17 +281,17 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 // regardless of mode; the grabbed stack is usually stored in twice that space for 
 // super-res; but if saving times 100, the super-res takes 4 times that space, or if
 // keeping precision in alignment, counting takes twice the RAM stack space and super-res
-// takes 4 times the RAM stack space. Memory is freed from the RAM stack in DM as soon as
+// takes 4 times the RAM stack space. M`emory is freed from the RAM stack in DM as soon as
 // the frame is accessed.  See SerialEM code for handling of this.
 //
 STDMETHODIMP CDMCamera::SetupFileSaving2(long rotationFlip, BOOL filePerImage, 
                                         double pixelSize, long flags, double numGrabSum,
-                                        double dummy2, double dummy3, double dummy4,
+                                        double frameThresh, double dummy3, double dummy4,
                                         long nameSize, long names[], long *error)
 {
 
   gPlugInWrapper.SetupFileSaving(rotationFlip, filePerImage, pixelSize, flags, numGrabSum,
-    dummy2, dummy3, dummy4, names, error);
+    frameThresh, dummy3, dummy4, names, error);
   return S_OK;
 }
 
