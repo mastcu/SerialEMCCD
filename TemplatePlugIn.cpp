@@ -1147,7 +1147,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
   // A read mode of -3 or -2 means set mode 0 for regular or 1 for diffraction
   if (mTD.iReadMode == -2 || mTD.iReadMode == -3) {
-    sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n", 3 + mTD.iReadMode);
+    sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
+      "CM_Validate_AcquisitionParameters(camera, acqParams)\n", 3 + mTD.iReadMode);
     mTD.strCommand += m_strTemp;
   }
   
