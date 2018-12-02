@@ -112,6 +112,14 @@ STDMETHODIMP CDMCamera::QueueScript(long size, long script[])
 	return S_OK;
 }
 
+STDMETHODIMP CDMCamera::SaveFrameMdoc(long size, long strMdoc[], long flags)
+{
+  int retval = gPlugInWrapper.SaveFrameMdoc((char *)strMdoc, flags);
+	if (retval)
+		return E_FAIL;
+	return S_OK;
+}
+
 STDMETHODIMP CDMCamera::GetAcquiredImage(short array[], long *arrSize, long *width, 
 										 long *height, long processing, double exposure,
 										 long binning, long top, long left, long bottom, 
@@ -362,6 +370,12 @@ STDMETHODIMP CDMCamera::FrameAlignResults(double *rawDist, double *smoothDist,
 {
   gPlugInWrapper.FrameAlignResults(rawDist, smoothDist, resMean, maxResMax, meanRawMax, 
     maxRawMax, crossHalf, crossQuarter, crossEighth, halfNyq, dumInt1, dumDbl1, dumDbl2);
+  return S_OK;
+}
+
+STDMETHODIMP CDMCamera::GetLastDoseRate(double *doseRate)
+{
+  *doseRate = gPlugInWrapper.GetLastDoseRate();
   return S_OK;
 }
 

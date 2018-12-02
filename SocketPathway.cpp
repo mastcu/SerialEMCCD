@@ -114,6 +114,8 @@ static ArgDescriptor sFuncTable[] = {
   {GS_ReturnDeferredSum,    3, 0, 0,   4, 0, 0,   FALSE},
   {GS_MakeAlignComFile,     3, 0, 2,   1, 0, 0,   TRUE},
   {GS_WaitUntilReady,       1, 0, 0,   0, 0, 0,   FALSE},
+  {GS_GetLastDoseRate,      0, 0, 0,   0, 0, 1,   FALSE},
+  {GS_SaveFrameMdoc,        2, 0, 0,   0, 0, 0,   TRUE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -581,6 +583,10 @@ static int ProcessCommand(int numBytes)
       SendArgsBack(0);
       break;
 
+    case GS_SaveFrameMdoc:
+      SendArgsBack(gPlugInWrapper.SaveFrameMdoc((char *)sLongArray, sLongArgs[1]));
+      break;
+
     case GS_GetAcquiredImage:
       imArray = new short[sLongArgs[1]];
       SendImageBack(gPlugInWrapper.GetImage(imArray, &sLongArgs[1], &sLongArgs[2], 
@@ -671,6 +677,11 @@ static int ProcessCommand(int numBytes)
         &sDoubleArgs[3], &sDoubleArgs[4], &sDoubleArgs[5], &sLongArgs[1], 
         &sLongArgs[2], &sLongArgs[3], &sLongArgs[4], &sLongArgs[5], 
         &sDoubleArgs[6], &sDoubleArgs[7]);
+      SendArgsBack(0);
+      break;
+
+    case GS_GetLastDoseRate:
+      sDoubleArgs[0] = gPlugInWrapper.GetLastDoseRate();
       SendArgsBack(0);
       break;
 

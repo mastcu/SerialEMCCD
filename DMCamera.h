@@ -61,6 +61,7 @@ public:
 		/*[in]*/long binning, /*[in]*/long top, /*[in]*/long left, /*[in]*/long bottom, /*[in]*/long right,
 		/*[in]*/long shutter, /*[in]*/double settling, /*[in]*/long divideBy2, /*[in]*/long corrections);
 	STDMETHOD(QueueScript)(/*[in]*/long size, /*[in, size_is(size)]*/long script[]);
+  STDMETHOD(SaveFrameMdoc)(/*[in]*/long size, /*[in, size_is(size)]*/long mdoc[], /*[in]*/long flags);
 	STDMETHOD(SetCurrentCamera)(/*[in]*/long camera);
 	STDMETHOD(SetDMVersion)(/*[in]*/long version);
 	STDMETHOD(SetDebugMode)(/*[in]*/long debug);
@@ -87,6 +88,7 @@ public:
 	STDMETHOD(GetLastError)(/*[out]*/long *error);
 	STDMETHOD(FreeK2GainReference)(/*[in]*/long which);
 	STDMETHOD(WaitUntilReady)(/*[in]*/long which);
+  STDMETHOD(GetLastDoseRate)(/*[out]*/double *doseRate);
 };
 
 #endif // !defined(AFX_DMCAMERA_H__05E3210A_0D63_47FB_AA3E_CABD30B8E8A4__INCLUDED_)

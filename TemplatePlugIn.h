@@ -66,6 +66,7 @@ public:
     double *resMean, double *maxResMax, double *meanRawMax, double *maxRawMax, 
     long *crossHalf, long *crossQuarter, long *crossEighth, long *halfNyq, 
     long *dumInt1, double *dumDbl1, double *dumDbl2);
+  double GetLastDoseRate();
   void MakeAlignComFile(long flags, long dumInt1, double dumDbl1, 
     double dumDbl2, long *strings, long *error);
   int ReturnDeferredSum(short array[], long *arrSize, long *width, long *height); 
@@ -77,6 +78,7 @@ public:
 	int GetGainReference(float *array, long *arrSize, long *width, 
 		long *height, long binning);
 	void QueueScript(char *strScript);
+  int SaveFrameMdoc(char *strMdoc, long flags);
 	void SetCurrentCamera(long inVal);
 	void SetDMVersion(long inVal);
 	void SetDebugMode(int inVal);
