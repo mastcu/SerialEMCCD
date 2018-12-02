@@ -55,6 +55,7 @@ using namespace std ;
 
 #include <stdio.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <direct.h>
@@ -137,6 +138,11 @@ static string sLastRefDir;
 static float sWriteScaling;
 static float sLastSaveFloatScaling;
 static bool sLastSaveNeededRef;
+static string sFrameMdocName;     // Mdoc name set by SaveFrameMdoc
+static string sMdocToSave;
+static bool sThreadWorking = false;
+static double sLastDoseRate = 0.;
+static double sDeferredDoseRate = 0.;
 //static int sNumThreads[6] = {1, 2, 3,4, 6, 8};
 //static int sThreadNumInd = 0;
 
@@ -332,8 +338,12 @@ static void SplitExtension(const string &file, string &root, string &ext);
 static void SplitFilePath(const string &path, string &dir, string &file);
 static int WriteTextFile(const char *filename, const char *text, int length, 
   int openErr, int writeErr, bool asBinary);
+static int WriteFrameMdoc(ThreadData *td);
 static int ReduceImage(ThreadData *td, void *array, void *outArray, int type, int width, 
   int height, int redWidth, int redHeight, int binning, int filterType, float scaling);
+static void DebugPrintf(char *buffer, const char *format, ...);
+static void GetElectronDoseRate(ThreadData *td, DM::Image &image, double exposure, 
+  float binning);
 
 // Declarations of global functions called from here
 void TerminateModuleUninitializeCOM();
@@ -379,6 +389,7 @@ public:
     double *resMean, double *maxResMax, double *meanRawMax, double *maxRawMax, 
     long *crossHalf, long *crossQuarter, long *crossEighth, long *halfNyq, 
     long *dumInt1, double *dumDbl1, double *dumDbl2);
+  double GetLastDoseRate();
   void MakeAlignComFile(long flags, long dumInt1, double dumDbl1, 
     double dumDbl2, char *mdocName, char *mdocFileOrText, long *error);
   int ReturnDeferredSum(short array[], long *arrSize, long *width, long *height); 
@@ -394,6 +405,7 @@ public:
     double exposure, long binning, long top, long left, long bottom, long right, 
     long shutter, double settling, long shutterDelay, long divideBy2, long corrections);
   void QueueScript(char *strScript);
+  int SaveFrameMdoc(char *strMdoc, long flags);
   void SetCurrentCamera(int inVal) {m_iCurrentCamera = inVal;};
   void SetDMVersion(int inVal) {m_iDMVersion = inVal;};
   int GetDSProperties(long timeout, double addedFlyback, double margin, double *flyback, 
@@ -441,6 +453,7 @@ private:
   BOOL m_bSaveFrames;
   string m_strPostSaveCom;
   string m_strDefectsToSave;
+  string m_strBaseNameForMdoc;    // Stack name or dir name saved by SetupFileSaving
   int m_iGpuAvailable;
   bool m_bDefectsParsed;
   bool m_bNextSaveResultsFromCopy;
@@ -1010,15 +1023,17 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   mTD.iLeft = left;
   mTD.iRight = right;
 
+  // These are needed generally for getting dose rate
+  mTD.dK2Exposure = exposure;
+  mTD.iK2Binning = binning;
+
   // Intercept K2 asynchronous saving and continuous mode here
   if (((saveFrames == SAVE_FRAMES || mTD.bUseFrameAlign) && mTD.bAsyncSave) || 
     mTD.bDoContinuous) {
       sprintf(m_strTemp, "Exit(0)");
       mTD.strCommand += m_strTemp;
-      mTD.dK2Exposure = exposure;
       mTD.dK2Settling = settling;
       mTD.iK2Shutter = shutter;
-      mTD.iK2Binning = binning;
       mTD.iCorrections = corrections;
 
       // Make call to acquire image or start continuous acquires
@@ -1473,12 +1488,12 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   void *imageData;
   short *outForRot;
   short *procOut;
-  bool doingStack, needProc, needTemp, needSum, exposureDone, copiedToProc;
+  bool doingStack, needProc, needTemp, needSum, exposureDone, copiedToProc, getDose;
   bool stackAllReady, doingAsyncSave, frameNeedsDelete = false;
   double retval, saveWall, getFrameWall, wallStart, alignWall, procSum = 0.;
   double procWall[6] = {0., 0., 0., 0., 0., 0.};
   int fileSlice, tmin, tmax, numSlices, grabInd, grabSlice;
-  float meanSum; 
+  float meanSum, binForDose; 
   bool saveOrFrameAlign = saveFrames || td->bUseFrameAlign;
   bool useOldAPI = GMS_SDK_VERSION < 31 || td->bUseOldAPI;
   bool alignBeforeProc = td->bFaKeepPrecision && !td->iNumGrabAndStack;
@@ -1512,6 +1527,24 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   td->outSumFrameIndex = 0;
   td->numOutSumsDoneAtIndex = 0;
   td->savedFrameList.clear();
+
+  // Clear out any leftover information here so mdoc is based only on new call
+  // Clear out dose rate info
+  if (saveFrames) {
+    sMdocToSave.clear();
+    sFrameMdocName.clear();
+  }
+  sLastDoseRate = 0.;
+  if (td->bMakeDeferredSum)
+    sDeferredDoseRate = 0.;
+
+  // The binning for dose rate: take binning literally except in super-res mode where it
+  // is 0.5, but could be 1 with binned frames
+  binForDose = (float)td->iK2Binning;
+  if (td->iReadMode == K2_SUPERRES_READ_MODE || td->iReadMode == K3_SUPER_COUNT_READ_MODE)
+    binForDose = 0.5f;
+  if (td->bTakeBinnedFrames)
+    binForDose *= 2.f;
 
   // Get array for unbinned image with antialias reduction, or for subarea
   if (td->iAntialias || td->bMakeSubarea || td->bUseFrameAlign) {
@@ -1677,6 +1710,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     }
   }
 
+  // Set this flag to allow synchronization with Mdoc writing, there is no return
+  // below here until the end
+  sThreadWorking = true;
+
   // Loop on stack then image if there are both
   for (loop = 0; loop < numLoop; loop++) {
     doingStack = (saveOrFrameAlign) && !loop;
@@ -1710,6 +1747,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           // width/height
           if (GetTypeAndSizeInfo(td, image, loop, outLimit, doingStack))
             SET_ERROR(WRONG_DATA_TYPE);
+
+          // Get the dose rate per physical pixel for K2
+          if (td->iReadMode >= 0)
+            GetElectronDoseRate(td, image, td->dK2Exposure, binForDose);
 
           // Get data pointer and transfer the data
           j++;
@@ -1871,8 +1912,18 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
               continue;
             }
           }
-          if ((td->iSaveFlags & K2_SKIP_BELOW_THRESH) && td->fFrameThresh > 0.)
+
+          // Get dose rate for the second passed frame when skipping, otherwise for
+          // the first frame then replace it with the half-way frame
+          if ((td->iSaveFlags & K2_SKIP_BELOW_THRESH) && td->fFrameThresh > 0.) {
             td->savedFrameList.push_back(stackSlice);
+            getDose = usedSlice == 1;
+          } else {
+            getDose = stackSlice == 0 || stackSlice == numSlices / 2;
+          }
+          if (getDose && td->iReadMode > 0)
+            GetElectronDoseRate(td, image, td->dFrameTime, binForDose);
+
 #endif
 
           SimulateSuperRes(td, imageData);
@@ -1946,10 +1997,12 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           // needs scaling or conversion
           // It goes from the DM array into the passed or temp array or grab stack
           if (needProc && (!alignBeforeProc || td->saveFrames) && !copiedToProc) {
-            ProcessImage(imageData, procOut, td->dataSize, td->width, td->height, 
-              frameDivide, transpose, td->byteSize, td->isInteger, td->isUnsignedInt,
-              td->fFloatScaling, td->fFrameOffset, (td->areFramesSuperRes ? 2 : 1) +
-              (td->K3type ? 1 : 0));
+            ProcessImage(imageData, procOut, 
+              (td->K3type && td->byteSize == 1 && td->isUnsignedInt && frameDivide > 0) ?
+              1 : td->dataSize, 
+              td->width, td->height, frameDivide, transpose, td->byteSize, td->isInteger,
+              td->isUnsignedInt, td->fFloatScaling, td->fFrameOffset, 
+              (td->areFramesSuperRes ? 2 : 1) + (td->K3type ? 1 : 0));
             td->outData = (short *)td->tempBuf;
             outForRot = td->rotBuf;
           }
@@ -2128,6 +2181,30 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     td->savedFrameList.clear();
   }
 
+  // Save frame mdoc if one is set up
+  WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
+  if (sMdocToSave.length() && sFrameMdocName.length()) {
+    if (td->iFramesSaved) {
+      tmin = (int)sMdocToSave.find("NumSubFrames = ");
+      if (tmin > 0) {
+        tmax = (int)sMdocToSave.find("\n", tmin + 15);
+        if (tmax > 0) {
+          sprintf(td->strTemp, "%d", td->iFramesSaved);
+          sMdocToSave.replace(tmin + 15, tmax - (tmin + 15), td->strTemp);
+        }
+      } else {
+        sprintf(td->strTemp, "NumSubFrames = %d", td->iFramesSaved);
+        sMdocToSave += td->strTemp;
+      }
+      tmin = WriteFrameMdoc(td);
+      if (!errorRet)
+        errorRet = tmin;
+    } else {
+      sMdocToSave.clear();
+      sFrameMdocName.clear();
+    }
+  }
+  ReleaseMutex(sDataMutexHandle);
 #endif
 
   // Clean up all buffers
@@ -2415,7 +2492,7 @@ static int RunContinuousAcquire(ThreadData *td)
   int j, transpose, nxout, nyout, maxTime = 0, retval = 0, rotationFlip = 0;
   int tleft, ttop, tbot, tright, width, height, finalWidth, finalHeight, boost;
   int tsizeX, tsizeY, tfullX, tfullY, totalBinning, coordBinning;
-  double delay;
+  double delay, lastDoseTime;
   short *procOutArray = sContinuousArray;
   short *redOutArray;
   DM::Image image;
@@ -2438,6 +2515,11 @@ static int RunContinuousAcquire(ThreadData *td)
   CM::AcquisitionParameters acqParams;
 #endif
   void *imageData;
+  float binForDose = (float)td->iK2Binning;
+  if (td->iReadMode == K2_SUPERRES_READ_MODE || td->iReadMode == K3_SUPER_COUNT_READ_MODE)
+    binForDose *= 0.5f;
+  sLastDoseRate = 0.;
+
   td->arrSize = 0;
 
   // Get modified sizes and temp array size for subarea.  iFullSize should be size of
@@ -2612,6 +2694,12 @@ static int RunContinuousAcquire(ThreadData *td)
         break;
       }
       sJ++;
+
+      // Get the dose rate every second
+      if (K2type && td->iReadMode > 0 && TickInterval(lastDoseTime) > 900.) {
+        lastDoseTime = GetTickCount();
+        GetElectronDoseRate(td, image, td->dK2Exposure, binForDose);
+      }
 
       // Get data pointer and transfer the data
       imageLp = new GatanPlugIn::ImageDataLocker( image ); j++; sJ++;
@@ -3118,6 +3206,23 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
 }
 
 /*
+ * Gets the dose per pixel from the DM if it supports it, then convert that to a dose
+ * rate per unbinned pixel
+ */
+static void GetElectronDoseRate(ThreadData *td, DM::Image &image, double exposure, 
+  float binning)
+{
+  sLastDoseRate = 0.;
+#if GMS_SDK_VERSION >= 331
+  double dose = CM::GetElectronDosePerPixel(image.get());
+  dose /= (exposure * binning * binning);
+  sLastDoseRate = dose;
+  if (td->bMakeDeferredSum)
+    sDeferredDoseRate = dose;
+#endif
+}
+
+/*
  * Produces a simulated super-resolution frame if it is blank and the environment 
  * variable is set
  */
@@ -3208,7 +3313,8 @@ static int InitializeFrameAlign(ThreadData *td)
   else if (td->iNumGrabAndStack && td->isFloat)
     td->fAlignScaling = B3DCHOICE(td->isSuperRes, 16.f, td->fSavedScaling * divideScale);
   else if (td->K3type)
-    td->fAlignScaling = divideScale;
+    td->fAlignScaling = B3DCHOICE(td->iK2Processing == NEWCM_GAIN_NORMALIZED, divideScale,
+      1.f);
   else
     td->fAlignScaling = 1.;
 
@@ -3467,6 +3573,8 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
   unsigned short *usData;
   unsigned char *bData, *packed;
   unsigned char lowbyte;
+  string refName, refPath;
+  bool needRef = sLastSaveNeededRef && sLastRefName.length();
   float numSample = 500000.;
   float sampleXtoYratio = 1.;
   float fracX, fracY, sampleFrac;
@@ -3526,6 +3634,8 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
     else
       sprintf(td->strTemp, "SerialEMCCD: Dose frac. image, scaled by %.2f  r/f %d", 
         sWriteScaling, td->iFrameRotFlip);
+    if (needRef)
+      SplitFilePath(sLastRefName, refPath, refName);
 
     // Set up header for one slice
     if (!td->bWriteTiff) {
@@ -3534,9 +3644,33 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
       if (td->save4bit && !use4bitMode)
         td->hdata.imodFlags |= MRC_FLAGS_4BIT_BYTES;
       mrc_head_label(&td->hdata, td->strTemp);
+
+      // Add lines for gain reference and defects and copy directly into the labels
+      if (needRef) {
+        sprintf(td->strTemp, "  %s", refName.c_str());
+        td->strTemp[MRC_LABEL_SIZE] = 0x00;
+        strcpy(td->hdata.labels[1], td->strTemp);
+        fixTitlePadding(td->hdata.labels[1]);
+        td->hdata.nlabl = 2;
+      }
+      if (td->bLastSaveHadDefects) {
+        sprintf(td->strTemp, "  %s", td->strLastDefectName.c_str());
+        td->strTemp[MRC_LABEL_SIZE] = 0x00;
+        strcpy(td->hdata.labels[td->hdata.nlabl], td->strTemp);
+        fixTitlePadding(td->hdata.labels[td->hdata.nlabl]);
+        td->hdata.nlabl++;
+      }
     } else {
+
+      // For TIFF, append these names to the string with newlines
+      if (needRef)
+        sprintf(&td->strTemp[strlen(td->strTemp)], "\n  %s", refName.c_str());
+      if (td->bLastSaveHadDefects)
+        sprintf(&td->strTemp[strlen(td->strTemp)], "\n  %s", 
+          td->strLastDefectName.c_str());
       tiffAddDescription(td->strTemp);
     }
+
     fileSlice = 0;
     tmin = 1000000;
     tmax = -tmin;
@@ -4145,7 +4279,7 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
         if (floatScaling == 1.) {
 
           // unsigned byte to short
-          DebugToResult("Dividing unsigned bytes by 2\n");
+          DebugToResult("Dividing unsigned bytes by 2 into shorts\n");
           for (i = 0; i < width * height; i++)
             outData[i] = (short)(bData[i] / 2);
         } else {
@@ -4861,6 +4995,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
       else
         *error = DIR_CREATE_ERROR;
     }
+    m_strBaseNameForMdoc = mTD.strSaveDir;
   } else if (! *error) {
 
     // Check whether the file exists
@@ -4883,8 +5018,9 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
         DeleteFile((LPCTSTR)m_strTemp);
       }
     }
+    if (!*error)
+      m_strBaseNameForMdoc = m_strTemp;
   }
-
   if (!*error && defects && (flags & K2_SAVE_DEFECTS)) {
     
     // Extract or make up a filename
@@ -4920,6 +5056,65 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
       stdStr.c_str(), strerror(errno));
     DebugToResult(m_strTemp);
   }
+}
+
+/* 
+ * Save a frame Mdoc file for the last frame-saving acquisition, or store it for saving 
+ * when the acquire thread finishes
+ */
+int TemplatePlugIn::SaveFrameMdoc(char *strMdoc, long flags)
+{
+  int retval = 0;
+
+  // This gets cleared by a previous call here, so a single-shot should not be able to
+  // save its mdoc by mistake
+  if (!m_strBaseNameForMdoc.length())
+    return FRAMEDOC_NO_SAVING;
+
+  // These should be cleared before an acquire with saving starts, and after saving
+  WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
+  sMdocToSave = strMdoc;
+  sFrameMdocName = m_strBaseNameForMdoc + ".mdoc";
+  m_strBaseNameForMdoc.clear();
+
+  // Add defect file now, it is known when the shot started
+  if (mTD.bLastSaveHadDefects) {
+    sprintf(m_strTemp, "DefectFile = %s\n", mTD.strLastDefectName.c_str());
+    sMdocToSave += m_strTemp;
+  }
+
+  // Write it now or let thread do it
+  if (!(m_HAcquireThread && sThreadWorking))
+    retval = WriteFrameMdoc(&mTD);
+  ReleaseMutex(sDataMutexHandle);
+  return retval;
+}
+
+/*
+ * Actually write the frame mdoc: called from above or from thread
+ */
+static int WriteFrameMdoc(ThreadData *td)
+{
+  string refPath, refName;
+  int retval;
+
+  // Add reference now, this all got handled in the thread
+  if (sLastSaveNeededRef && sLastRefName.length()) {
+    SplitFilePath(sLastRefName, refPath, refName);
+    sprintf(td->strTemp, "GainReference = %s\n", refName.c_str());
+    sMdocToSave += td->strTemp;
+  }
+  errno = 0;
+  retval = WriteTextFile(sFrameMdocName.c_str(), sMdocToSave.c_str(),
+    (int)sMdocToSave.length(), FRAMEDOC_OPEN_ERR, FRAMEDOC_WRITE_ERR, false);
+  if (retval) {
+    sprintf(td->strTemp, "WriteFrameMdoc error is %d for file: %s : %s\n", retval, 
+      sFrameMdocName.c_str(), strerror(errno));
+    DebugToResult(td->strTemp);
+  }
+  sFrameMdocName.clear();
+  sMdocToSave.clear();
+  return retval;
 }
 
 /*
@@ -5144,6 +5339,14 @@ void TemplatePlugIn::FrameAlignResults(double *rawDist, double *smoothDist,
 }
 
 /*
+ * Return the dose rate stored in last acquisition or deferred sum return
+ */
+double TemplatePlugIn::GetLastDoseRate()
+{
+  return sLastDoseRate;
+}
+
+/*
  * Write the com file for aligning based on an mdoc file (for tilt series)
  */
 void TemplatePlugIn::MakeAlignComFile(long flags, long dumInt1, double dumDbl1, 
@@ -5197,6 +5400,7 @@ int TemplatePlugIn::ReturnDeferredSum(short *array, long *arrSize, long *width,
   delete [] sDeferredSum;
   sDeferredSum = NULL;
   sValidDeferredSum = false;
+  sLastDoseRate = sDeferredDoseRate;
   return 0;
 }
 
@@ -5634,7 +5838,7 @@ void TemplatePlugIn::FreeK2GainReference(long which)
   }
 }
 
-// Wait until ready fror single shot or dose fractionation shot
+// Wait until ready for single shot or dose fractionation shot
 int TemplatePlugIn::WaitUntilReady(long which)
 {
   if (m_HAcquireThread && WaitForAcquireThread(which ? WAIT_FOR_THREAD : 
@@ -5743,6 +5947,7 @@ static void SplitExtension(const string &file, string &root, string &ext)
   ext = file.substr(ind);
 }
 
+// To write a string to a text file
 static int WriteTextFile(const char *filename, const char *text, int length, 
   int openErr, int writeErr, bool asBinary)
 {
@@ -5756,6 +5961,16 @@ static int WriteTextFile(const char *filename, const char *text, int length,
     fclose(fp);
   }
   return error;
+}
+
+// To replace sprintf followed by debugToResult
+static void DebugPrintf(char *buffer, const char *format, ...)
+{
+  va_list args;
+  va_start(args, format);
+  vsprintf(buffer, format, args);
+  DebugToResult(buffer);
+  va_end(args);
 }
 
 // Global instances of the plugin and the wrapper class for calling into this file
@@ -5807,6 +6022,11 @@ void PlugInWrapper::QueueScript(char *strScript)
 {
   mLastRetVal = 0;
   gTemplatePlugIn.QueueScript(strScript);
+}
+
+int PlugInWrapper::SaveFrameMdoc(char *strMdoc, long flags)
+{
+  return gTemplatePlugIn.SaveFrameMdoc(strMdoc, flags);
 }
 
 int PlugInWrapper::GetImage(short *array, long *arrSize, long *width, 
@@ -5916,6 +6136,12 @@ void PlugInWrapper::FrameAlignResults(double *rawDist, double *smoothDist,
   mLastRetVal = 0;
   gTemplatePlugIn.FrameAlignResults(rawDist, smoothDist, resMean, maxResMax, meanRawMax, 
     maxRawMax, crossHalf, crossQuarter, crossEighth, halfNyq, dumInt1, dumDbl1, dumDbl2);
+}
+
+double PlugInWrapper::GetLastDoseRate()
+{
+  mLastRetVal = 0;
+  return gTemplatePlugIn.GetLastDoseRate();
 }
 
 void PlugInWrapper::MakeAlignComFile(long flags, long dumInt1, double dumDbl1, 
