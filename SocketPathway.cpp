@@ -293,7 +293,7 @@ static DWORD WINAPI SocketProc(LPVOID pParam)
       if (err < 0 && !sCloseForExit) {
         sLastWSAerror = WSAGetLastError();
         sStartupError = 7;
-        sprintf(sMessageBuf, "WSA Error %d on select command\n");
+        sprintf(sMessageBuf, "WSA Error %d on select command\n", sLastWSAerror);
         gPlugInWrapper.ErrorToResult(sMessageBuf, "SerialEMSocket: ");
       }
         //gPlugInWrapper.DebugToResult("returning\n");
@@ -336,7 +336,7 @@ static DWORD WINAPI SocketProc(LPVOID pParam)
 
         if (!FinishGettingBuffer(numBytes, numExpected)) {
           sprintf(sMessageBuf, "SerialEMSocket: got %d bytes via recv on socket %d\n",
-            numExpected, sHClient);
+            numExpected, (int)sHClient);
           if ((gPlugInWrapper.GetDebugVal() % 10) > 1)
             gPlugInWrapper.DebugToResult(sMessageBuf);
           sProcessingCommand = true;
@@ -366,7 +366,7 @@ static void CloseClient()
 {
   if (sHClient == INVALID_SOCKET)
     return;
-  sprintf(sMessageBuf, "SerialEMSocket: Closing socket %d\n", sHClient);
+  sprintf(sMessageBuf, "SerialEMSocket: Closing socket %d\n", (int)sHClient);
   if (!sCloseForExit)
     gPlugInWrapper.DebugToResult(sMessageBuf);
   closesocket(sHClient);
@@ -406,7 +406,7 @@ static int SendBuffer(char *buffer, int numBytes)
 {
   int numTotalSent = 0;
   int numToSend, numSent;
-  sprintf(sMessageBuf, "In SendBuffer, socket %d, sending %d bytes\n", sHClient,
+  sprintf(sMessageBuf, "In SendBuffer, socket %d, sending %d bytes\n", (int)sHClient,
     numBytes);
   if ((gPlugInWrapper.GetDebugVal() % 10) > 1)
     gPlugInWrapper.DebugToResult(sMessageBuf);
@@ -452,7 +452,7 @@ static void CloseOnExitOrSelectError(int err)
   if (err < 0) {
     sLastWSAerror = WSAGetLastError();
     sStartupError = 7;
-    sprintf(sMessageBuf, "WSA Error %d on select command\n");
+    sprintf(sMessageBuf, "WSA Error %d on select command\n", sLastWSAerror);
     gPlugInWrapper.ErrorToResult(sMessageBuf, "SerialEMSocket: ");
   }
 }

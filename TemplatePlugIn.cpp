@@ -59,6 +59,7 @@ using namespace std ;
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <direct.h>
+#include <time.h>
 #include "Shared\mrcfiles.h"
 #include "Shared\iimage.h"
 #include "Shared\b3dutil.h"
@@ -468,7 +469,7 @@ TemplatePlugIn::TemplatePlugIn()
 
   sDataMutexHandle = CreateMutex(0, 0, 0);
   sImageMutexHandle = CreateMutex(0, 0, 0);
-  srand((unsigned int)sDataMutexHandle);
+  srand((unsigned int)time(NULL));
 #ifdef _WIN64
   b3dSetStoreError(1);
   sFrameAli.setPrintFunc(framePrintFunc);
@@ -1488,7 +1489,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   void *imageData;
   short *outForRot;
   short *procOut;
-  bool doingStack, needProc, needTemp, needSum, exposureDone, copiedToProc, getDose;
+  bool doingStack, needProc, needTemp, needSum, exposureDone, copiedToProc, getDose = 0;
   bool stackAllReady, doingAsyncSave, frameNeedsDelete = false;
   double retval, saveWall, getFrameWall, wallStart, alignWall, procSum = 0.;
   double procWall[6] = {0., 0., 0., 0., 0., 0.};
@@ -1541,7 +1542,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   // The binning for dose rate: take binning literally except in super-res mode where it
   // is 0.5, but could be 1 with binned frames
   binForDose = (float)td->iK2Binning;
-  if (td->iReadMode == K2_SUPERRES_READ_MODE || td->iReadMode == K3_SUPER_COUNT_READ_MODE)
+  if (sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE || 
+    sReadModes[td->iReadMode] == K3_SUPER_COUNT_READ_MODE)
     binForDose = 0.5f;
   if (td->bTakeBinnedFrames)
     binForDose *= 2.f;
@@ -2516,7 +2518,8 @@ static int RunContinuousAcquire(ThreadData *td)
 #endif
   void *imageData;
   float binForDose = (float)td->iK2Binning;
-  if (td->iReadMode == K2_SUPERRES_READ_MODE || td->iReadMode == K3_SUPER_COUNT_READ_MODE)
+  if (sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE || 
+    sReadModes[td->iReadMode] == K3_SUPER_COUNT_READ_MODE)
     binForDose *= 0.5f;
   sLastDoseRate = 0.;
 
@@ -3013,6 +3016,7 @@ static int GetWatchedDataValue(int &member)
 static int GetTypeAndSizeInfo(ThreadData *td, DM::Image &image, int loop,  int outLimit,
                               bool doingStack)
 {
+  
   // Check the data type (getting the Gatan data type directly might have been easier)
   td->byteSize = DM::ImageGetDataElementByteSize(image.get());
   td->isInteger = DM::ImageIsDataTypeInteger(image.get());
@@ -3215,6 +3219,7 @@ static void GetElectronDoseRate(ThreadData *td, DM::Image &image, double exposur
   sLastDoseRate = 0.;
 #if GMS_SDK_VERSION >= 331
   double dose = CM::GetElectronDosePerPixel(image.get());
+  DebugPrintf(td->strTemp, "dose from DM %.3f   exp %.3f  bin %.1f\n", dose, exposure, binning);
   dose /= (exposure * binning * binning);
   sLastDoseRate = dose;
   if (td->bMakeDeferredSum)
@@ -4060,7 +4065,7 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
                          bool isInteger, bool isUnsignedInt, float floatScaling,
                          float linearOffset, int useThreads)
 {
-  int i, j, iy, ix;
+  int i, j, iy, ix = 0;
   unsigned int *uiData;
   int *iData;
   unsigned short *usData, *usData2;
@@ -4071,7 +4076,7 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
   char *sbData;
   char sbVal;
   float scale, postOffset;
-  float *flIn, *flOut, flTmp;
+  float *flIn, *flOut = NULL, flTmp;
   int operations[4] = {1, 5, 7, 3};
   char mess[512];
   int numThreads;
@@ -4555,9 +4560,9 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
  */
 static void AddToSum(ThreadData *td, void *data, void *sumArray) 
 {
-  int ix, iy, numThreads = 1, width = td->width;
+  int ix = 0, iy, numThreads = 1, width = td->width;
   int *outData = (int *)sumArray;
-  float *flIn, *flOut;
+  float *flIn = NULL, *flOut = NULL;
   if (td->areFramesSuperRes)
      numThreads = numOMPthreads(td->K3type ? 8 : 2);
 #pragma omp parallel for num_threads(numThreads) \
