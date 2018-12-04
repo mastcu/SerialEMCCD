@@ -2415,7 +2415,8 @@ static void GainNormalizeSum(ThreadData *td, void *array)
 }
 
 /*
- * read in one of the K2 gain references if necessary
+ * read in one of the K2 gain references if necessary; and/or make a K3 binned reference
+ * Checking the reference time should happen before this call
  */
 static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &errStr)
 {
@@ -2424,6 +2425,13 @@ static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &e
   int error = 0;
 #ifdef _WIN64
   MrcHeader *hdr;
+
+  // If need a binned reference, done if it exists and reference time is good enough
+  if (td->bTakeBinnedFrames && sK2GainRefData[0] && 
+    sK2GainRefTime[0] + 10. >= td->curRefTime)
+      return 0;
+
+  // Now check the reference that might need loading (SR for binned K3)
   if (!sK2GainRefData[refInd] || sK2GainRefTime[refInd] + 10. < td->curRefTime) {
     iiFile = iiOpen(td->strGainRefToCopy.c_str(), "rb");
     if (!iiFile) {
@@ -2438,7 +2446,8 @@ static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &e
 
     if (!error) {
       try {
-        sK2GainRefData[refInd] = new float[iiFile->nx * iiFile->ny];
+        if (!sK2GainRefData[refInd])
+          sK2GainRefData[refInd] = new float[iiFile->nx * iiFile->ny];
 
         // We are working with inverted images so the reference needs to be loaded in
         // native inverted form
@@ -2470,6 +2479,41 @@ static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &e
   }
   if (iiFile)
     iiDelete(iiFile);
+
+  // If taking binned frames, now make sure the binned reference is there or make it
+  if (!error && td->bTakeBinnedFrames) {
+    int ixBase, ixpb, iyadd;
+    float minval = 0.02f;
+    float *ubGainp, *binGainp;
+    sK2GainRefWidth[0] = sK2GainRefWidth[1] / 2;
+    sK2GainRefHeight[0] = sK2GainRefHeight[1] / 2;
+    iyadd = sK2GainRefWidth[1];
+    try {
+      if (!sK2GainRefData[0])
+        sK2GainRefData[refInd] = new float[sK2GainRefWidth[0] * sK2GainRefHeight[0]];
+      ubGainp = sK2GainRefData[1];
+      binGainp = sK2GainRefData[0];
+      sK2GainRefTime[0] = td->curRefTime;
+
+      // Loop on output pixels, take inverse of average of the inverses of the 4 pixels
+      // being binned
+      for (int iy = 0; iy < sK2GainRefHeight[0]; iy++) {
+        ixBase = sK2GainRefWidth[1] * iy;
+        for (int ix = 0; ix < sK2GainRefWidth[0]; ix++) {
+          ixpb = ixBase + 2 * ix;
+          *binGainp++ = 0.25f / (1.f / B3DMAX(minval, ubGainp[ixpb]) +
+            1.f / B3DMAX(minval, ubGainp[ixpb + 1]) + 
+            1.f / B3DMAX(minval, ubGainp[ixpb + iyadd]) +
+            1.f / B3DMAX(minval, ubGainp[ixpb + iyadd + 1]));
+        }
+      }
+    }
+    catch (...) {
+      error = 4;
+      errStr = "could not allocate memory for gain reference";
+      sK2GainRefData[0] = NULL;
+    }
+  }
 #endif
   return error;
 }
@@ -4605,7 +4649,7 @@ static void AddToSum(ThreadData *td, void *data, void *sumArray)
  
 
 /*
- * Copy a gain reference file to the directory if there is not a newer one
+ * Copy or write a gain reference file to the directory if there is not a newer one
  */
 static int CopyK2ReferenceIfNeeded(ThreadData *td)
 {
@@ -4613,11 +4657,12 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   HANDLE hFindCopy;
   string saveDir = td->strSaveDir;
   string rootName = td->strRootName;
+  string errStr;
   char *prefix[2] = {"Count", "Super"};
   int ind, retVal = 0;
   bool needCopy = true, namesOK = false;
   double maxCopySec = 0.;
-  int prefInd = td->isSuperRes ? 1 : 0;
+  int prefInd = (td->isSuperRes && !td->bTakeBinnedFrames) ? 1 : 0;
 
   // For single image files, find the date-time root and split up the name
   if (td->bFilePerImage) {
@@ -4682,6 +4727,38 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   sprintf(td->strTemp, "%s\\%sRef_%s.dm4", saveDir.c_str(), prefix[prefInd],
     rootName.c_str());
   sLastRefName = td->strTemp;
+
+  // Intercept need for K3 binned frame and make sure it is there or loaded and made
+#ifdef _WIN64
+  if (td->bTakeBinnedFrames) {
+    MrcHeader hdata;
+    FILE *fp;
+    if (!LoadK2ReferenceIfNeeded(td, true, errStr)) {
+      fp = fopen(sLastRefName.c_str(), "wb");
+      if (!fp)
+        errStr = "Could not open file " + sLastRefName + "for binned gain reference";
+    }
+    if (!errStr.length()) {
+      mrc_head_new(&hdata, sK2GainRefWidth[0], sK2GainRefHeight[0], 1, MRC_MODE_FLOAT);
+      hdata.yInverted = 1;
+      mrc_head_label(&hdata, "SerialEMCCD: Generated K3 binned gain reference");
+      if (mrc_head_write(fp, &hdata)) {
+        errStr = "Error writing header to binned gain reference: " + 
+          string(b3dGetError());
+      } else if (mrc_write_slice(sK2GainRefData[0], fp, &hdata, 0, 'Z')) {
+        errStr = "Error writing binned gain reference: " + string(b3dGetError());
+      }
+      fclose(fp);
+    }
+    if (errStr.length() > 0) {
+      sprintf(td->strTemp, "%s\n", errStr.c_str());
+      ErrorToResult(td->strTemp);
+      sLastRefName = "";
+      return 1;
+    }
+    return 0;
+  }
+#endif
 
   // Copy the reference
   sprintf(td->strTemp, "Making new copy of gain reference: refSec  %f  maxCopySec %f\n",
