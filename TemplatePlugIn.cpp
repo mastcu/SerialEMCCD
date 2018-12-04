@@ -812,8 +812,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       return FRAMEALI_BAD_SUBSET;
   }
 
-  mTD.bTakeBinnedFrames = mTD.bTakeBinnedFrames && mTD.K3type && mTD.isSuperRes &&
-    (processing == GAIN_NORMALIZED);
+  mTD.bTakeBinnedFrames = mTD.bTakeBinnedFrames && mTD.K3type && mTD.isSuperRes;
   mTD.areFramesSuperRes = mTD.isSuperRes && !mTD.bTakeBinnedFrames;
 
   // Set flag to keep precision when indicated or when it has no cost, but not if frames
@@ -2363,7 +2362,7 @@ static void ExtractSubarea(ThreadData *td, void *inArray, int iTop, int iLeft,
 static void GainNormalizeSum(ThreadData *td, void *array)
 {
 #ifdef _WIN64
-  int refInd = td->isSuperRes ? 1 : 0;
+  int refInd = (td->isSuperRes && !td->bTakeBinnedFrames) ? 1 : 0;
   int ind, error = 0;
   int iVal;
   short *sData = (short *)array;
@@ -2423,6 +2422,7 @@ static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &e
   int refInd = td->isSuperRes ? 1 : 0;
   ImodImageFile *iiFile = NULL;
   int error = 0;
+  int sizeFac = td->bTakeBinnedFrames ? 2 : 1;
 #ifdef _WIN64
   MrcHeader *hdr;
 
@@ -2439,8 +2439,9 @@ static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &e
       errStr = "the gain reference file could not be opened as an IMOD image file: " +
         string(b3dGetError());
     } else {
-      if (sizeMustMatch && (iiFile->nx != td->width || iiFile->ny != td->height)) {
-        error = 3;
+      if (sizeMustMatch && (iiFile->nx != td->width * sizeFac || 
+        iiFile->ny != td->height * sizeFac)) {
+          error = 3;
       }
     }
 
@@ -2490,7 +2491,7 @@ static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &e
     iyadd = sK2GainRefWidth[1];
     try {
       if (!sK2GainRefData[0])
-        sK2GainRefData[refInd] = new float[sK2GainRefWidth[0] * sK2GainRefHeight[0]];
+        sK2GainRefData[0] = new float[sK2GainRefWidth[0] * sK2GainRefHeight[0]];
       ubGainp = sK2GainRefData[1];
       binGainp = sK2GainRefData[0];
       sK2GainRefTime[0] = td->curRefTime;
@@ -2498,7 +2499,7 @@ static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &e
       // Loop on output pixels, take inverse of average of the inverses of the 4 pixels
       // being binned
       for (int iy = 0; iy < sK2GainRefHeight[0]; iy++) {
-        ixBase = sK2GainRefWidth[1] * iy;
+        ixBase = sK2GainRefWidth[1] * 2 * iy;
         for (int ix = 0; ix < sK2GainRefWidth[0]; ix++) {
           ixpb = ixBase + 2 * ix;
           *binGainp++ = 0.25f / (1.f / B3DMAX(minval, ubGainp[ixpb]) +
@@ -2507,6 +2508,8 @@ static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &e
             1.f / B3DMAX(minval, ubGainp[ixpb + iyadd + 1]));
         }
       }
+      DebugPrintf(td->strTemp, "Made binned gain ref of size %d %d\n",
+        sK2GainRefWidth[0], sK2GainRefHeight[0]);
     }
     catch (...) {
       error = 4;
@@ -4497,7 +4500,7 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
         uiData = (unsigned int *)imageData;
         if (linearOffset) {
           postOffset = 0.5f - linearOffset * floatScaling;
-          sprintf(mess,"Converting unsigned integers to unsigned shorts,  scaling by"
+          sprintf(mess,"Converting unsigned integers to unsigned shorts,  scaling by "
             "%f  offset %f -> %f\n", floatScaling, linearOffset, postOffset);
           DebugToResult(mess);
           if (useThreads > 2) {  // K3
@@ -4558,7 +4561,7 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
 
         // Scaling, convert to usigned and truncate at 0
           postOffset = 0.5f - linearOffset * floatScaling;
-          sprintf(mess,"Truncating signed integers to unsigned shorts,  scaling by"
+          sprintf(mess,"Truncating signed integers to unsigned shorts,  scaling by "
             "%f  offset %f -> %f\n", floatScaling, linearOffset, postOffset);
           DebugToResult(mess);
         iData = (int *)imageData;
@@ -4739,6 +4742,9 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
         errStr = "Could not open file " + sLastRefName + "for binned gain reference";
     }
     if (!errStr.length()) {
+      sprintf(td->strTemp, "Writing file with binned gain reference: refSec  %f  "
+        "maxCopySec %f\n", td->curRefTime, maxCopySec);
+      DebugToResult(td->strTemp);
       mrc_head_new(&hdata, sK2GainRefWidth[0], sK2GainRefHeight[0], 1, MRC_MODE_FLOAT);
       hdata.yInverted = 1;
       mrc_head_label(&hdata, "SerialEMCCD: Generated K3 binned gain reference");
