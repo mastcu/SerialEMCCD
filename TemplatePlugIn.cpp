@@ -2502,7 +2502,7 @@ static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &e
         ixBase = sK2GainRefWidth[1] * 2 * iy;
         for (int ix = 0; ix < sK2GainRefWidth[0]; ix++) {
           ixpb = ixBase + 2 * ix;
-          *binGainp++ = 0.25f / (1.f / B3DMAX(minval, ubGainp[ixpb]) +
+          *binGainp++ = 4.f / (1.f / B3DMAX(minval, ubGainp[ixpb]) +
             1.f / B3DMAX(minval, ubGainp[ixpb + 1]) + 
             1.f / B3DMAX(minval, ubGainp[ixpb + iyadd]) +
             1.f / B3DMAX(minval, ubGainp[ixpb + iyadd + 1]));
@@ -3103,14 +3103,14 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
                             long &frameDivide, bool &needProc)
 {
   bool gainNormed = td->iK2Processing == NEWCM_GAIN_NORMALIZED;
-  bool sumBinnedFrames = td->bTakeBinnedFrames && td->bSaveSummedFrames;
+  bool sumBinNormFrames = (td->bTakeBinnedFrames && gainNormed) && td->bSaveSummedFrames;
 
   // Float super-res image is from software processing and needs special scaling
   // into bytes, set divide -1 as flag for this
   if (td->isSuperRes && td->isFloat && !td->bSaveTimes100)
     frameDivide = (td->bFaKeepPrecision && td->iNumGrabAndStack) ? -3 : -1;
 
-  // Multiply float scaling by 100 if flat is set and they are floats
+  // Multiply float scaling by 100 if tlat is set and they are floats
   if (td->bSaveTimes100)
     td->fFloatScaling *= 100.f;
 
@@ -3133,12 +3133,12 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
   // Set # of bytes in the saving output
   td->outByteSize = 2;
   if ((td->byteSize == 1 || frameDivide < 0) && !td->bSaveSuperReduced &&
-    !sumBinnedFrames) {
+    !sumBinNormFrames) {
     td->fileMode = MRC_MODE_BYTE;
     td->outByteSize = 1;
   } else if ((frameDivide > 0 && td->byteSize != 2) || 
     (td->dataSize == td->byteSize && !td->isUnsignedInt) ||
-    ((td->bSaveSuperReduced || sumBinnedFrames) && td->divideBy2 > 0))
+    ((td->bSaveSuperReduced || sumBinNormFrames) && td->divideBy2 > 0))
     td->fileMode = MRC_MODE_SHORT;
   else
     td->fileMode = MRC_MODE_USHORT;
@@ -3165,7 +3165,7 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
   // Set the byte size for a grab stack if any
   td->iGrabByteSize = td->outByteSize;
   td->iFaDataMode = td->fileMode;
-  if (td->K3type && (td->bSaveSuperReduced || td->bTakeBinnedFrames))
+  if (td->K3type && (td->bSaveSuperReduced || (td->bTakeBinnedFrames && gainNormed)))
     td->iFaDataMode = MRC_MODE_BYTE;
   if (td->bFaKeepPrecision && !td->K3type) {
     td->iGrabByteSize = td->isCounting ? 4 : 2;
@@ -3516,7 +3516,10 @@ static int SumFrameIfNeeded(ThreadData *td, bool finalFrame, bool &openForFirstS
   short *sData, *sSum;
   unsigned char *bData;
   unsigned short *usData, *usSum;
-  bool bytesPassedIn = td->bTakeBinnedFrames || td->bSaveSuperReduced;
+
+  // Here the fact that they are bytes is only relevant if binned frames are normalized
+  bool bytesPassedIn = td->bSaveSuperReduced ||
+    (td->bTakeBinnedFrames && td->iK2Processing == NEWCM_GAIN_NORMALIZED);
 
     // Sum frame first if flag is set, and there is a count
   if (td->bSaveSummedFrames && td->outSumFrameIndex < (int)td->outSumFrameList.size()) {
@@ -3581,10 +3584,10 @@ static int SumFrameIfNeeded(ThreadData *td, bool finalFrame, bool &openForFirstS
 
       // Otherwise, get the data into outData one way or another
       // Data to now be reduced is expected to still be bytes, not fileMode
-      // Binned frames are now expected to be fileMode (1/6) but the buffer is not big 
+      // Bin-normed frames are now expected to be fileMode (1/6) but the buffer is not big 
       // enough, so set outData instead.  This can be done instead of copying in all cases
       if ((td->fileMode != MRC_MODE_BYTE && !td->bSaveSuperReduced) ||
-        td->bTakeBinnedFrames) {
+        td->bTakeBinnedFrames && td->iK2Processing == NEWCM_GAIN_NORMALIZED) {
           td->outData = td->outSumBuf;
       } else {
         usSum = (unsigned short *)td->outSumBuf;
