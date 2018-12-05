@@ -3143,8 +3143,10 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
   else
     td->fileMode = MRC_MODE_USHORT;
   td->save4bit = (td->isSuperRes && ((!td->K3type && td->byteSize <= 2) || 
-    (td->K3type && !gainNormed)) ||
-    (td->isCounting && td->isInteger && (td->iSaveFlags & K2_RAW_COUNTING_4BIT)))
+    (td->K3type && !gainNormed && !td->bTakeBinnedFrames)) ||
+    (((td->isCounting && td->isInteger) || 
+    (td->K3type && !gainNormed && td->bTakeBinnedFrames)) && 
+    (td->iSaveFlags & K2_RAW_COUNTING_4BIT)))
     && (td->iSaveFlags & K2_SAVE_RAW_PACKED);
   needProc = td->byteSize > 2 || td->signedBytes || frameDivide < 0 ||
     (td->K3type && td->byteSize == 1 && td->isUnsignedInt && frameDivide > 0 && 
@@ -4662,10 +4664,12 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   string rootName = td->strRootName;
   string errStr;
   char *prefix[2] = {"Count", "Super"};
+  char *extension[2] = {"dm4", "mrc"};
   int ind, retVal = 0;
   bool needCopy = true, namesOK = false;
   double maxCopySec = 0.;
   int prefInd = (td->isSuperRes && !td->bTakeBinnedFrames) ? 1 : 0;
+  int extInd = td->bTakeBinnedFrames ? 1 : 0;
 
   // For single image files, find the date-time root and split up the name
   if (td->bFilePerImage) {
@@ -4689,7 +4693,8 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
     hFindCopy = FindFirstFile(sLastRefName.c_str(), &findCopyData);
     namesOK = true;
   } else {
-    sprintf(td->strTemp, "%s\\%sRef_*.dm4", saveDir.c_str(), prefix[prefInd]);
+    sprintf(td->strTemp, "%s\\%sRef_*.%s", saveDir.c_str(), prefix[prefInd], 
+      extension[extInd]);
     hFindCopy = FindFirstFile(td->strTemp, &findCopyData);
     //sprintf(td->strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefix[prefInd]);
   }
@@ -4727,8 +4732,8 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
     sLastRefName += findCopyData.cFileName;
     return 0;
   }
-  sprintf(td->strTemp, "%s\\%sRef_%s.dm4", saveDir.c_str(), prefix[prefInd],
-    rootName.c_str());
+  sprintf(td->strTemp, "%s\\%sRef_%s.%s", saveDir.c_str(), prefix[prefInd],
+    rootName.c_str(), extension[extInd]);
   sLastRefName = td->strTemp;
 
   // Intercept need for K3 binned frame and make sure it is there or loaded and made
