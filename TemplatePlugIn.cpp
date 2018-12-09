@@ -105,7 +105,8 @@ K2_SUPERRES_READ_MODE, K2_LINEAR_READ_MODE, K3_SUPER_COUNT_READ_MODE};
 static int sCMHardCorrs[4] = {0x0, 0x100, 0x200, 0x300};
 static int sK2HardProcs[4] = {0, 2, 4, 6};
 
-// Transpose values to use to cancel default transpose for GMS 2.3.1 with dose frac
+// Transpose values formerly used to cancel default transpose for GMS 2.3.1 with dose frac
+// Now used to look up what to
 static int sInverseTranspose[8] = {0, 258, 3, 257, 1, 256, 2, 259};
 
 // THE debug mode flag and an integer that came through environment variable
@@ -214,6 +215,7 @@ struct ThreadData
   bool bSetContinuousMode;
   bool bUseAcquisitionObj;
   int iContinuousQuality;
+  bool bK3RotFlipBug;
   int iCorrections;
   int iEndContinuous;
   int iContWidth, iContHeight;
@@ -851,6 +853,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       mTD.iContinuousQuality = (procIn >> QUALITY_BITS_SHIFT) & QUALITY_BITS_MASK;
       mTD.bUseAcquisitionObj = (procIn & CONTINUOUS_ACQUIS_OBJ) != 0;
       mTD.bSetContinuousMode = (procIn & CONTINUOUS_SET_MODE) != 0;
+      mTD.bK3RotFlipBug = (procIn & CONTIN_K3_ROTFLIP_BUG) != 0;
     }
   }
   if (!mTD.bDoContinuous && sContinuousArray) {
@@ -1146,8 +1149,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
       // Cancel the rotation/flip done by DM in GMS 2.3.1 rgardless of API
       if (mTD.iRotationFlip) {
-        sprintf(m_strTemp, "CM_SetAcqTranspose(acqParams, %d)\n", 
-          sInverseTranspose[mTD.iRotationFlip]);
+        sprintf(m_strTemp, "CM_SetTotalTranspose(camera, acqParams, 0)\n");
         mTD.strCommand += m_strTemp;
       }
     }
@@ -1639,10 +1641,9 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       CM::SetDoAcquireStack(acqParams, 1);  j++;
       CM::SetStackFormat(acqParams, CM::StackFormat::Series);  j++;
       CM::SetDoAsyncReadout(acqParams, td->bAsyncToRAM ? 1 : 0);   j++;
-      // Try this - it works in continuous mode
-      //CM::SetTotalTranspose(camera, acqParams, Imaging::Transpose2d::RotateNoneFlipNone);
-      i = sInverseTranspose[td->iRotationFlip];
-      CM::SetAcqTranspose(acqParams, (i & 1) != 0, (i & 2) != 0, (i & 256) != 0);
+
+      // Switched from setting inverse transpose to canceling it this way
+      CM::SetTotalTranspose(camera, acqParams, Imaging::Transpose2d::RotateNoneFlipNone);
       /*sprintf(td->strTemp, "Set corr %d  filt %s frame %f asyncRAM %d transp %d\n", 
         td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0,
         filter.c_str(), td->dFrameTime + 0.0001,td->bAsyncToRAM ? 1 : 0, i);
@@ -2625,13 +2626,13 @@ static int RunContinuousAcquire(ThreadData *td)
         if ((transpose + 1) / 2 == 129)
           transpose = 515 - transpose;
 
-        // Set the inverse transpose and look up needed rotation/flip
+        // Cancel the transpose and look up needed rotation/flip
         CM::SetTotalTranspose(camera, acqParams, zeroTrans2d);
-        //CM::SetAcqTranspose(acqParams, zeroTrans2d);
         for (rotationFlip = 0; rotationFlip < 8; rotationFlip++)
           if (sInverseTranspose[rotationFlip] == transpose)
             break;
-
+        if (td->K3type && td->bK3RotFlipBug && (rotationFlip == 5 || rotationFlip == 7))
+          rotationFlip = 12 - rotationFlip;
       }
       sprintf(td->strTemp, "Default transpose %d  rotationFlip %d\n", 
         transpose, rotationFlip);
