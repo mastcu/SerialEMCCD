@@ -321,6 +321,9 @@
     <TargetName Condition="'$(Configuration)|$(Platform)'=='GMS2-NOMP-64|x64'">SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS_MINOR_VERSION)-64</TargetName>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|Win32'">SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS_MINOR_VERSION)-32</TargetName>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='GMS3.31-64|x64'">
+    <IncludePath>$(BOOST_1_63-64);$(IncludePath)</IncludePath>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <CustomBuildStep>
       <Message>Performing registration</Message>
@@ -924,7 +927,7 @@ regsvr32 /s SerialEMCCDps.dll
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
-      <AdditionalIncludeDirectories>$(BOOST_1_38-64);$(GMS2-64_SDK)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(GMS2-64_SDK)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>GMS_MAJOR_VERSION=$(GMS_MAJOR_VERSION);GMS_MINOR_VERSION=$(GMS_MINOR_VERSION);NDEBUG;WIN32;GMS2;_DMSDK;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;DELAY_LOAD_FGPU;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
@@ -941,6 +944,7 @@ regsvr32 /s SerialEMCCDps.dll
       <CompileAs>Default</CompileAs>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <OpenMPSupport>true</OpenMPSupport>
+      <DisableSpecificWarnings>4275</DisableSpecificWarnings>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
