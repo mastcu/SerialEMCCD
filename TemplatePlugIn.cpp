@@ -2542,7 +2542,7 @@ static int RunContinuousAcquire(ThreadData *td)
   int j, transpose, nxout, nyout, maxTime = 0, retval = 0, rotationFlip = 0;
   int tleft, ttop, tbot, tright, width, height, finalWidth, finalHeight, boost;
   int tsizeX, tsizeY, tfullX, tfullY, totalBinning, coordBinning;
-  double delay, lastDoseTime;
+  double delay, lastDoseTime = GetTickCount();
   short *procOutArray = sContinuousArray;
   short *redOutArray;
   DM::Image image;
@@ -2747,10 +2747,13 @@ static int RunContinuousAcquire(ThreadData *td)
       sJ++;
 
       // Get the dose rate every second
-      if (K2type && td->iReadMode > 0 && TickInterval(lastDoseTime) > 900.) {
+      /*if (K2type && td->iReadMode > 0 && TickInterval(lastDoseTime) > 900.) {
+        j = 118;
+        CM::GetCameraManager()->GetCameraEnvironment()->WriteAcquisitionInfo(acqObj,
+          image, 1); j++;
         lastDoseTime = GetTickCount();
-        GetElectronDoseRate(td, image, td->dK2Exposure, binForDose);
-      }
+        GetElectronDoseRate(td, image, td->dK2Exposure, binForDose); j++;
+      }*/
 
       // Get data pointer and transfer the data
       imageLp = new GatanPlugIn::ImageDataLocker( image ); j++; sJ++;
