@@ -63,6 +63,7 @@ using namespace std ;
 #include "Shared\mrcfiles.h"
 #include "Shared\iimage.h"
 #include "Shared\b3dutil.h"
+#include "Shared\cfft.h"
 
 // Include and static instance for framealign
 #ifdef _WIN64
@@ -197,7 +198,8 @@ struct ThreadData
   string strLastDefectName;
   string strSaveExtension;
   bool bLastSaveHadDefects;
-
+  string strFrameTitle;
+  
   // New non-internal items
   int iNumFramesToSum;
   int iNumSummed;
@@ -347,6 +349,7 @@ static int ReduceImage(ThreadData *td, void *array, void *outArray, int type, in
 static void DebugPrintf(char *buffer, const char *format, ...);
 static void GetElectronDoseRate(ThreadData *td, DM::Image &image, double exposure, 
   float binning);
+static void AddTitleToHeader(MrcHeader *hdata, char *title);
 
 // Declarations of global functions called from here
 void TerminateModuleUninitializeCOM();
@@ -377,7 +380,7 @@ public:
   void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, long flags,
     double nSumAndGrab, double frameThresh, double dummy3, double dummy4, char *dirName, 
     char *rootName, char *refName, char *defects, char *command, char *sumList, 
-    long *error);
+    char *frameTitle, long *error);
   void GetFileSaveResult(long *numSaved, long *error);
   int GetDefectList(short xyPairs[], long *arrSize, long *numPoints, 
     long *numTotal);
@@ -456,6 +459,7 @@ private:
   BOOL m_bSaveFrames;
   string m_strPostSaveCom;
   string m_strDefectsToSave;
+  string m_strFrameTitle;
   string m_strBaseNameForMdoc;    // Stack name or dir name saved by SetupFileSaving
   int m_iGpuAvailable;
   bool m_bDefectsParsed;
@@ -774,6 +778,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   int saveFrames = NO_SAVE;
   int newProc, err, procIn, heightAdj, widthAdj, binAdj, scaleAdj, binWidth, binHeight;
   bool swapXY = mTD.iRotationFlip > 0 && mTD.iRotationFlip % 2 && m_bDoseFrac;
+  bool userKeepPrecision = mTD.bFaKeepPrecision && !mTD.bSaveTimes100;
   string errStr, aliHead;
 
   // Save incoming processing and strip the continuous flags
@@ -804,6 +809,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     sLastSaveFloatScaling = mTD.fFloatScaling / (divideBy2 ? 2.f : 1.f);
   mTD.bSaveTimes100 = saveFrames == SAVE_FRAMES && (mTD.iSaveFlags & K2_SAVE_TIMES_100)
     && !mTD.K3type;
+  if (saveFrames == SAVE_FRAMES)
+    mTD.strFrameTitle = m_strFrameTitle;
 
   if (mTD.bFaDoSubset && (mTD.bUseFrameAlign || mTD.bMakeAlignComFile) && 
     B3DMIN(mTD.iExpectedFrames, mTD.iFaSubsetEnd) + 1 - mTD.iFaSubsetStart < 2) {
@@ -818,11 +825,10 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   mTD.areFramesSuperRes = mTD.isSuperRes && !mTD.bTakeBinnedFrames;
 
   // Set flag to keep precision when indicated or when it has no cost, but not if frames
-  // are being saved times 100
-  mTD.bFaKeepPrecision = (!mTD.iNumGrabAndStack || (mTD.bFaKeepPrecision && 
-    !mTD.bSaveTimes100)) && 
-    mTD.bUseFrameAlign && sReadModes[mTD.iReadMode] != K2_LINEAR_READ_MODE && 
-    processing == GAIN_NORMALIZED && !mTD.K3type;
+  // are being saved times 100.  Copy this test to CameraController when it changes
+  mTD.bFaKeepPrecision = (!mTD.iNumGrabAndStack || userKeepPrecision) && !mTD.K3type && 
+    mTD.bUseFrameAlign && (!mTD.iFaGpuFlags || userKeepPrecision) &&
+    sReadModes[mTD.iReadMode] != K2_LINEAR_READ_MODE && processing == GAIN_NORMALIZED;
   m_bNextSaveResultsFromCopy = false;
 
   // Check validity of making a com file
@@ -1779,6 +1785,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             td->tempBuf = NULL;
             td->array = NULL;
           }
+
           delete imageLp;
           imageLp = NULL;
 
@@ -2747,13 +2754,14 @@ static int RunContinuousAcquire(ThreadData *td)
       sJ++;
 
       // Get the dose rate every second
-      /*if (K2type && td->iReadMode > 0 && TickInterval(lastDoseTime) > 900.) {
+#if GMS_SDK_VERSION >= 331
+      if (K2type && td->iReadMode > 0 && TickInterval(lastDoseTime) > 900.) {
         j = 118;
-        CM::GetCameraManager()->GetCameraEnvironment()->WriteAcquisitionInfo(acqObj,
-          image, 1); j++;
+        acqObj->Acquire_WriteInfo(image, 1); j++;
         lastDoseTime = GetTickCount();
         GetElectronDoseRate(td, image, td->dK2Exposure, binForDose); j++;
-      }*/
+      }
+#endif
 
       // Get data pointer and transfer the data
       imageLp = new GatanPlugIn::ImageDataLocker( image ); j++; sJ++;
@@ -3396,7 +3404,7 @@ static int InitializeFrameAlign(ThreadData *td)
     td->height, fullTaperFrac, taperFrac, 
     td->iFaAntialiasType, 0., radius2, sigma1, 
     sigma2, numFilters, td->iFaShiftLimit, kFactor, maxMaxWeight, 0, td->iExpectedFrames, 
-    td->iFaGpuFlags, B3DCHOICE(sDebug, B3DMAX(1, sEnvDebug), 0));
+    0, td->iFaGpuFlags, B3DCHOICE(sDebug, B3DMAX(1, sEnvDebug), 0));
   td->fFaRawDist = td->fFaSmoothDist = 0.;
   sTDwithFaResult = td;
   if (ind) {
@@ -3634,7 +3642,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
   unsigned short *usData;
   unsigned char *bData, *packed;
   unsigned char lowbyte;
-  string refName, refPath;
+  string refName, refPath, titles, line;
   bool needRef = sLastSaveNeededRef && sLastRefName.length();
   float numSample = 500000.;
   float sampleXtoYratio = 1.;
@@ -3709,17 +3717,29 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
       // Add lines for gain reference and defects and copy directly into the labels
       if (needRef) {
         sprintf(td->strTemp, "  %s", refName.c_str());
-        td->strTemp[MRC_LABEL_SIZE] = 0x00;
-        strcpy(td->hdata.labels[1], td->strTemp);
-        fixTitlePadding(td->hdata.labels[1]);
-        td->hdata.nlabl = 2;
+        AddTitleToHeader(&td->hdata, td->strTemp);
       }
       if (td->bLastSaveHadDefects) {
         sprintf(td->strTemp, "  %s", td->strLastDefectName.c_str());
-        td->strTemp[MRC_LABEL_SIZE] = 0x00;
-        strcpy(td->hdata.labels[td->hdata.nlabl], td->strTemp);
-        fixTitlePadding(td->hdata.labels[td->hdata.nlabl]);
-        td->hdata.nlabl++;
+        AddTitleToHeader(&td->hdata, td->strTemp);
+      }
+      if (td->strFrameTitle.length() > 0) {
+        titles = td->strFrameTitle;
+        while (titles.length() > 0) {
+          line = titles;
+          j = (int)line.find('\n');
+          if (j >= 0) {
+            line = titles.substr(0, j);
+            titles = titles.substr(j + 1, titles.length() - (j + 1));
+          } else
+            titles = "";
+          if (line.length() > 0) {
+            if (line.length() > MRC_LABEL_SIZE)
+              line.resize(MRC_LABEL_SIZE);
+            sprintf(td->strTemp, "%s", line.c_str());
+            AddTitleToHeader(&td->hdata, td->strTemp);
+          }
+        }
       }
     } else {
 
@@ -3729,6 +3749,12 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
       if (td->bLastSaveHadDefects)
         sprintf(&td->strTemp[strlen(td->strTemp)], "\n  %s", 
           td->strLastDefectName.c_str());
+      if (td->strFrameTitle.length() > 0) {
+        j = (int)(MAX_TEMP_STRING - (strlen(td->strTemp) + 8));
+        if (td->strFrameTitle.length() > j)
+          td->strFrameTitle.resize(j);
+        sprintf(&td->strTemp[strlen(td->strTemp)], "\n%s", td->strFrameTitle.c_str());
+      }
       tiffAddDescription(td->strTemp);
     }
 
@@ -3923,6 +3949,14 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
   AccumulateWallTime(saveWall, wallStart);
 #endif
   return 0;
+}
+
+static void AddTitleToHeader(MrcHeader *hdata, char *title)
+{
+  title[MRC_LABEL_SIZE] = 0x00;
+  strcpy(hdata->labels[hdata->nlabl], title);
+  fixTitlePadding(hdata->labels[hdata->nlabl]);
+  hdata->nlabl++;
 }
 
 /*
@@ -4972,7 +5006,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
                                      double frameThresh, double dummy3, double dummy4, 
                                      char *dirName, char *rootName, char *refName,
                                      char *defects, char *command, char *sumList, 
-                                     long *error)
+                                     char *frameTitle, long *error)
 {
   struct _stat statbuf;
   FILE *fp;
@@ -5013,6 +5047,10 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   }
   if (command && (flags & K2_RUN_COMMAND)) {
     if (CopyStringIfChanged(command, m_strPostSaveCom, dummy, error))
+      return;
+  }
+  if (frameTitle && (flags & K2_ADD_FRAME_TITLE)) {
+    if (CopyStringIfChanged(frameTitle, m_strFrameTitle, dummy, error))
       return;
   }
 
@@ -5327,12 +5365,12 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
 {
   string errStr;
   int newDefects = 0;
-  int gpuNum = gpuFlags / 65536;
+  int gpuNum = (gpuFlags >> GPU_NUMBER_SHIFT) & GPU_NUMBER_MASK;
   *error = 0;
 #ifdef _WIN64
   bool makingCom = (alignFlags & K2_MAKE_ALIGN_COM) != 0 && comName != NULL;
   float memory;
-  gpuFlags = gpuFlags & 65535;
+  gpuFlags = gpuFlags & ~(GPU_NUMBER_MASK << GPU_NUMBER_SHIFT);
   sprintf(m_strTemp, "SetupFrameAligning called with flags %x  gpuFlags %x  %s\n", 
     alignFlags, gpuFlags, comName ? comName : "");
   DebugToResult(m_strTemp);
@@ -6182,10 +6220,11 @@ void PlugInWrapper::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   char *defects = UnpackString((flags & K2_SAVE_DEFECTS) != 0, names, nextInd);
   char *command = UnpackString((flags & K2_RUN_COMMAND) != 0, names, nextInd);
   char *sumList = UnpackString((flags & K2_SAVE_SUMMED_FRAMES) != 0, names, nextInd);
+  char *frameTitle = UnpackString((flags & K2_ADD_FRAME_TITLE) != 0, names, nextInd);
   mLastRetVal = 0;
   gTemplatePlugIn.SetupFileSaving(rotationFlip, filePerImage, pixelSize, flags, 
     nSumAndGrab, frameThresh, dummy3, dummy4, cnames, &cnames[rootind], refName, defects, 
-    command, sumList, error);
+    command, sumList, frameTitle, error);
 }
 
 void PlugInWrapper::GetFileSaveResult(long *numSaved, long *error)

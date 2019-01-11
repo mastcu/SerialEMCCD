@@ -1210,7 +1210,7 @@ regsvr32 /s SerialEMCCDps.dll
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|Win32'">true</ExcludedFromBuild>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS2-NOMP-64|x64'">NotUsing</PrecompiledHeader>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">F77FUNCAP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='GMS2-NOMP-64|x64'">F77FUNCAP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">true</OpenMPSupport>
       <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='GMS2-NOMP-64|x64'">false</OpenMPSupport>

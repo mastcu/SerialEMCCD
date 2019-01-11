@@ -952,7 +952,7 @@ regsvr32 /s SerialEMCCDps.dll
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/force:unresolved /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>DMPlugInBasic.lib;Foundation.lib;Ws2_32.lib;libiimod-14-64.lib;libifft-FFTW3-14-64.lib;libcfshr-14-64.lib;libimxml-14-64.lib;libfftwf-3.3-14.lib;libtiff-14-64.lib;libjpeg-14-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>DMPlugInBasic.lib;Foundation.lib;Ws2_32.lib;libiimod-14-64.lib;libifft-FFTWdll-14-64.lib;libcfshr-14-64.lib;libimxml-14-64.lib;libfftw3f-3.lib;libtiff-14-64.lib;libjpeg-14-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>.\$(OutDir)SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS_MINOR_VERSION)-64.dll</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>..\SerialEMLibs;$(GMS2-64_SDK)\lib\x64\Release;$(GMS2-64_SDK)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -1387,8 +1387,8 @@ regsvr32 /s SerialEMCCDps.dll
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS3.31-64|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS2-NOMP-64|x64'">NotUsing</PrecompiledHeader>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">F77FUNCAP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='GMS3.31-64|x64'">F77FUNCAP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='GMS3.31-64|x64'">%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='GMS2-NOMP-64|x64'">F77FUNCAP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">true</OpenMPSupport>
       <OpenMPSupport Condition="'$(Configuration)|$(Platform)'=='GMS3.31-64|x64'">true</OpenMPSupport>
