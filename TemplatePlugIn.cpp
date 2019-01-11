@@ -5365,9 +5365,9 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
 {
   string errStr;
   int newDefects = 0;
-  int gpuNum = (gpuFlags >> GPU_NUMBER_SHIFT) & GPU_NUMBER_MASK;
   *error = 0;
 #ifdef _WIN64
+  int gpuNum = (gpuFlags >> GPU_NUMBER_SHIFT) & GPU_NUMBER_MASK;
   bool makingCom = (alignFlags & K2_MAKE_ALIGN_COM) != 0 && comName != NULL;
   float memory;
   gpuFlags = gpuFlags & ~(GPU_NUMBER_MASK << GPU_NUMBER_SHIFT);
