@@ -70,8 +70,10 @@ using namespace std ;
 #include "Shared\framealign.h"
 #include "Shared\CorrectDefects.h"
 #include "Shared\frameutil.h"
+#include "ShrMemClient.h"
 static FrameAlign sFrameAli;
 static CameraDefects sCamDefects;
+static ShrMemClient sShrMemAli;
 #else
 void CorDefUserToRotFlipCCD(int operation, int binning, int &camSizeX, int &camSizeY, 
   int &imSizeX, int &imSizeY, int &top, int &left, int &bottom, int &right) {};
@@ -143,6 +145,7 @@ static float sLastSaveFloatScaling;
 static bool sLastSaveNeededRef;
 static string sFrameMdocName;     // Mdoc name set by SaveFrameMdoc
 static string sMdocToSave;
+static string sStrDefectsToSave;
 static bool sThreadWorking = false;
 static double sLastDoseRate = 0.;
 static double sDeferredDoseRate = 0.;
@@ -256,6 +259,7 @@ struct ThreadData
   int iFaDataMode;
   bool bMakeDeferredSum;
   bool bCorrectDefects;
+  bool bFaUseShrMemFrame;
   bool bFaMakeEvenOdd;
   int iFaCamSizeX, iFaCamSizeY;
   int iFaAliBinning;
@@ -320,7 +324,6 @@ static void AccumulateWallTime(double &cumTime, double &wallStart);
 static void DeleteImageIfNeeded(ThreadData *td, DM::Image &image, bool *needsDelete);
 static void SetWatchedDataValue(int &member, int value);
 static int GetWatchedDataValue(int &member);
-static double TickInterval(double start);
 static int CopyK2ReferenceIfNeeded(ThreadData *td);
 static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &errStr);
 static int CheckK2ReferenceTime(ThreadData *td);
@@ -328,7 +331,6 @@ static void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
 static void ErrorToResult(const char *strMessage, const char *strPrefix = NULL);
 static void ProblemToResult(const char *strMessage);
 static void framePrintFunc(const char *strMessage);
-static BOOL SleepMsg(DWORD dwTime_ms);
 static double ExecuteScript(char *strScript);
 static int RunContinuousAcquire(ThreadData *td);
 static void SubareaAndAntialiasReduction(ThreadData *td, void *array, void *outArray,
@@ -384,7 +386,7 @@ public:
   void GetFileSaveResult(long *numSaved, long *error);
   int GetDefectList(short xyPairs[], long *arrSize, long *numPoints, 
     long *numTotal);
-  int IsGpuAvailable(long gpuNum, double *gpuMemory);
+  int IsGpuAvailable(long gpuNum, double *gpuMemory, bool shrMem);
   void SetupFrameAligning(long aliBinning, double rad2Filt1, 
     double rad2Filt2, double rad2Filt3, double sigma2Ratio, 
     double truncLimit, long alignFlags, long gpuFlags, long numAllVsAll, long groupSize, 
@@ -458,10 +460,11 @@ private:
   BOOL m_bDoseFrac;
   BOOL m_bSaveFrames;
   string m_strPostSaveCom;
-  string m_strDefectsToSave;
   string m_strFrameTitle;
   string m_strBaseNameForMdoc;    // Stack name or dir name saved by SetupFileSaving
   int m_iGpuAvailable;
+  int m_iProcessGpuOK;
+  int m_iPluginGpuOK;
   bool m_bDefectsParsed;
   bool m_bNextSaveResultsFromCopy;
 };
@@ -511,6 +514,8 @@ TemplatePlugIn::TemplatePlugIn()
   mTD.bUseFrameAlign = false;
   m_bDefectsParsed = false;
   m_iGpuAvailable = -1;
+  m_iPluginGpuOK = -1;
+  m_iProcessGpuOK = -1;
   mTD.iSaveFlags = 0;
   mTD.bFilePerImage = true;
   mTD.bWriteTiff = false;
@@ -1885,6 +1890,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           }
 
 #ifdef _WIN64
+
+          // IF dropping frames below threshold, now do the analysis of rapid mean
           if (stackSlice > 0 && (stackSlice < numSlices - 1 || !stackAllReady) && 
             (td->iSaveFlags & K2_SKIP_BELOW_THRESH) && td->fFrameThresh > 0.) {
             int imType, numSample = 2500, sampXstart, sampYstart, sampXuse, sampYuse;
@@ -1974,11 +1981,16 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             }
           }
 
+          // Set the output buffer for processing, go direct to the shared memory for
+          // frame alignment; this will be replaced if going to grab stack
+          procOut = td->tempBuf;
+          if (needProc && !alignBeforeProc && td->bUseFrameAlign && td->bFaUseShrMemFrame)
+            procOut = (short *)sShrMemAli.getFrameBuffer();
+          copiedToProc = false;
+
           // If grabbing frames at this point, allocate the frame, copy over if not proc
           // Don't worry about stackSlice / usedSlice: grabbing is forbidden with skipping
-          procOut = td->tempBuf;
-          copiedToProc = false;
-          grabInd = stackSlice - (numSlices - td->iNumGrabAndStack);
+           grabInd = stackSlice - (numSlices - td->iNumGrabAndStack);
           if (grabInd >= 0) {
             try {
               td->grabStack[grabInd] = new char[td->width * td->height * 
@@ -2244,8 +2256,12 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     }
   }
 #ifdef _WIN64
-  if (td->bUseFrameAlign)
-    sFrameAli.cleanup();
+  if (td->bUseFrameAlign) {
+    if (td->bFaUseShrMemFrame)
+      sShrMemAli.cleanup();
+    else
+      sFrameAli.cleanup();
+  }
 #endif
 
   delete unbinnedArray;
@@ -3024,7 +3040,7 @@ static void AccumulateWallTime(double &cumTime, double &wallStart)
 /*
  * Get millisecond interval from tick counts accounting for wraparound
  */
-static double TickInterval(double start)
+double TickInterval(double start)
 {
   double interval = GetTickCount() - start;
   if (interval < 0)
@@ -3398,13 +3414,21 @@ static int InitializeFrameAlign(ThreadData *td)
   for (ind = 0; ind < 4; ind++)
     sigma2[ind] = (float)(0.001 * B3DNINT(1000. * td->fFaSigmaRatio * radius2[ind]));
 
-  ind = sFrameAli.initialize(td->iFinalBinning, td->iFaAliBinning, trimFrac, 
-    td->iFaNumAllVsAll, td->iFaRefineIter, td->iFaHybridShifts, 
-    (td->iFaDeferGpuSum | td->iFaSmoothShifts) ? 1 : 0, td->iFaGroupSize, td->width, 
-    td->height, fullTaperFrac, taperFrac, 
-    td->iFaAntialiasType, 0., radius2, sigma1, 
-    sigma2, numFilters, td->iFaShiftLimit, kFactor, maxMaxWeight, 0, td->iExpectedFrames, 
-    0, td->iFaGpuFlags, B3DCHOICE(sDebug, B3DMAX(1, sEnvDebug), 0));
+  if (td->bFaUseShrMemFrame) {
+    ind = sShrMemAli.initialize(td->iFinalBinning, td->iFaAliBinning, trimFrac, 
+      td->iFaNumAllVsAll, td->iFaRefineIter, td->iFaHybridShifts, 
+      (td->iFaDeferGpuSum | td->iFaSmoothShifts) ? 1 : 0, td->iFaGroupSize, td->width, 
+      td->height, fullTaperFrac, taperFrac, td->iFaAntialiasType, 0., radius2, sigma1, 
+      sigma2, numFilters, td->iFaShiftLimit, kFactor, maxMaxWeight,0, td->iExpectedFrames, 
+      0, td->iFaGpuFlags, B3DCHOICE(sDebug, B3DMAX(1, sEnvDebug), 0));
+  } else {
+    ind = sFrameAli.initialize(td->iFinalBinning, td->iFaAliBinning, trimFrac, 
+      td->iFaNumAllVsAll, td->iFaRefineIter, td->iFaHybridShifts, 
+      (td->iFaDeferGpuSum | td->iFaSmoothShifts) ? 1 : 0, td->iFaGroupSize, td->width, 
+      td->height, fullTaperFrac, taperFrac, td->iFaAntialiasType, 0., radius2, sigma1, 
+      sigma2, numFilters, td->iFaShiftLimit, kFactor, maxMaxWeight,0, td->iExpectedFrames, 
+      0, td->iFaGpuFlags, B3DCHOICE(sDebug, B3DMAX(1, sEnvDebug), 0));
+  }
   td->fFaRawDist = td->fFaSmoothDist = 0.;
   sTDwithFaResult = td;
   if (ind) {
@@ -3439,11 +3463,19 @@ static int AlignOrSaveImage(ThreadData *td, short *outForRot, bool saveFrame,
   if (alignFrame && (!td->bFaDoSubset || 
     (slice + 1 >= td->iFaSubsetStart && slice + 1 <= td->iFaSubsetEnd))) {
     DebugToResult("Passing frame to nextFrame\n");
-    i = sFrameAli.nextFrame(td->outData, td->iFaDataMode, 
-      td->iK2Processing != NEWCM_GAIN_NORMALIZED ? sK2GainRefData[refInd] : NULL, 
-      sK2GainRefWidth[refInd], sK2GainRefHeight[refInd], NULL, 
-      td->fAlignScaling * td->fFaTruncLimit, td->bCorrectDefects ? &sCamDefects : NULL, 
-      td->iFaCamSizeX, td->iFaCamSizeY, 2 - refInd, 0., 0.);
+    if (td->bFaUseShrMemFrame) {
+      i = sShrMemAli.nextFrame(td->outData, td->iFaDataMode, 
+        td->iK2Processing != NEWCM_GAIN_NORMALIZED ? sK2GainRefData[refInd] : NULL, 
+        sK2GainRefWidth[refInd], sK2GainRefHeight[refInd], 
+        td->fAlignScaling * td->fFaTruncLimit, sStrDefectsToSave, 
+        td->bCorrectDefects ? td->iFaCamSizeX : 0, td->iFaCamSizeY, 2 - refInd, 0., 0.);
+    } else {
+      i = sFrameAli.nextFrame(td->outData, td->iFaDataMode, 
+        td->iK2Processing != NEWCM_GAIN_NORMALIZED ? sK2GainRefData[refInd] : NULL, 
+        sK2GainRefWidth[refInd], sK2GainRefHeight[refInd], NULL, 
+        td->fAlignScaling * td->fFaTruncLimit, td->bCorrectDefects ? &sCamDefects : NULL, 
+        td->iFaCamSizeX, td->iFaCamSizeY, 2 - refInd, 0., 0.);
+    }
     AccumulateWallTime(alignWall, wallStart);
     if (i) {
       td->iErrorFromSave = FRAMEALI_NEXT_FRAME;
@@ -3966,11 +3998,13 @@ static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice)
 {
 #ifdef _WIN64
   int err, bestFilt, nxOut, nyOut, ix, iy;
-  float resMean[5], smoothDist[5], rawDist[5], resSD[5], meanResMax[5];
-  float maxResMax[5], meanRawMax[5], maxRawMax[5], ringCorrs[26], frcDelta = 0.02f;
+  const int filtSize = 5, ringSize = 26;
+  float resMean[filtSize], smoothDist[filtSize], rawDist[filtSize], resSD[filtSize]; 
+  float meanResMax[filtSize], maxResMax[filtSize], meanRawMax[filtSize];
+  float maxRawMax[filtSize], ringCorrs[ringSize], frcDelta = 0.02f;
   float refSigma = (float)(0.001 * B3DNINT(1000. * td->fFaRefRadius2 * 
     td->fFaSigmaRatio));
-  float *aliSum = sFrameAli.getFullWorkArray();
+  float *aliSum;
   float *xShifts = new float [numSlice + 10];
   float *yShifts = new float [numSlice + 10];
   float finalScale;
@@ -3980,17 +4014,29 @@ static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice)
   // Get the final sum, which will have this size
   nxOut = td->width / td->iFinalBinning;
   nyOut = td->height / td->iFinalBinning;
-  err = sFrameAli.finishAlignAndSum(td->fFaRefRadius2, refSigma, td->fFaStopIterBelow,
-    td->iFaGroupRefine, td->iFaSmoothShifts, aliSum, xShifts, yShifts, xShifts, yShifts,
-    td->bFaMakeEvenOdd ? ringCorrs : NULL, frcDelta, bestFilt, smoothDist, rawDist,
-    resMean, resSD, meanResMax, maxResMax, meanRawMax, maxRawMax);
+  if (td->bFaUseShrMemFrame) {
+    err = sShrMemAli.finishAlignAndSum(nxOut, nyOut, filtSize, ringSize, 
+      td->fFaRefRadius2, refSigma, td->fFaStopIterBelow,
+      td->iFaGroupRefine, td->iFaSmoothShifts, &aliSum, xShifts, yShifts, xShifts, yShifts,
+      td->bFaMakeEvenOdd ? ringCorrs : NULL, frcDelta, bestFilt, smoothDist, rawDist,
+      resMean, resSD, meanResMax, maxResMax, meanRawMax, maxRawMax);
+  } else {
+    aliSum = sFrameAli.getFullWorkArray();
+    err = sFrameAli.finishAlignAndSum(td->fFaRefRadius2, refSigma, td->fFaStopIterBelow,
+      td->iFaGroupRefine, td->iFaSmoothShifts, aliSum, xShifts, yShifts, xShifts, yShifts,
+      td->bFaMakeEvenOdd ? ringCorrs : NULL, frcDelta, bestFilt, smoothDist, rawDist,
+      resMean, resSD, meanResMax, maxResMax, meanRawMax, maxRawMax);
+  }
   if (err) {
     sprintf(td->strTemp, "Framealign failed to finish alignment (error %d)\n", err);
     ErrorToResult(td->strTemp);
     td->iErrorFromSave = FRAMEALI_FINISH_ALIGN;
     delete [] xShifts;
     delete [] yShifts;
-    sFrameAli.cleanup();
+    if (td->bFaUseShrMemFrame)
+      sShrMemAli.cleanup();
+    else
+      sFrameAli.cleanup();
     return td->iErrorFromSave;
   }
 
@@ -4003,7 +4049,11 @@ static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice)
   td->fFaSmoothDist = smoothDist[bestFilt];
   sTDwithFaResult = td;
   if (td->bFaMakeEvenOdd) {
-    sFrameAli.analyzeFRCcrossings(ringCorrs, frcDelta, td->fFaCrossHalf, 
+    if (td->bFaUseShrMemFrame)
+      sShrMemAli.analyzeFRCcrossings(ringSize, ringCorrs, frcDelta, td->fFaCrossHalf, 
+        td->fFaCrossQuarter, td->fFaCrossEighth, td->fFaHalfNyq);
+    else
+      sFrameAli.analyzeFRCcrossings(ringCorrs, frcDelta, td->fFaCrossHalf, 
       td->fFaCrossQuarter, td->fFaCrossEighth, td->fFaHalfNyq);
   } else {
     td->fFaCrossHalf = td->fFaCrossQuarter = td->fFaCrossEighth = td->fFaHalfNyq = 0.;
@@ -4027,7 +4077,10 @@ static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice)
   }
   delete [] xShifts;
   delete [] yShifts;
-  sFrameAli.cleanup();
+  if (td->bFaUseShrMemFrame)
+    sShrMemAli.cleanup();
+  else
+    sFrameAli.cleanup();
 #endif
   return 0;
 }
@@ -4851,7 +4904,7 @@ static int CheckK2ReferenceTime(ThreadData *td)
  * sleeps for the given amount of time while pumping messages
  * returns TRUE if successful, FALSE otherwise
  */
-static BOOL SleepMsg(DWORD dwTime_ms)
+BOOL SleepMsg(DWORD dwTime_ms)
 {
   DWORD dwStart = GetTickCount();
   DWORD dwElapsed;
@@ -5040,7 +5093,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
       return;
   }
   if (defects && (flags & K2_SAVE_DEFECTS)) {
-    if (CopyStringIfChanged(defects, m_strDefectsToSave, newDefects, error))
+    if (CopyStringIfChanged(defects, sStrDefectsToSave, newDefects, error))
       return;
     if (newDefects)
       m_bDefectsParsed = false;
@@ -5163,12 +5216,12 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     
     // Extract or make up a filename
     string defectName;
-    if (m_strDefectsToSave[0] == '#') {
-      dummy = (int)m_strDefectsToSave.find('\n') - 1;
-      if (dummy > 0 && m_strDefectsToSave[dummy] == '\r')
+    if (sStrDefectsToSave[0] == '#') {
+      dummy = (int)sStrDefectsToSave.find('\n') - 1;
+      if (dummy > 0 && sStrDefectsToSave[dummy] == '\r')
         dummy--;
       if (dummy > 3 && dummy < MAX_TEMP_STRING - 3 - (int)topDir.length())
-        defectName = m_strDefectsToSave.substr(1, dummy);
+        defectName = sStrDefectsToSave.substr(1, dummy);
     }
 
     if (!defectName.length()) {
@@ -5180,8 +5233,8 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     // If the string is new, new directory, or the file doesn't exist, write the text
     if (newDefects || newDir || _stat(m_strTemp, &statbuf)) {
       errno = 0;
-      *error = WriteTextFile(m_strTemp, m_strDefectsToSave.c_str(), 
-        (int)m_strDefectsToSave.length(), OPEN_DEFECTS_ERROR, WRITE_DEFECTS_ERROR, false);
+      *error = WriteTextFile(m_strTemp, sStrDefectsToSave.c_str(), 
+        (int)sStrDefectsToSave.length(), OPEN_DEFECTS_ERROR, WRITE_DEFECTS_ERROR, false);
       mTD.strLastDefectName = defectName;
     }
   }
@@ -5339,16 +5392,22 @@ int TemplatePlugIn::GetDefectList(short xyPairs[], long *arrSize,
 }
 
 /*
- * Test if GPU is available and get memory
+ * Test if GPU is available and get memory. 
+ * Only test through shrmemframe if that is specifically requested or if local fails
  */
-int TemplatePlugIn::IsGpuAvailable(long gpuNum, double *gpuMemory)
+int TemplatePlugIn::IsGpuAvailable(long gpuNum, double *gpuMemory, bool shrMem)
 {
   int m_iGpuAvailable = 0;
   *gpuMemory = 0;
 #ifdef _WIN64
-  float memory;
-  m_iGpuAvailable = sFrameAli.gpuAvailable(gpuNum, &memory, sDebug);
-  *gpuMemory = m_iGpuAvailable ? memory : 0.;
+  float memory1 = 0., memory2 = 0.;
+  if (!shrMem)
+    m_iPluginGpuOK = sFrameAli.gpuAvailable(gpuNum, &memory1, sDebug);
+  if (shrMem || m_iPluginGpuOK <= 0)
+    m_iProcessGpuOK = sShrMemAli.gpuAvailable(gpuNum, &memory2, sDebug);
+  m_iGpuAvailable = B3DMAX(m_iProcessGpuOK, m_iPluginGpuOK);
+  if (m_iGpuAvailable)
+    *gpuMemory = B3DMAX(memory1, memory2);
 #endif
   return m_iGpuAvailable;
 }
@@ -5369,30 +5428,39 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
 #ifdef _WIN64
   int gpuNum = (gpuFlags >> GPU_NUMBER_SHIFT) & GPU_NUMBER_MASK;
   bool makingCom = (alignFlags & K2_MAKE_ALIGN_COM) != 0 && comName != NULL;
-  float memory;
+  double memory;
   gpuFlags = gpuFlags & ~(GPU_NUMBER_MASK << GPU_NUMBER_SHIFT);
   sprintf(m_strTemp, "SetupFrameAligning called with flags %x  gpuFlags %x  %s\n", 
     alignFlags, gpuFlags, comName ? comName : "");
   DebugToResult(m_strTemp);
   if (m_HAcquireThread)
     WaitForAcquireThread(WAIT_FOR_THREAD);
-  if (!makingCom) {
-    if (gpuFlags && m_iGpuAvailable < 0)
-      m_iGpuAvailable = sFrameAli.gpuAvailable(gpuNum, &memory, sDebug);
+  if (!makingCom && gpuFlags) {
+
+    // If GPU hasn't been tested yet, do so now, consulting shrmemframe only if local
+    // GPU fails.  Then if the flag to use shrmemframe is set and THAT isn't known yet,
+    // test again specifically for that
+    if (m_iGpuAvailable < 0)
+      m_iGpuAvailable = IsGpuAvailable(gpuNum, &memory, false);
+    if (m_iPluginGpuOK > 0 && m_iProcessGpuOK < 0 && (gpuFlags & GPU_RUN_SHRMEMFRAME))
+      IsGpuAvailable(gpuNum, &memory, true);
     if (gpuFlags && m_iGpuAvailable <= 0) {
       *error = NO_GPU_AVAILABLE;
       return;
     }
   }
+  // TEMP
+  mTD.bFaUseShrMemFrame = !makingCom && (!gpuFlags || !m_iPluginGpuOK ||
+    ((gpuFlags & GPU_RUN_SHRMEMFRAME) && m_iProcessGpuOK));
 
   // If correcting defects, see if the string has changed since last saved or parsed
   // and parse them if needed
   mTD.iFaCamSizeX = 0;
   if ((alignFlags & K2_SAVE_DEFECTS) && defects) {
-    if (CopyStringIfChanged(defects, m_strDefectsToSave, newDefects, error))
+    if (CopyStringIfChanged(defects, sStrDefectsToSave, newDefects, error))
       return;
     if (newDefects || !m_bDefectsParsed) {
-      if (CorDefParseDefects(m_strDefectsToSave.c_str(), 1, sCamDefects, mTD.iFaCamSizeX, 
+      if (CorDefParseDefects(sStrDefectsToSave.c_str(), 1, sCamDefects, mTD.iFaCamSizeX, 
         mTD.iFaCamSizeY)) {
           *error = DEFECT_PARSE_ERROR;
           return;
@@ -6242,7 +6310,7 @@ int PlugInWrapper::GetDefectList(short xyPairs[], long *arrSize, long *numPoints
 
 int PlugInWrapper::IsGpuAvailable(long gpuNum, double *gpuMemory)
 {
-  int retVal = gTemplatePlugIn.IsGpuAvailable(gpuNum, gpuMemory);
+  int retVal = gTemplatePlugIn.IsGpuAvailable(gpuNum, gpuMemory, false);
   mLastRetVal = 0;
   if (retVal < 0)
     mLastRetVal = retVal;

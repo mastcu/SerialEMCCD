@@ -788,7 +788,7 @@ regsvr32 /s SerialEMCCDps.dll
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/force:unresolved %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>DMPlugInBasic.lib;Foundation.lib;Ws2_32.lib;libiimod-64.lib;libifft-FFTW3-64.lib;libcfshr-64.lib;libimxml-64.lib;libfftwf-3.3.lib;libtiff-64.lib;libjpeg-64.lib;zlib-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>DMPlugInBasic.lib;Foundation.lib;Ws2_32.lib;libiimod-64.lib;libifft-64.lib;libcfshr-64.lib;libimxml-64.lib;libtiff-64.lib;libjpeg-64.lib;zlib-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>.\$(OutDir)SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS_MINOR_VERSION)-64.dll</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>..\SerialEMLibs;$(GMS2-64_SDK)\lib\x64\Release;$(GMS2-64_SDK)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -1220,10 +1220,7 @@ regsvr32 /s SerialEMCCDps.dll
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS2-NOMP-64|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="Shared\rotateflip.c">
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|Win32'">NotUsing</PrecompiledHeader>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">true</ExcludedFromBuild>
-    </ClCompile>
+    <ClCompile Include="ShrMemClient.cpp" />
     <ClCompile Include="SocketPathway.cpp">
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|x64'">WIN32;NDEBUG;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release MinDependency|x64'">WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY</PreprocessorDefinitions>
@@ -1427,6 +1424,7 @@ regsvr32 /s SerialEMCCDps.dll
     <ClInclude Include="Shared\CorrectDefects.h" />
     <ClInclude Include="Shared\framealign.h" />
     <ClInclude Include="Shared\frameutil.h" />
+    <ClInclude Include="ShrMemClient.h" />
     <ClInclude Include="StdAfx.h" />
     <ClInclude Include="TemplatePlugIn.h" />
   </ItemGroup>

@@ -10,6 +10,7 @@ syntax: glob
 *.ncb
 *.suo
 *sdf
+*db
 *.vcproj.*.user
 *.vcxproj.user
 *~
@@ -23,6 +24,7 @@ ReleaseMinDependency
 GMS2-64bit
 GMS2-32bit
 GMS2-NOMP-64
+GMS3.31-64
 SerialEMCCD.h
 SerialEMCCD.ncb
 SerialEMCCD.sln

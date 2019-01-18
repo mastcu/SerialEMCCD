@@ -33,6 +33,8 @@
 #define NEW_SELECT_SHUTTER_OK 371
 #define NEW_SETTLING_OK       371
 
+extern double TickInterval(double start);
+extern BOOL SleepMsg(DWORD dwTime_ms);
 
 class PlugInWrapper
 {

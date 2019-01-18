@@ -42,7 +42,7 @@
     <ClCompile Include="Shared\frameutil.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Shared\rotateflip.c">
+    <ClCompile Include="ShrMemClient.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -90,6 +90,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Shared\frameutil.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ShrMemClient.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
