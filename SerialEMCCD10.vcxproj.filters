@@ -45,6 +45,9 @@
     <ClCompile Include="ShrMemClient.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Shared\rotateflip.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="SerialEMCCD.def">

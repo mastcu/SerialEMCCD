@@ -1984,8 +1984,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           // Set the output buffer for processing, go direct to the shared memory for
           // frame alignment; this will be replaced if going to grab stack
           procOut = td->tempBuf;
+#ifdef _WIN64
           if (needProc && !alignBeforeProc && td->bUseFrameAlign && td->bFaUseShrMemFrame)
             procOut = (short *)sShrMemAli.getFrameBuffer();
+#endif
           copiedToProc = false;
 
           // If grabbing frames at this point, allocate the frame, copy over if not proc
