@@ -1405,7 +1405,9 @@ regsvr32 /s SerialEMCCDps.dll
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='GMS2-64bit|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='GMS3.31-64|x64'">true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="ShrMemClient.cpp" />
+    <ClCompile Include="ShrMemClient.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="SocketPathway.cpp">
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='GMS2-32bit|x64'">WIN32;NDEBUG;GMS2;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release MinDependency|x64'">WIN32;NDEBUG;_WINDOWS;_MBCS;_USRDLL;_ATL_STATIC_REGISTRY</PreprocessorDefinitions>

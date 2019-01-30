@@ -8,17 +8,17 @@ set INCLUDE=c:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\INCLUDE;c:\Pr
 set GMS_MINOR_VERSION=0
 set GMS_MAJOR_VERSION=2
 set GMS2-32_SDK=C:\Users\mast\Documents\Scope\DMSDKs\DMSDK%GMS_MAJOR_VERSION%.%GMS_MINOR_VERSION%-32
-msbuild /t:Rebuild /p:Configuration=GMS2-32bit /p:Platform=Win32 SerialEMCCD10.vcxproj
+msbuild /t:Rebuild /p:Configuration=GMS2-32bit /p:Platform=Win32 SerialEMCCD14.vcxproj
 if %errorlevel% neq 0 exit /b %errorlevel%
 
 set GMS_MINOR_VERSION=30
 set GMS2-32_SDK=C:\Users\mast\Documents\Scope\DMSDKs\DMSDK%GMS_MAJOR_VERSION%.%GMS_MINOR_VERSION%-32
-msbuild /t:Rebuild /p:Configuration=GMS2-32bit /p:Platform=Win32 SerialEMCCD10.vcxproj
+msbuild /t:Rebuild /p:Configuration=GMS2-32bit /p:Platform=Win32 SerialEMCCD14.vcxproj
 if %errorlevel% neq 0 exit /b %errorlevel%
 
 set GMS_MINOR_VERSION=31
 set GMS2-64_SDK=C:\Users\mast\Documents\Scope\DMSDKs\DMSDK%GMS_MAJOR_VERSION%.%GMS_MINOR_VERSION%-64
-msbuild /t:Rebuild /p:Configuration=GMS2-64bit /p:Platform=x64 SerialEMCCD10.vcxproj
+msbuild /t:Rebuild /p:Configuration=GMS2-64bit /p:Platform=x64 SerialEMCCD14.vcxproj
 if %errorlevel% neq 0 exit /b %errorlevel%
 
 Rem VS2015 build - reset the path and lib/include

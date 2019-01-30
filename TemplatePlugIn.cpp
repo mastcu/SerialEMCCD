@@ -115,6 +115,7 @@ static int sInverseTranspose[8] = {0, 258, 3, 257, 1, 256, 2, 259};
 // THE debug mode flag and an integer that came through environment variable
 static BOOL sDebug;
 static int sEnvDebug;
+static bool sSimulateSuperRes;
 
 static HANDLE sInstanceMutex;
 
@@ -184,6 +185,7 @@ struct ThreadData
   int iRight;
   int iTop;
   int iBottom;
+  BOOL bDoseFrac;
   string strCommand;
   char strTemp[MAX_TEMP_STRING];   // Give it its own temp string separate from class
   int iDSimageID;
@@ -315,7 +317,7 @@ static int GetTypeAndSizeInfo(ThreadData *td, DM::Image &image, int loop, int ou
                               bool doingStack);
 static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum, 
                             long &frameDivide, bool &needProc);
-static void SimulateSuperRes(ThreadData *td, void *image);
+static void SimulateSuperRes(ThreadData *td, void *image, double time);
 static int InitializeFrameAlign(ThreadData *td);
 static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice);
 static int WriteAlignComFile(ThreadData *td, string inputFile, bool ifMdoc);
@@ -457,7 +459,6 @@ private:
   double m_dFlyback;
   double m_dLineFreq;
   double m_dSyncMargin;
-  BOOL m_bDoseFrac;
   BOOL m_bSaveFrames;
   string m_strPostSaveCom;
   string m_strFrameTitle;
@@ -475,6 +476,7 @@ TemplatePlugIn::TemplatePlugIn()
   sEnvDebug = 0;
   if (sDebug)
     sEnvDebug = atoi(getenv("SERIALEMCCD_DEBUG"));
+  sSimulateSuperRes = getenv("SEMCCD_SIM_SUPERRES") != NULL;
 
   sDataMutexHandle = CreateMutex(0, 0, 0);
   sImageMutexHandle = CreateMutex(0, 0, 0);
@@ -509,9 +511,9 @@ TemplatePlugIn::TemplatePlugIn()
   mTD.fFloatScaling = 1.;
   mTD.fLinearOffset = 0.;
   mTD.iHardwareProc = 6;
-  m_bDoseFrac = false;
   m_bSaveFrames = false;
   mTD.bUseFrameAlign = false;
+  mTD.bDoseFrac = false;
   m_bDefectsParsed = false;
   m_iGpuAvailable = -1;
   m_iPluginGpuOK = -1;
@@ -782,7 +784,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 {
   int saveFrames = NO_SAVE;
   int newProc, err, procIn, heightAdj, widthAdj, binAdj, scaleAdj, binWidth, binHeight;
-  bool swapXY = mTD.iRotationFlip > 0 && mTD.iRotationFlip % 2 && m_bDoseFrac;
+  bool swapXY = mTD.iRotationFlip > 0 && mTD.iRotationFlip % 2 && mTD.bDoseFrac;
   bool userKeepPrecision = mTD.bFaKeepPrecision && !mTD.bSaveTimes100;
   string errStr, aliHead;
 
@@ -791,16 +793,16 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   processing &= 7;
 
   // Process flags to do with saving/aligning for consistency
-  if (m_bSaveFrames && mTD.iReadMode >= 0 && m_bDoseFrac && mTD.strSaveDir.length() && 
+  if (m_bSaveFrames && mTD.iReadMode >= 0 && mTD.bDoseFrac && mTD.strSaveDir.length() && 
     mTD.strRootName.length())
       saveFrames = SAVE_FRAMES;
   if (saveFrames == NO_SAVE) {
     mTD.bMakeAlignComFile = false;
     mTD.bFaDoSubset = false;
   }
-  if (!(mTD.iReadMode >= 0 && m_bDoseFrac))
+  if (!(mTD.iReadMode >= 0 && mTD.bDoseFrac))
     mTD.bUseFrameAlign = false;
-  if (m_bDoseFrac)
+  if (mTD.bDoseFrac)
     mTD.iExpectedFrames = B3DNINT(exposure / mTD.dFrameTime);
   if (mTD.iExpectedFrames < 2)
     mTD.bUseFrameAlign = false;
@@ -872,7 +874,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   }
 
   // Give up on an existing deferred sum for a new dose frac shot or starting continuous
-  if ((m_bDoseFrac || mTD.bDoContinuous) && (sDeferredSum || sValidDeferredSum)) {
+  if ((mTD.bDoseFrac || mTD.bDoContinuous) && (sDeferredSum || sValidDeferredSum)) {
     delete [] sDeferredSum;
     sDeferredSum = NULL;
     sValidDeferredSum = false;
@@ -1028,7 +1030,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   }
 
   // Compute linear offsets needed for frames and whole exposure
-  if (m_bDoseFrac)
+  if (mTD.bDoseFrac)
     mTD.fFrameOffset = (float)(mTD.fLinearOffset * mTD.dFrameTime);
   mTD.fLinearOffset = (float)(mTD.fLinearOffset * exposure);
 
@@ -1069,7 +1071,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       "(camera, %d, %g, %d, %d)\n", newProc, exposure + 0.0005, 
       mTD.bTakeBinnedFrames ? 2 : binning, mTD.bTakeBinnedFrames ? 2 : binning);
     mTD.strCommand += m_strTemp;
-    if (!m_bDoseFrac && !mTD.bMakeSubarea) {
+    if (!mTD.bDoseFrac && !mTD.bMakeSubarea) {
       sprintf(m_strTemp, "CM_SetBinnedReadArea(camera, acqParams, %d, %d, %d, %d)\n",
         top, left, bottom, right);
       mTD.strCommand += m_strTemp;
@@ -1122,10 +1124,10 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
         mTD.iReadMode ? sCMHardCorrs[mTD.iHardwareProc / 2] : 0);
       mTD.strCommand += m_strTemp;
     }
-    sprintf(m_strTemp, "CM_SetDoAcquireStack(acqParams, %d)\n", m_bDoseFrac ? 1 : 0);
+    sprintf(m_strTemp, "CM_SetDoAcquireStack(acqParams, %d)\n", mTD.bDoseFrac ? 1 : 0);
     mTD.strCommand += m_strTemp;
 
-    if (m_bDoseFrac) {
+    if (mTD.bDoseFrac) {
 
       if (mTD.bUseOldAPI) {
 
@@ -1168,7 +1170,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
       "Number wait_time_s\n%s"   // Validate for K3
       "CM_PrepareCameraForAcquire(manager, camera, acqParams, NULL, wait_time_s)\n"
-      "Sleep(wait_time_s)\n", sReadModes[mTD.iReadMode], mTD.K3type ?
+      "Sleep(wait_time_s)\n", sReadModes[mTD.iReadMode], 
+      (mTD.K3type || GMS_SDK_VERSION >= 330) ?
       "CM_Validate_AcquisitionParameters(camera, acqParams)\n" : "");
     mTD.strCommand += m_strTemp;
   }
@@ -1232,7 +1235,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
           "Image img := CM_AcquireImage(camera, acqParams)\n";
 //      "Image img := CM_CreateImageForAcquire(camera, acqParams, \"temp\")\n"
 //            "CM_AcquireDarkReference(camera, acqParams, img, NULL)\n";
-    } else if (mTD.iReadMode >= 0 && m_bDoseFrac && mTD.bUseOldAPI) {
+    } else if (mTD.iReadMode >= 0 && mTD.bDoseFrac && mTD.bUseOldAPI) {
       mTD.strCommand += "Image stack\n"
         "Image img := k2dfa.DoseFrac_AcquireImage(camera, acqParams, stack)\n"
         "K2_DoseFrac_SetFrameExposure(camera, savedFrameTime)\n";
@@ -1257,7 +1260,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     mTD.strCommand += m_strTemp;
   } else if (m_bSaveFrames) {
     sprintf(m_strTemp, "Save set but %d %d   %s   %s\n", mTD.iReadMode, 
-      m_bDoseFrac ? 1 : 0, mTD.strSaveDir.length() ? mTD.strSaveDir.c_str() : "NO DIR",
+      mTD.bDoseFrac ? 1 : 0, mTD.strSaveDir.length() ? mTD.strSaveDir.c_str() : "NO DIR",
       mTD.strRootName.length() ? mTD.strRootName.c_str() : "NO ROOT");
     DebugToResult(m_strTemp);
   }
@@ -1335,7 +1338,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   // shot, or until ready for acquisition for other shots
   if (m_HAcquireThread) {
     retval = WaitForAcquireThread(sContinuousArray ? WAIT_FOR_CONTINUOUS : (
-      m_bDoseFrac ? WAIT_FOR_THREAD : WAIT_FOR_NEW_SHOT));
+      mTD.bDoseFrac ? WAIT_FOR_THREAD : WAIT_FOR_NEW_SHOT));
     if (!SleepMsg(10))
       retval = 1;
   }
@@ -1774,6 +1777,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             DebugToResult(td->strTemp);
           }
           imageData = imageLp->get();   j++;
+          if (td->bDoseFrac)
+            SimulateSuperRes(td, imageData, td->dK2Exposure);
           if (td->bMakeDeferredSum) {
             td->array = td->tempBuf;
             if (!(td->iAntialias || td->bMakeSubarea))
@@ -1893,7 +1898,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
           // IF dropping frames below threshold, now do the analysis of rapid mean
           if (stackSlice > 0 && (stackSlice < numSlices - 1 || !stackAllReady) && 
-            (td->iSaveFlags & K2_SKIP_BELOW_THRESH) && td->fFrameThresh > 0.) {
+            td->saveFrames && (td->iSaveFlags & K2_SKIP_BELOW_THRESH) && 
+            td->fFrameThresh > 0.) {
             int imType, numSample = 2500, sampXstart, sampYstart, sampXuse, sampYuse;
             float sampMean = 2 * td->fFrameThresh, sampSD, fracSamp;
             unsigned char **imLinePtrs = makeLinePointers(imageData, td->width, 
@@ -1931,9 +1937,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
           // Get dose rate for the second passed frame when skipping, otherwise for
           // the first frame then replace it with the half-way frame
-          if ((td->iSaveFlags & K2_SKIP_BELOW_THRESH) && td->fFrameThresh > 0.) {
-            td->savedFrameList.push_back(stackSlice);
-            getDose = usedSlice == 1;
+          if (td->saveFrames && (td->iSaveFlags & K2_SKIP_BELOW_THRESH) && 
+            td->fFrameThresh > 0.) {
+              td->savedFrameList.push_back(stackSlice);
+              getDose = usedSlice == 1;
           } else {
             getDose = stackSlice == 0 || stackSlice == numSlices / 2;
           }
@@ -1942,7 +1949,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
 #endif
 
-          SimulateSuperRes(td, imageData);
+          SimulateSuperRes(td, imageData, td->dFrameTime);
           td->outData = (short *)imageData;
           outForRot = (short *)td->tempBuf;
 
@@ -1992,7 +1999,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
           // If grabbing frames at this point, allocate the frame, copy over if not proc
           // Don't worry about stackSlice / usedSlice: grabbing is forbidden with skipping
-           grabInd = stackSlice - (numSlices - td->iNumGrabAndStack);
+          grabInd = stackSlice - (numSlices - td->iNumGrabAndStack);
           if (grabInd >= 0) {
             try {
               td->grabStack[grabInd] = new char[td->width * td->height * 
@@ -2020,13 +2027,13 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           // needs scaling or conversion
           // It goes from the DM array into the passed or temp array or grab stack
           if (needProc && (!alignBeforeProc || td->saveFrames) && !copiedToProc) {
-            ProcessImage(imageData, procOut, 
+            ProcessImage(imageData, procOut,
               (td->K3type && td->byteSize == 1 && td->isUnsignedInt && frameDivide > 0) ?
               1 : td->dataSize, 
               td->width, td->height, frameDivide, transpose, td->byteSize, td->isInteger,
               td->isUnsignedInt, td->fFloatScaling, td->fFrameOffset, 
               (td->areFramesSuperRes ? 2 : 1) + (td->K3type ? 1 : 0));
-            td->outData = (short *)td->tempBuf;
+            td->outData = (short *)procOut;  // WAS td->tempBuf;
             outForRot = td->rotBuf;
           }
           AccumulateWallTime(procWall[1], wallStart);
@@ -2206,7 +2213,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
   // Save frame mdoc if one is set up
   WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
-  if (sMdocToSave.length() && sFrameMdocName.length()) {
+  if (saveFrames && sMdocToSave.length() && sFrameMdocName.length()) {
     if (td->iFramesSaved) {
       tmin = (int)sMdocToSave.find("NumSubFrames = ");
       if (tmin > 0) {
@@ -3140,7 +3147,7 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
   if (td->isSuperRes && td->isFloat && !td->bSaveTimes100)
     frameDivide = (td->bFaKeepPrecision && td->iNumGrabAndStack) ? -3 : -1;
 
-  // Multiply float scaling by 100 if tlat is set and they are floats
+  // Multiply float scaling by 100 if that is set and they are floats
   if (td->bSaveTimes100)
     td->fFloatScaling *= 100.f;
 
@@ -3149,7 +3156,7 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
   if (td->isCounting && td->isInteger) {
     td->fFloatScaling = 1.;
     frameDivide = 0;
-    if(td->iSaveFlags & K2_SAVE_RAW_PACKED)
+    if (td->saveFrames && (td->iSaveFlags & K2_SAVE_RAW_PACKED))
       frameDivide = -2;
   }
 
@@ -3172,8 +3179,8 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
     td->fileMode = MRC_MODE_SHORT;
   else
     td->fileMode = MRC_MODE_USHORT;
-  td->save4bit = (td->isSuperRes && ((!td->K3type && td->byteSize <= 2) || 
-    (td->K3type && !gainNormed && !td->bTakeBinnedFrames)) ||
+  td->save4bit = td->saveFrames && (td->isSuperRes && ((!td->K3type && td->byteSize <= 2)
+    || (td->K3type && !gainNormed && !td->bTakeBinnedFrames)) ||
     (((td->isCounting && td->isInteger) || 
     (td->K3type && !gainNormed && td->bTakeBinnedFrames)) && 
     (td->iSaveFlags & K2_RAW_COUNTING_4BIT)))
@@ -3195,14 +3202,17 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
   // Set the byte size for a grab stack if any
   td->iGrabByteSize = td->outByteSize;
   td->iFaDataMode = td->fileMode;
-  if (td->K3type && (td->bSaveSuperReduced || (td->bTakeBinnedFrames && gainNormed)))
+  if (td->K3type && (td->bSaveSuperReduced || (td->bTakeBinnedFrames && gainNormed))) {
     td->iFaDataMode = MRC_MODE_BYTE;
+    td->iGrabByteSize = 1;
+  }
   if (td->bFaKeepPrecision && !td->K3type) {
     td->iGrabByteSize = td->isCounting ? 4 : 2;
     td->iFaDataMode = MRC_MODE_FLOAT;
     if (td->isSuperRes && td->iNumGrabAndStack)
       td->iFaDataMode = MRC_MODE_USHORT;
-  }
+  } else if (!td->K3type && td->bSaveSuperReduced)
+    td->iFaDataMode = MRC_MODE_BYTE;
 
   if (td->bUseFrameAlign && InitializeFrameAlign(td))
     return 1;
@@ -3310,7 +3320,7 @@ static void GetElectronDoseRate(ThreadData *td, DM::Image &image, double exposur
  * Produces a simulated super-resolution frame if it is blank and the environment 
  * variable is set
  */
-static void SimulateSuperRes(ThreadData *td, void *image)
+static void SimulateSuperRes(ThreadData *td, void *image, double time)
 {
   float *fdata = (float *)image;
   unsigned char *bdata = (unsigned char *)image;
@@ -3319,9 +3329,9 @@ static void SimulateSuperRes(ThreadData *td, void *image)
   int ind, val, cumSum = 0, target;
   int numTest = 1000;
   const int numFill = 1000;
-  double mean = td->dFrameTime * 3.75 * 0.806;
+  double mean = time * 3.75 * 0.806;
 
-  if (td->isSuperRes && getenv("SEMCCD_SIM_SUPERRES") != NULL) {
+  if (td->isSuperRes && sSimulateSuperRes) {
     int newVals[numFill];
 
     // Check that there are a lot of 0's
@@ -3390,17 +3400,19 @@ static int InitializeFrameAlign(ThreadData *td)
 
   // Get the scaling that will be applied to the images being aligned
   if (td->bFaKeepPrecision)
-    td->fAlignScaling = B3DCHOICE(td->isSuperRes && td->iNumGrabAndStack, 
+    td->fAlignScaling = B3DCHOICE(td->isSuperRes && td->iNumGrabAndStack,
       SUPERRES_FRAME_SCALE * SUPERRES_PRESERVE_SCALE, 1.f);
-  else if (td->iNumGrabAndStack && td->isFloat && td->bSaveTimes100)
+  else if (td->isFloat && td->bSaveTimes100)
     td->fAlignScaling = td->fFloatScaling * divideScale;
   else if (td->iNumGrabAndStack && td->isFloat)
     td->fAlignScaling = B3DCHOICE(td->isSuperRes, 16.f, td->fSavedScaling * divideScale);
   else if (td->K3type)
     td->fAlignScaling = B3DCHOICE(td->iK2Processing == NEWCM_GAIN_NORMALIZED, divideScale,
       1.f);
+  else if (td->iK2Processing == NEWCM_GAIN_NORMALIZED)
+    td->fAlignScaling = B3DCHOICE(td->isSuperRes, 16.f, td->fFloatScaling * divideScale);
   else
-    td->fAlignScaling = 1.;
+    td->fAlignScaling = 1.f;
 
   // Set up filters
   if (!td->fFaRadius2[0])
@@ -3569,7 +3581,7 @@ static int SumFrameIfNeeded(ThreadData *td, bool finalFrame, bool &openForFirstS
 
     // Sum frame first if flag is set, and there is a count
   if (td->bSaveSummedFrames && td->outSumFrameIndex < (int)td->outSumFrameList.size()) {
-    if (td->numFramesInOutSum[td->outSumFrameIndex] > 1) {
+    if (td->numFramesInOutSum[td->outSumFrameIndex] > 1 || bytesPassedIn) {
 
       // If there is just one frame in this sum, just go on and use it,
       // Otherwise add frame to sum: zero sum first if it is the first one
@@ -4012,7 +4024,7 @@ static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice)
   float finalScale;
   finalScale = (float)(td->iFinalBinning * td->iFinalBinning * td->fFloatScaling * 
     B3DCHOICE(td->bGainNormSum, td->fGainNormScale, 1.f) / td->fAlignScaling);
-  
+
   // Get the final sum, which will have this size
   nxOut = td->width / td->iFinalBinning;
   nyOut = td->height / td->iFinalBinning;
@@ -4999,7 +5011,7 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
   }
   if (mode < 0) {
     m_bSaveFrames = false;
-    m_bDoseFrac = false;
+    mTD.bDoseFrac = false;
     mTD.bUseFrameAlign = false;
     mTD.bMakeDeferredSum = false;
   }
@@ -5021,7 +5033,7 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
   SetReadMode(mode, scaling);
   mTD.iHardwareProc = hardwareProc;
   B3DCLAMP(mTD.iHardwareProc, 0, 6);
-  m_bDoseFrac = doseFrac;
+  mTD.bDoseFrac = doseFrac;
   mTD.dFrameTime = frameTime;
 
   // Override the DM align option with framealign option
