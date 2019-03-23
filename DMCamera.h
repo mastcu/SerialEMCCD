@@ -42,8 +42,9 @@ public:
 	STDMETHOD(SetNoDMSettling)(/*[in]*/long camera);
 	STDMETHOD(SetShutterNormallyClosed)(/*[in]*/long camera, /*[in]*/long shutter);
 	STDMETHOD(GetDMCapabilities)(/*[out]*/BOOL *canSelectShutter, /*[out]*/BOOL *canSetSettling, /*[out]*/BOOL *openShutterWorks);
-	STDMETHOD(GetDMVersion)(/*[out]*/long *version);
-	STDMETHOD(InsertCamera)(/*[in]*/long camera, /*[in]*/BOOL state);
+  STDMETHOD(GetDMVersion)(/*[out]*/long *version);
+  STDMETHOD(GetDMVersionAndBuild)(/*[out]*/long *version, /*[out]*/long *build);
+  STDMETHOD(InsertCamera)(/*[in]*/long camera, /*[in]*/BOOL state);
 	STDMETHOD(IsCameraInserted)(/*[in]*/long camera, /*[out]*/BOOL *inserted);
 	STDMETHOD(GetNumberOfCameras)(/*[out]*/long *numCameras);
 	STDMETHOD(SelectCamera)(/*[in]*/long camera);

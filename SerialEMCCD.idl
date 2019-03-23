@@ -56,6 +56,7 @@ import "ocidl.idl";
 		[id(41), helpstring("method WaitUntilReady")] HRESULT WaitUntilReady([in]long which);
 		[id(42), helpstring("method GetLastDoseRate")] HRESULT GetLastDoseRate([out]double *doseRate);
 		[id(43), helpstring("method SaveFrameMdoc")] HRESULT SaveFrameMdoc([in]long size, [in, size_is(size)]long mdoc[], [in]long flags);
+    [id(44), helpstring("method GetDMVersionAndBuild")] HRESULT GetDMVersionAndBuild([out]long *version, [out]long *build);
 
     // Add new functions at the end.  Be sure to build 32 and 64-bit versions before
     // trying to run through COM from 64-bit, since both proxy-stubs are needed

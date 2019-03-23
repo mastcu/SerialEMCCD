@@ -422,10 +422,19 @@ STDMETHODIMP CDMCamera::InsertCamera(long camera, BOOL state)
 
 STDMETHODIMP CDMCamera::GetDMVersion(long *version)
 {
-	*version = gPlugInWrapper.GetDMVersion();
-	if (*version < 0)
-		return E_FAIL;
-	return S_OK;
+  long build;
+  *version = gPlugInWrapper.GetDMVersion(&build);
+  if (*version < 0)
+    return E_FAIL;
+  return S_OK;
+}
+
+STDMETHODIMP CDMCamera::GetDMVersionAndBuild(long *version, long *build)
+{
+  *version = gPlugInWrapper.GetDMVersion(build);
+  if (*version < 0)
+    return E_FAIL;
+  return S_OK;
 }
 
 STDMETHODIMP CDMCamera::GetPluginVersion(long *version)
@@ -456,7 +465,8 @@ STDMETHODIMP CDMCamera::WaitUntilReady(long which)
 STDMETHODIMP CDMCamera::GetDMCapabilities(BOOL *canSelectShutter, BOOL *canSetSettling,
 											BOOL *openShutterWorks)
 {
-	long version = gPlugInWrapper.GetDMVersion();
+  long build;
+	long version = gPlugInWrapper.GetDMVersion(&build);
 	if (version < 0)
 		return E_FAIL;
 	*canSelectShutter = version < OLD_SELECT_SHUTTER_BROKEN || 

@@ -116,6 +116,7 @@ static ArgDescriptor sFuncTable[] = {
   {GS_WaitUntilReady,       1, 0, 0,   0, 0, 0,   FALSE},
   {GS_GetLastDoseRate,      0, 0, 0,   0, 0, 1,   FALSE},
   {GS_SaveFrameMdoc,        2, 0, 0,   0, 0, 0,   TRUE},
+  {GS_GetDMVersionAndBuild, 0, 0, 0,   2, 0, 0,   FALSE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -496,6 +497,7 @@ static int ListenForHandshake(int superChunk)
 static int ProcessCommand(int numBytes)
 {
   int funcCode, ind, needed, version;
+  long build;
   short *imArray;
   struct __stat64 statbuf;
 
@@ -713,8 +715,13 @@ static int ProcessCommand(int numBytes)
       break;
 
     case GS_GetDMVersion:
-      sLongArgs[1] = gPlugInWrapper.GetDMVersion();
+      sLongArgs[1] = gPlugInWrapper.GetDMVersion(&build);
       SendArgsBack(sLongArgs[1] < 0 ? 1: 0);
+      break;
+
+    case GS_GetDMVersionAndBuild:
+      sLongArgs[1] = gPlugInWrapper.GetDMVersion(&sLongArgs[2]);
+      SendArgsBack(sLongArgs[1] < 0 ? 1 : 0);
       break;
 
     case GS_GetPluginVersion:
@@ -737,7 +744,7 @@ static int ProcessCommand(int numBytes)
       break;
 
     case GS_GetDMCapabilities:
-      version = gPlugInWrapper.GetDMVersion();
+      version = gPlugInWrapper.GetDMVersion(&build);
       if (version < 0) {
         SendArgsBack(1);
         break;
