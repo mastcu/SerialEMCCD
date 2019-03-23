@@ -41,7 +41,7 @@ class PlugInWrapper
 public:
 	void SetNoDMSettling(long camera);
 	int SetShutterNormallyClosed(long camera, long shutter);
-	long GetDMVersion();
+	long GetDMVersion(long *build);
   long GetPluginVersion() {return SEMCCD_PLUGIN_VERSION;};
 	int InsertCamera(long camera, BOOL state);
 	int IsCameraInserted(long camera);

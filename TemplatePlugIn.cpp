@@ -372,7 +372,7 @@ class TemplatePlugIn :  public Gatan::PlugIn::PlugInMain
 public:
   void SetNoDMSettling(long camera);
   int SetShutterNormallyClosed(long camera, long shutter);
-  long GetDMVersion();
+  long GetDMVersion(long *build);
   int InsertCamera(long camera, BOOL state);
   int IsCameraInserted(long camera);
   int GetNumberOfCameras();
@@ -558,6 +558,7 @@ void TemplatePlugIn::Start()
 void TemplatePlugIn::Run()
 {
   int socketRet, wsaError;
+  long build;
   char buff[80];
   static bool wasRun = false;
   if (wasRun)
@@ -575,7 +576,7 @@ void TemplatePlugIn::Run()
     DebugToResult("DllMain was never called when SerialEMCCD was loaded - trouble!\n");
     //PlugIn::gResultOut << "DllMain was never called - trouble!" << std::endl;
   }
-  if (GetDMVersion() < 0) {
+  if (GetDMVersion(&build) < 0) {
     sDebug = true;
     DebugToResult("SerialEMCCD: Error getting Digital Micrograph version\n");
   }
@@ -5693,9 +5694,10 @@ int TemplatePlugIn::InsertCamera(long camera, BOOL state)
  * HERE IS WHERE IT MATTERS HOW GMS_SDK_VERSION IS DEFINED
  * IT MUST BE 0, 1, 2, then 30, 31, etc above 2.
  */
-long TemplatePlugIn::GetDMVersion()
+long TemplatePlugIn::GetDMVersion(long *build)
 {
   unsigned int code;
+  *build = 0;
   mTD.strCommand.resize(0);
   if (m_bGMS2) {
     if (GMS_SDK_VERSION < 2) {
@@ -5705,7 +5707,7 @@ long TemplatePlugIn::GetDMVersion()
     }
     mTD.strCommand += "number major, minor, build\n"
           "GetApplicationVersion(major, minor, build)\n"
-          "Exit(10000 * major + minor)";
+          "Exit(100000 * (10000 * major + minor) + build)";
   } else {
     mTD.strCommand += "number version\n"
           "GetApplicationInfo(2, version)\n"
@@ -5714,14 +5716,16 @@ long TemplatePlugIn::GetDMVersion()
   double retval = ExecuteScript((char *)mTD.strCommand.c_str());
   if (retval == SCRIPT_ERROR_RETURN)
     return -1;
-  code = (unsigned int)(retval + 0.1);
   if (m_bGMS2) {
+    code = B3DNINT(retval / 100000.);
     int major = code / 10000;
     int minor = code % 10000;
+    *build = B3DNINT(retval - 100000. * code);
     m_iDMVersion = 10000 * (2 + major) + 100 * (minor / 10) + (minor % 10);
   } else {
 
     // They don't support the last digit
+    code = (unsigned int)(retval + 0.1);
     if ((code >> 24) < 4 && ((code >> 16) & 0xff) < 11)
       m_iDMVersion = 100 * (code >> 24) + 10 * ((code >> 16) & 0xff) + 
         ((code >> 8) & 0xff);
@@ -6405,9 +6409,9 @@ int PlugInWrapper::InsertCamera(long camera, BOOL state)
   return (mLastRetVal = gTemplatePlugIn.InsertCamera(camera, state));
 }
 
-long PlugInWrapper::GetDMVersion()
+long PlugInWrapper::GetDMVersion(long *build)
 {
-  int retVal = gTemplatePlugIn.GetDMVersion();
+  int retVal = gTemplatePlugIn.GetDMVersion(build);
   mLastRetVal = 0;
   if (retVal < 0)
     mLastRetVal = GENERAL_SCRIPT_ERROR;
