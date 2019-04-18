@@ -1778,6 +1778,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             DebugToResult(td->strTemp);
           }
           imageData = imageLp->get();   j++;
+          if (!imageData)
+            SET_ERROR(NULL_IMAGE);
           if (td->bDoseFrac)
             SimulateSuperRes(td, imageData, td->dK2Exposure);
           if (td->bMakeDeferredSum) {
@@ -1893,6 +1895,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             imageData = fData.get_data();   j++;
           } else {
             imageData = imageLp->get();   j++;
+          }
+          if (!imageData) {
+            errorRet = td->iErrorFromSave = NULL_IMAGE;
+            break;
           }
 
 #ifdef _WIN64
@@ -3301,19 +3307,24 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
 
 /*
  * Gets the dose per pixel from the DM if it supports it, then convert that to a dose
- * rate per unbinned pixel
+ * rate per unbinned pixel.  An exception silently gives a zero dose rate
  */
 static void GetElectronDoseRate(ThreadData *td, DM::Image &image, double exposure, 
   float binning)
 {
   sLastDoseRate = 0.;
 #if GMS_SDK_VERSION >= 331
-  double dose = CM::GetElectronDosePerPixel(image.get());
-  DebugPrintf(td->strTemp, "dose from DM %.3f   exp %.3f  bin %.1f\n", dose, exposure, binning);
-  dose /= (exposure * binning * binning);
-  sLastDoseRate = dose;
-  if (td->bMakeDeferredSum)
-    sDeferredDoseRate = dose;
+  try {
+    double dose = CM::GetElectronDosePerPixel(image.get());
+    DebugPrintf(td->strTemp, "dose from DM %.3f   exp %.3f  bin %.1f\n", dose, exposure, 
+      binning);
+    dose /= (exposure * binning * binning);
+    sLastDoseRate = dose;
+    if (td->bMakeDeferredSum)
+      sDeferredDoseRate = dose;
+  }
+  catch (exception exc) {
+  }
 #endif
 }
 
