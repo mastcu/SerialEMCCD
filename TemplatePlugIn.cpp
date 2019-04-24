@@ -1558,8 +1558,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   // The binning for dose rate: take binning literally except in super-res mode where it
   // is 0.5, but could be 1 with binned frames
   binForDose = (float)td->iK2Binning;
-  if (sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE || 
-    sReadModes[td->iReadMode] == K3_SUPER_COUNT_READ_MODE)
+  if (td->iReadMode >= 0 && (sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE ||
+    sReadModes[td->iReadMode] == K3_SUPER_COUNT_READ_MODE))
     binForDose = 0.5f;
   if (td->bTakeBinnedFrames)
     binForDose *= 2.f;
@@ -2339,6 +2339,7 @@ static int ReduceImage(ThreadData *td, void *array, void *outArray, int type, in
   unsigned short *usOut = (unsigned short *)outArray;
   short *sOut = (short *)outArray;
   double filtScale = 1. / binning;
+
   sprintf(td->strTemp, "AntialiasReduction from %d x %d bin %d to %d x %d\n",
     width, height, binning, redWidth, redHeight);
   DebugToResult(td->strTemp);
@@ -2605,8 +2606,8 @@ static int RunContinuousAcquire(ThreadData *td)
 #endif
   void *imageData;
   float binForDose = (float)td->iK2Binning;
-  if (sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE || 
-    sReadModes[td->iReadMode] == K3_SUPER_COUNT_READ_MODE)
+  if (K2type && (sReadModes[td->iReadMode] == K2_SUPERRES_READ_MODE ||
+    sReadModes[td->iReadMode] == K3_SUPER_COUNT_READ_MODE))
     binForDose *= 0.5f;
   sLastDoseRate = 0.;
 
