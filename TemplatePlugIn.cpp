@@ -243,6 +243,7 @@ struct ThreadData
   bool bSaveSuperReduced;
   bool bMakeSubarea;
   bool bTakeBinnedFrames;
+  bool bUseCorrDblSamp;
   vector<short> outSumFrameList;
   vector<short> numFramesInOutSum;
   vector<int> savedFrameList;
@@ -447,6 +448,7 @@ private:
   HANDLE m_HAcquireThread;
   BOOL m_bGMS2;
   int m_iDMVersion;
+  int m_iDMBuild;
   int m_iCurrentCamera;
   int m_iDMSettlingOK[MAX_CAMERAS];
   string m_strQueue;
@@ -487,6 +489,7 @@ TemplatePlugIn::TemplatePlugIn()
 #endif
   m_HAcquireThread = NULL;
   m_iDMVersion = 340;
+  m_iDMBuild = 0;
   m_iCurrentCamera = 0;
   m_strQueue.resize(0);
   for (int i = 0; i < MAX_CAMERAS; i++)
@@ -831,6 +834,9 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
   mTD.bTakeBinnedFrames = mTD.bTakeBinnedFrames && mTD.K3type && mTD.isSuperRes;
   mTD.areFramesSuperRes = mTD.isSuperRes && !mTD.bTakeBinnedFrames;
+  mTD.bUseCorrDblSamp = mTD.bUseCorrDblSamp && mTD.K3type && 
+    ((m_iDMVersion == DM_VERSION_WITH_CDS && m_iDMBuild >= DM_BUILD_WITH_CDS) || 
+      m_iDMVersion > DM_VERSION_WITH_CDS);
 
   // Set flag to keep precision when indicated or when it has no cost, but not if frames
   // are being saved times 100.  Copy this test to CameraController when it changes
@@ -1171,7 +1177,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
       "Number wait_time_s\n%s"   // Validate for K3
       "CM_PrepareCameraForAcquire(manager, camera, acqParams, NULL, wait_time_s)\n"
-      "Sleep(wait_time_s)\n", sReadModes[mTD.iReadMode], 
+      "Sleep(wait_time_s)\n", sReadModes[mTD.iReadMode] + (mTD.bUseCorrDblSamp ? 2 : 0), 
       (mTD.K3type || GMS_SDK_VERSION >= 330) ?
       "CM_Validate_AcquisitionParameters(camera, acqParams)\n" : "");
     mTD.strCommand += m_strTemp;
@@ -1667,7 +1673,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       j = 10;
       CM::SetSettling(acqParams, td->dK2Settling);  j++;
       CM::SetShutterIndex(acqParams, td->iK2Shutter);  j++;
-      CM::SetReadMode(acqParams, sReadModes[td->iReadMode]);  j++;
+      CM::SetReadMode(acqParams, sReadModes[td->iReadMode] + 
+        (td->bUseCorrDblSamp ? 2 : 0));  j++;
       /*sprintf(td->strTemp, "Set settle %f  shutter %d mode %d\n", 
         td->dK2Settling, td->iK2Shutter, sReadModes[td->iReadMode]);
       DebugToResult(td->strTemp);*/
@@ -3309,7 +3316,7 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
  * Gets the dose per pixel from the DM if it supports it, then convert that to a dose
  * rate per unbinned pixel.  An exception silently gives a zero dose rate
  */
-static void GetElectronDoseRate(ThreadData *td, DM::Image &image, double exposure, 
+static void GetElectronDoseRate(ThreadData *td, DM::Image &image, double exposure,
   float binning)
 {
   sLastDoseRate = 0.;
@@ -4782,7 +4789,7 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   HANDLE hFindCopy;
   string saveDir = td->strSaveDir;
   string rootName = td->strRootName;
-  string errStr;
+  string errStr, prefStr;
   char *prefix[2] = {"Count", "Super"};
   char *extension[2] = {"dm4", "mrc"};
   int ind, retVal = 0;
@@ -4790,6 +4797,9 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   double maxCopySec = 0.;
   int prefInd = (td->isSuperRes && !td->bTakeBinnedFrames) ? 1 : 0;
   int extInd = td->bTakeBinnedFrames ? 1 : 0;
+  prefStr = prefix[prefInd];
+  if (td->bUseCorrDblSamp)
+    prefStr += "CDS";
 
   // For single image files, find the date-time root and split up the name
   if (td->bFilePerImage) {
@@ -4807,16 +4817,16 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
 
   // If there is an existing copy and the mode and the directory match, find the copy
   // Otherwise look for all matching files in directory
-  if (sLastRefName.length() && strstr(sLastRefName.c_str(), prefix[prefInd])
+  if (sLastRefName.length() && strstr(sLastRefName.c_str(), (prefStr + "Ref").c_str())
     && !sLastRefDir.compare(saveDir)) {
     //sprintf(td->strTemp, "Finding %s\n", sLastRefName.c_str());
     hFindCopy = FindFirstFile(sLastRefName.c_str(), &findCopyData);
     namesOK = true;
   } else {
-    sprintf(td->strTemp, "%s\\%sRef_*.%s", saveDir.c_str(), prefix[prefInd], 
+    sprintf(td->strTemp, "%s\\%sRef_*.%s", saveDir.c_str(), prefStr.c_str(),
       extension[extInd]);
     hFindCopy = FindFirstFile(td->strTemp, &findCopyData);
-    //sprintf(td->strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefix[prefInd]);
+    //sprintf(td->strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefStr.c_str());
   }
   //DebugToResult(td->strTemp);
 
@@ -4852,7 +4862,7 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
     sLastRefName += findCopyData.cFileName;
     return 0;
   }
-  sprintf(td->strTemp, "%s\\%sRef_%s.%s", saveDir.c_str(), prefix[prefInd],
+  sprintf(td->strTemp, "%s\\%sRef_%s.%s", saveDir.c_str(), prefStr.c_str(),
     rootName.c_str(), extension[extInd]);
   sLastRefName = td->strTemp;
 
@@ -5063,6 +5073,7 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
   }
   m_bSaveFrames = saveFrames;
   mTD.iAntialias = flags & K2_ANTIALIAS_MASK;
+  mTD.bUseCorrDblSamp = (flags & K3_USE_CORR_DBL_SAMP) != 0;
   if (mTD.iAntialias || mTD.bUseFrameAlign) {
     mTD.iFinalHeight = B3DNINT(reducedSizes / K2_REDUCED_Y_SCALE);
     mTD.iFinalWidth = B3DNINT(reducedSizes - K2_REDUCED_Y_SCALE * mTD.iFinalHeight);
@@ -5731,7 +5742,8 @@ long TemplatePlugIn::GetDMVersion(long *build)
     code = B3DNINT(retval / 100000.);
     int major = code / 10000;
     int minor = code % 10000;
-    *build = B3DNINT(retval - 100000. * code);
+    m_iDMBuild = B3DNINT(retval - 100000. * code);
+    *build = m_iDMBuild;
     m_iDMVersion = 10000 * (2 + major) + 100 * (minor / 10) + (minor % 10);
   } else {
 
