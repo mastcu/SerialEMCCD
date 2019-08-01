@@ -4873,7 +4873,7 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
       DebugToResult(td->strTemp);
       mrc_head_new(&hdata, sK2GainRefWidth[0], sK2GainRefHeight[0], 1, MRC_MODE_FLOAT);
       hdata.yInverted = 1;
-      mrc_head_label(&hdata, "SerialEMCCD: Generated K3 binned gain reference");
+      mrc_head_label(&hdata, "SerialEMCCD: Generated K3 binned  reference oriented OK");
       if (mrc_head_write(fp, &hdata)) {
         errStr = "Error writing header to binned gain reference: " + 
           string(b3dGetError());
