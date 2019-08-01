@@ -2732,7 +2732,8 @@ static int RunContinuousAcquire(ThreadData *td)
       if (!td->K3type)
         CM::SetHardwareCorrections(acqParams, CM::CCD::Corrections::from_bits(
           td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0));
-      CM::SetReadMode(acqParams, sReadModes[td->iReadMode]);
+      CM::SetReadMode(acqParams, sReadModes[td->iReadMode] + 
+        (td->bUseCorrDblSamp ? 2 : 0));
       j++;
       if (td->K3type) {
 #if GMS_SDK_VERSION >= 300
@@ -4876,14 +4877,14 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
       fp = fopen(sLastRefName.c_str(), "wb");
       if (!fp)
         errStr = "Could not open file " + sLastRefName + "for binned gain reference";
-    }
+    } 
     if (!errStr.length()) {
       sprintf(td->strTemp, "Writing file with binned gain reference: refSec  %f  "
         "maxCopySec %f\n", td->curRefTime, maxCopySec);
       DebugToResult(td->strTemp);
       mrc_head_new(&hdata, sK2GainRefWidth[0], sK2GainRefHeight[0], 1, MRC_MODE_FLOAT);
       hdata.yInverted = 1;
-      mrc_head_label(&hdata, "SerialEMCCD: Generated K3 binned gain reference");
+      mrc_head_label(&hdata, "SerialEMCCD: Generated K3 binned reference oriented OK");
       if (mrc_head_write(fp, &hdata)) {
         errStr = "Error writing header to binned gain reference: " + 
           string(b3dGetError());
