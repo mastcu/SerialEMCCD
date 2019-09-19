@@ -164,6 +164,8 @@ STDMETHODIMP CDMCamera::SelectCamera(long camera)
 // Set the read mode and the scaling factor
 // For K2, pass 0, 1, or 2 for linear, counting, super-res
 // For K3, pass 3 or 4 for linear or super-res: this is THE signal that it is a K3
+// For camera not needing read mode, pass -1
+// For OneView, pass -3 for regular imaging or -2 for diffraction
 // For K3, the offset to be subtracted for linear mode must be supplied with the scaling.
 // The offset is supposed to be 8192 per frame
 // The offset per ms is thus nominally (8192 per frame) / (1.502 frames per ms)

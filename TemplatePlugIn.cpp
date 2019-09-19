@@ -280,6 +280,7 @@ struct ThreadData
   bool bFaDoSubset;
   int iFaSubsetStart, iFaSubsetEnd;
   bool K3type;
+  bool OneViewType;
   float fFrameThresh;
   
   // Items needed internally in save routine and its functions
@@ -511,6 +512,7 @@ TemplatePlugIn::TemplatePlugIn()
   m_dSyncMargin = 10.;
   mTD.iReadMode = -1;
   mTD.K3type = false;
+  mTD.OneViewType = false;
   mTD.fFloatScaling = 1.;
   mTD.fLinearOffset = 0.;
   mTD.iHardwareProc = 6;
@@ -791,20 +793,21 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   bool swapXY = mTD.iRotationFlip > 0 && mTD.iRotationFlip % 2 && mTD.bDoseFrac;
   bool userKeepPrecision = mTD.bFaKeepPrecision && !mTD.bSaveTimes100;
   string errStr, aliHead;
+  bool frameCapable = mTD.iReadMode >= 0 || (mTD.OneViewType && mTD.bDoseFrac);
 
   // Save incoming processing and strip the continuous flags
   procIn = processing;
   processing &= 7;
 
   // Process flags to do with saving/aligning for consistency
-  if (m_bSaveFrames && mTD.iReadMode >= 0 && mTD.bDoseFrac && mTD.strSaveDir.length() && 
+  if (m_bSaveFrames && frameCapable && mTD.bDoseFrac && mTD.strSaveDir.length() && 
     mTD.strRootName.length())
       saveFrames = SAVE_FRAMES;
   if (saveFrames == NO_SAVE) {
     mTD.bMakeAlignComFile = false;
     mTD.bFaDoSubset = false;
   }
-  if (!(mTD.iReadMode >= 0 && mTD.bDoseFrac))
+  if (!(frameCapable && mTD.bDoseFrac))
     mTD.bUseFrameAlign = false;
   if (mTD.bDoseFrac)
     mTD.iExpectedFrames = B3DNINT(exposure / mTD.dFrameTime);
@@ -841,7 +844,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   // Set flag to keep precision when indicated or when it has no cost, but not if frames
   // are being saved times 100.  Copy this test to CameraController when it changes
   mTD.bFaKeepPrecision = (!mTD.iNumGrabAndStack || userKeepPrecision) && !mTD.K3type && 
-    mTD.bUseFrameAlign && (!mTD.iFaGpuFlags || userKeepPrecision) &&
+    !mTD.OneViewType && mTD.bUseFrameAlign && (!mTD.iFaGpuFlags || userKeepPrecision) &&
     sReadModes[mTD.iReadMode] != K2_LINEAR_READ_MODE && processing == GAIN_NORMALIZED;
   m_bNextSaveResultsFromCopy = false;
 
@@ -1122,11 +1125,11 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     mTD.strCommand += m_strTemp;
   }
 
-  // Commands for K2 camera
-  if (mTD.iReadMode >= 0) {
-    if (mTD.K3type) {
+  // Commands for K2 camera or Oneview saving frames
+  if (frameCapable) {
+    if (mTD.K3type || mTD.OneViewType)
       mTD.strCommand += "CM_SetExposurePrecedence(acqParams, 0)\n";
-    } else {
+    if (!mTD.K3type && !mTD.OneViewType) {
       sprintf(m_strTemp, "CM_SetHardwareCorrections(acqParams, %d)\n",
         mTD.iReadMode ? sCMHardCorrs[mTD.iHardwareProc / 2] : 0);
       mTD.strCommand += m_strTemp;
@@ -1159,12 +1162,15 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       } else {
 
         // NEW API
-        sprintf(m_strTemp, "CM_SetAlignmentFilter(acqParams, \"%s\")\n"
-          "CM_SetFrameExposure(acqParams, %f)\n"
-          "CM_SetStackFormat(acqParams, %d)\n",
-          mTD.bAlignFrames ? mTD.strFilterName : "", mTD.dFrameTime,
+        if (!mTD.OneViewType) {
+          sprintf(m_strTemp, "CM_SetAlignmentFilter(acqParams, \"%s\")\n",
+            mTD.bAlignFrames ? mTD.strFilterName : "");
+          mTD.strCommand += m_strTemp;
+        }
+        sprintf(m_strTemp, "CM_SetFrameExposure(acqParams, %f)\n"
+          "CM_SetStackFormat(acqParams, %d)\n", mTD.dFrameTime,
           saveFrames == SAVE_FRAMES ? 0 : 1);
-        mTD.strCommand += m_strTemp;
+          mTD.strCommand += m_strTemp;
       }
 
       // Cancel the rotation/flip done by DM in GMS 2.3.1 rgardless of API
@@ -1177,14 +1183,15 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
       "Number wait_time_s\n%s"   // Validate for K3
       "CM_PrepareCameraForAcquire(manager, camera, acqParams, NULL, wait_time_s)\n"
-      "Sleep(wait_time_s)\n", sReadModes[mTD.iReadMode] + (mTD.bUseCorrDblSamp ? 2 : 0), 
-      (mTD.K3type || GMS_SDK_VERSION >= 330) ?
+      "Sleep(wait_time_s)\n", B3DCHOICE(mTD.OneViewType, 3 + mTD.iReadMode,
+      sReadModes[mTD.iReadMode] + (mTD.bUseCorrDblSamp ? 2 : 0)),
+        (mTD.K3type || GMS_SDK_VERSION >= 330 || mTD.OneViewType) ?
       "CM_Validate_AcquisitionParameters(camera, acqParams)\n" : "");
     mTD.strCommand += m_strTemp;
-  }
 
-  // A read mode of -3 or -2 means set mode 0 for regular or 1 for diffraction
-  if (mTD.iReadMode == -2 || mTD.iReadMode == -3) {
+  } else if (mTD.iReadMode == -2 || mTD.iReadMode == -3) {
+
+    // A read mode of -3 or -2 means set mode 0 for regular or 1 for diffraction
     sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
       "CM_Validate_AcquisitionParameters(camera, acqParams)\n", 3 + mTD.iReadMode);
     mTD.strCommand += m_strTemp;
@@ -1651,13 +1658,15 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0)); j++;
       } 
 #if GMS_SDK_VERSION >= 300
-      if (td->K3type) {
+      if (td->K3type || td->OneViewType) {
         CM::SetExposurePrecedence(acqParams, 
           Gatan::Camera::ExposurePrecedence::FRAME_EXPOSURE);
         j++;
       }
 #endif
-      CM::SetAlignmentFilter(acqParams, filter);  j++;
+      if (!td->OneViewType)
+        CM::SetAlignmentFilter(acqParams, filter); 
+      j++;
       CM::SetFrameExposure(acqParams, td->dFrameTime + 0.0001);  j++;
       CM::SetDoAcquireStack(acqParams, 1);  j++;
       CM::SetStackFormat(acqParams, CM::StackFormat::Series);  j++;
@@ -1673,8 +1682,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       j = 10;
       CM::SetSettling(acqParams, td->dK2Settling);  j++;
       CM::SetShutterIndex(acqParams, td->iK2Shutter);  j++;
-      CM::SetReadMode(acqParams, sReadModes[td->iReadMode] + 
-        (td->bUseCorrDblSamp ? 2 : 0));  j++;
+      CM::SetReadMode(acqParams, B3DCHOICE(td->OneViewType, 3 + td->iReadMode,
+        sReadModes[td->iReadMode] + (td->bUseCorrDblSamp ? 2 : 0)));  j++;
       /*sprintf(td->strTemp, "Set settle %f  shutter %d mode %d\n", 
         td->dK2Settling, td->iK2Shutter, sReadModes[td->iReadMode]);
       DebugToResult(td->strTemp);*/
@@ -5018,6 +5027,7 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
     scaling = 1.;
   mTD.iReadMode = mode;
   mTD.K3type = mode > 2;
+  mTD.OneViewType = mode < -1;
   mTD.fFloatScaling = (float)scaling;
   mTD.fLinearOffset = 0.;
   mTD.fFrameOffset = 0.;
@@ -5062,7 +5072,7 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
 
   // Override the DM align option with framealign option
   mTD.bUseFrameAlign = doseFrac && (flags & K2_USE_FRAMEALIGN) != 0;
-  mTD.bAlignFrames = alignFrames && !mTD.bUseFrameAlign;
+  mTD.bAlignFrames = alignFrames && !mTD.bUseFrameAlign && !mTD.OneViewType;
   mTD.bMakeAlignComFile = doseFrac && saveFrames && (flags & K2_MAKE_ALIGN_COM) != 0 &&
     mTD.strAlignComName.size() > 0;
   mTD.bTakeBinnedFrames = doseFrac && (saveFrames || mTD.bUseFrameAlign) && 
