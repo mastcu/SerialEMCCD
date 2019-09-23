@@ -954,7 +954,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   binAdj = binning / (mTD.areFramesSuperRes ? 2 : 1);
   heightAdj = swapXY ? right - left : bottom - top;
   widthAdj = swapXY ? bottom - top : right - left;
-  mTD.iFinalBinning = binning;
+  mTD.iFinalBinning = mTD.OneViewType ? 1 : binning;
 
   // For antialias reduction here, make sure it is allowed and set binning to 1
   // Antialias reduction for pure binning is allowed for continuous mode
@@ -994,7 +994,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   } else
     mTD.iAntialias = 0;
 
-  if (mTD.bUseFrameAlign) {
+  if (mTD.bUseFrameAlign && mTD.iReadMode >= 0) {
 
     // Get the size that framealign needs to produce, either divide chip sizes by adjusted
     // binning or double them for super-res
@@ -1168,7 +1168,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
           mTD.strCommand += m_strTemp;
         }
         sprintf(m_strTemp, "CM_SetFrameExposure(acqParams, %f)\n"
-          "CM_SetStackFormat(acqParams, %d)\n", mTD.dFrameTime,
+          "CM_SetStackFormat(acqParams, %d)\n", 
+          mTD.dFrameTime + (mTD.dFrameTime > 0.05 ? 0.0001 : 0.00002),
           saveFrames == SAVE_FRAMES ? 0 : 1);
           mTD.strCommand += m_strTemp;
       }
@@ -1667,7 +1668,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       if (!td->OneViewType)
         CM::SetAlignmentFilter(acqParams, filter); 
       j++;
-      CM::SetFrameExposure(acqParams, td->dFrameTime + 0.0001);  j++;
+      CM::SetFrameExposure(acqParams, td->dFrameTime + (td->dFrameTime > 0.05 ? 0.0001 : 0.00002));  j++;
       CM::SetDoAcquireStack(acqParams, 1);  j++;
       CM::SetStackFormat(acqParams, CM::StackFormat::Series);  j++;
       CM::SetDoAsyncReadout(acqParams, td->bAsyncToRAM ? 1 : 0);   j++;
