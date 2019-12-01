@@ -3497,7 +3497,7 @@ static int AlignOrSaveImage(ThreadData *td, short *outForRot, bool saveFrame,
   int i = 0;
   unsigned char *bData = (unsigned char *)td->outData;
   unsigned short *usData = (unsigned short *)td->outData;
-  int refInd = td->isSuperRes ? 1 : 0;
+  int refInd = (td->isSuperRes && !td->bTakeBinnedFrames) ? 1 : 0;
 #ifdef _WIN64
   int width, height, nxout, nyout, numThreads, filtType;
   float scaling;
