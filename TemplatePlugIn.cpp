@@ -719,13 +719,14 @@ static double ExecuteScript(char *strScript)
   try {
     retval = DM::ExecuteScriptString(strScript);
   }
-  catch (exception exc) {
+  catch (const exception &exc) {
     DebugToResult("Exception thrown while executing script");
     if (!sDebug) {
       DM::OpenResultsWindow();
       DM::Result("\nAn exception occurred executing this script for SerialEM:\n\n\n");
       DM::Result(strScript);
     }
+    exc.what();
     DM::Result("\n\n\nTo determine the cause, copy the above script with Ctrl-C,\n"
       "  open a script window with Ctrl-K, paste in there with Ctrl-V,\n"
       "  and execute the script with Ctrl-Enter\n");
@@ -1528,7 +1529,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   bool saveOrFrameAlign = saveFrames || td->bUseFrameAlign;
   bool useOldAPI = GMS_SDK_VERSION < 31 || td->bUseOldAPI;
   bool alignBeforeProc = td->bFaKeepPrecision && !td->iNumGrabAndStack;
-  int stackSlice = 0, usedSlice = 0;
+  int stackSlice = 0, usedSlice = 0, sliceForList;
   int errorRet = 0;
 #ifdef _WIN64
   DM::ScriptObject dummyObj;
@@ -1702,7 +1703,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       td->iNumFramesToSum = B3DMIN(td->iNumFramesToSum, numSlices);
       DebugToResult("Returned from asynchronous start of acquire\n");
     }
-    catch (exception exc) {
+    catch (const exception &exc) {
       sprintf(td->strTemp, "Caught an exception from call %d to start dose frac exposure:"
         "\n  %s\n%s", j, exc.what(), j == 13 ? "   in Validate_AcquisitionParameters\n" :
         "");
@@ -1711,7 +1712,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         stack->Abort();
         // TODO: delete anything?
       }
-      catch (exception exc) {
+      catch (...) {
       }
       delete unbinnedArray;
       return GENERAL_SCRIPT_ERROR;
@@ -1917,15 +1918,15 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             errorRet = td->iErrorFromSave = NULL_IMAGE;
             break;
           }
+          sliceForList = stackSlice;
 
 #ifdef _WIN64
 
           // IF dropping frames below threshold, now do the analysis of rapid mean
-          if (stackSlice > 0 && (stackSlice < numSlices - 1 || !stackAllReady) && 
-            td->saveFrames && (td->iSaveFlags & K2_SKIP_BELOW_THRESH) && 
+          if (td->saveFrames && (td->iSaveFlags & K2_SKIP_BELOW_THRESH) && 
             td->fFrameThresh > 0.) {
-            int imType, numSample = 2500, sampXstart, sampYstart, sampXuse, sampYuse;
-            float sampMean = 2 * td->fFrameThresh, sampSD, fracSamp;
+            int imType, numSample = 20000, sampXstart, sampYstart, sampXuse, sampYuse;
+            float sampMean = 2 * td->fFrameThresh, fracSamp;
             unsigned char **imLinePtrs = makeLinePointers(imageData, td->width, 
               td->height, td->byteSize);
             if (td->byteSize == 1)
@@ -1938,24 +1939,31 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
               else
                 imType = 7;
             }
-            sampXstart = td->width / 10;
-            sampYstart = td->height / 10;
-            sampXuse = 8 * td->width / 10;
-            sampYuse = 8 * td->height / 10;
+            sampXstart = td->width / 20;
+            sampYstart = td->height / 20;
+            sampXuse = 9 * td->width / 10;
+            sampYuse = 9 * td->height / 10;
             fracSamp = (float)numSample / (float)(td->width * td->height);
-            if (imLinePtrs)
-              sampleMeanSD(imLinePtrs, imType, td->width, td->height, fracSamp,
-                sampXstart, sampYstart, sampXuse, sampYuse, &sampMean, &sampSD);
+            if (imLinePtrs) {
+              sampleMeanOnly(imLinePtrs, imType, td->width, td->height, fracSamp,
+                sampXstart, sampYstart, sampXuse, sampYuse, &sampMean);
+            }
             free(imLinePtrs);
             if (sampMean * sWriteScaling < td->fFrameThresh) {
-              sprintf(td->strTemp, "Skipping frame %d with mean = %.2f\n", 
+              if (stackSlice > 0 && (stackSlice < numSlices - 1 || !stackAllReady)) {
+                sprintf(td->strTemp, "Skipping frame %d with mean = %.2f\n",
                   stackSlice + 1, sampMean * sWriteScaling);
-              DebugToResult(td->strTemp);
-              stackSlice++;
-              delete imageLp;
-              imageLp = NULL;
-              DeleteImageIfNeeded(td, image, &frameNeedsDelete);
-              continue;
+                DebugToResult(td->strTemp);
+                stackSlice++;
+                delete imageLp;
+                imageLp = NULL;
+                DeleteImageIfNeeded(td, image, &frameNeedsDelete);
+                continue;
+              } else {
+                sliceForList = -1;
+                DebugPrintf(td->strTemp, "Writing required frame %d with mean = %.2f but"
+                  " putting -1 in saved list\n",  stackSlice + 1, sampMean*sWriteScaling);
+              }
             }
           }
 
@@ -1963,7 +1971,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           // the first frame then replace it with the half-way frame
           if (td->saveFrames && (td->iSaveFlags & K2_SKIP_BELOW_THRESH) && 
             td->fFrameThresh > 0.) {
-              td->savedFrameList.push_back(stackSlice);
+              td->savedFrameList.push_back(sliceForList);
               getDose = usedSlice == 1;
           } else {
             getDose = stackSlice == 0 || stackSlice == numSlices / 2;
@@ -2116,7 +2124,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         }
       }
     }
-    catch (exception exc) {
+    catch (const exception &exc) {
       sprintf(td->strTemp, "Caught an exception from call %d to a DM:: function:\n  %s\n", 
         j, exc.what());
       ErrorToResult(td->strTemp);
@@ -2193,7 +2201,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         if (stackSlice < numSlices)
           stack->Abort();
       }
-      catch (exception exc) {
+      catch (...) {
       }
     }
 #endif
@@ -2925,7 +2933,7 @@ static int RunContinuousAcquire(ThreadData *td)
       }
     }
   }
-  catch (exception exc) {
+  catch (const exception &exc) {
     sprintf(td->strTemp, "Caught an exception from call %d in continuous acquire:"
       "\n  %s\n", j, exc.what());
     ErrorToResult(td->strTemp);
@@ -3095,7 +3103,7 @@ static void DeleteImageIfNeeded(ThreadData *td, DM::Image &image, bool *needsDel
   try {
     DM::DeleteImage(image.get());
   }
-  catch (exception exc) {
+  catch (...) {
   }
   if (needsDelete)
     *needsDelete = false;
@@ -3342,7 +3350,7 @@ static void GetElectronDoseRate(ThreadData *td, DM::Image &image, double exposur
     if (td->bMakeDeferredSum)
       sDeferredDoseRate = dose;
   }
-  catch (exception exc) {
+  catch (...) {
   }
 #endif
 }
@@ -3710,21 +3718,22 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
   float &meanSum, double *procWall, double &saveWall, double &wallStart)
 {
 #ifdef _WIN64
-  float tmean;
-  int i, j, tsum, val, didParallel;
+  float tmean, fmin, fmax;
+  int i, j, didParallel;
   int nxFile = td->save4bit ? ((nxout + 1) / 2) : nxout;
   int use4bitMode = (td->save4bit && (td->iSaveFlags & K2_SAVE_4BIT_MRC_MODE)) ? 1 : 0;
   static int singleSliceNum;
-  short *sData;
-  unsigned short *usData;
   unsigned char *bData, *packed;
   unsigned char lowbyte;
+  unsigned char **linePtrs;
   string refName, refPath, titles, line;
   bool needRef = sLastSaveNeededRef && sLastRefName.length();
-  float numSample = 500000.;
-  float sampleXtoYratio = 1.;
-  float fracX, fracY, sampleFrac;
-  int deltaX, deltaY, xstart, numSum = 0;
+
+  // 12/4/19: There was bad bug before where the fraction sampled in X was determined
+  // by sampleFrac * fraction in Y instead of / fraction in Y.  K2 was sampling 1000
+  // and 13500 pixels in CM/SR, K3 maybe was sample 1200 and 10000.  Changed to 13000
+  // after adopting the new sampleMinMaxMean function
+  float numSample = 13000., sampleFrac;
   int numThreads = 1;
 
   if (!slice || openForFirstSum)
@@ -3841,57 +3850,21 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
     meanSum = 0.;
   }
 
-  // Loop on the lines to compute min/max/mean from samples
-  tmean = 0.; 
-  sampleFrac = numSample / (nxout * nyout);
-  fracY = sqrt(sampleFrac / sqrt(sampleXtoYratio));
-  fracX = sampleFrac * fracY;
-  deltaX = (int)(fracX * nxout);
-  deltaY = (int)(fracY * nyout);
-  B3DCLAMP(deltaX, 1, nxout / 4);
-  B3DCLAMP(deltaY, 1, nyout / 4);
-  for (i = 0; i < nyout; i += deltaY) {
-
-    // Get pointer to start of line
-    if (td->outByteSize == 1) {
-      bData = ((unsigned char *)td->outData) + i * nxout;
-      sData = (short *)bData;
-    } else
-      sData = &td->outData[i * nxout];
-    usData = (unsigned short *)sData;
-
-    // Get min/max/sum and add to mean
-    tsum = 0;
-    xstart = (i % 17) % deltaX;
-    if (td->fileMode == MRC_MODE_USHORT) {
-      for (j = xstart; j < nxout; j += deltaX) {
-        val = usData[j];
-        tmin = B3DMIN(tmin, val);
-        tmax = B3DMAX(tmax, val);
-        tsum += val;
-        numSum++;
-      }
-    } else if (td->fileMode == MRC_MODE_SHORT) {
-      for (j = xstart; j < nxout; j += deltaX) {
-        val = sData[j];
-        tmin = B3DMIN(tmin, val);
-        tmax = B3DMAX(tmax, val);
-        tsum += val;
-        numSum++;
-      }
-    } else {
-      for (j = xstart; j < nxout; j += deltaX) {
-        val = bData[j];
-        tmin = B3DMIN(tmin, val);
-        tmax = B3DMAX(tmax, val);
-        tsum += val;
-        numSum++;
-      }
+  // Compute min/max/mean from samples
+  i = 0;
+  if (td->outByteSize > 1)
+    i = td->fileMode == MRC_MODE_USHORT ? 2 : 3;
+  linePtrs = makeLinePointers(td->outData, nxout, nyout, td->outByteSize);
+  tmean = 0.;
+  sampleFrac = numSample / (float)(nxout * nyout);
+  if (linePtrs) {
+    if (!sampleMinMaxMean(linePtrs, i, nxout, nyout, sampleFrac, 0, 0, nxout, nyout,
+      &tmean, &fmin, &fmax)) {
+      tmin = (int)B3DMIN(fmin, tmin);
+      tmax = (int)B3DMAX(fmax, tmax);
     }
-    j += xstart % 3;
-    tmean += tsum;
+    free(linePtrs);
   }
-  tmean /= B3DMAX(1, numSum);
   AccumulateWallTime(procWall[3], wallStart);
 
    /* if (!fileSlice) {
@@ -5432,7 +5405,7 @@ int TemplatePlugIn::GetDefectList(short xyPairs[], long *arrSize,
       pairs[2 * i + 1] = (unsigned short)y;
     }
   }
-  catch (exception exc) {
+  catch (...) {
     return GETTING_DEFECTS_ERROR;
   }
   return 0;
