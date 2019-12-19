@@ -147,6 +147,7 @@ static bool sLastSaveNeededRef;
 static string sFrameMdocName;     // Mdoc name set by SaveFrameMdoc
 static string sMdocToSave;
 static string sStrDefectsToSave;
+static string sInputForComFile;
 static bool sThreadWorking = false;
 static double sLastDoseRate = 0.;
 static double sDeferredDoseRate = 0.;
@@ -279,9 +280,12 @@ struct ThreadData
   float fFaMaxRawMax, fFaCrossHalf, fFaCrossQuarter, fFaCrossEighth, fFaHalfNyq;
   bool bFaDoSubset;
   int iFaSubsetStart, iFaSubsetEnd;
+  float fFaPartialStartThresh, fFaPartialEndThresh;
   bool K3type;
   bool OneViewType;
   float fFrameThresh;
+  bool bDoingFrameTS;
+  bool bSaveComAfterMdoc;
   
   // Items needed internally in save routine and its functions
   FILE *fp;
@@ -322,7 +326,7 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
 static void SimulateSuperRes(ThreadData *td, void *image, double time);
 static int InitializeFrameAlign(ThreadData *td);
 static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice);
-static int WriteAlignComFile(ThreadData *td, string inputFile, bool ifMdoc);
+static int WriteAlignComFile(ThreadData *td, string inputFile, int ifMdoc);
 static void AddToSum(ThreadData *td, void *data, void *sumArray);
 static void AccumulateWallTime(double &cumTime, double &wallStart);
 static void DeleteImageIfNeeded(ThreadData *td, DM::Image &image, bool *needsDelete);
@@ -350,7 +354,8 @@ static void SplitFilePath(const string &path, string &dir, string &file);
 static int WriteTextFile(const char *filename, const char *text, int length, 
   int openErr, int writeErr, bool asBinary);
 static int WriteFrameMdoc(ThreadData *td);
-static int ReduceImage(ThreadData *td, void *array, void *outArray, int type, int width, 
+static void AddLineToFrameMdoc(const char *line);
+static int ReduceImage(ThreadData *td, void *array, void *outArray, int type, int width,
   int height, int redWidth, int redHeight, int binning, int filterType, float scaling);
 static void DebugPrintf(char *buffer, const char *format, ...);
 static void GetElectronDoseRate(ThreadData *td, DM::Image &image, double exposure, 
@@ -395,8 +400,8 @@ public:
     double rad2Filt2, double rad2Filt3, double sigma2Ratio, 
     double truncLimit, long alignFlags, long gpuFlags, long numAllVsAll, long groupSize, 
     long shiftLimit, long antialiasType, long refineIter, double stopIterBelow, 
-    double refRad2, long nSumAndGrab, long frameStartEnd, long dumInt2, double dumDbl1, 
-    char *refName, char *defects, char *comName, long *error);
+    double refRad2, long nSumAndGrab, long frameStartEnd, long frameThreshes,
+    double dumDbl1, char *refName, char *defects, char *comName, long *error);
   void FrameAlignResults(double *rawDist, double *smoothDist, 
     double *resMean, double *maxResMax, double *meanRawMax, double *maxRawMax, 
     long *crossHalf, long *crossQuarter, long *crossEighth, long *halfNyq, 
@@ -1032,6 +1037,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     saveFrames == SAVE_FRAMES && newProc == NEWCM_GAIN_NORMALIZED;
   if (mTD.bSaveSuperReduced)
     mTD.bSaveTimes100 = false;
+  mTD.bDoingFrameTS = saveFrames == SAVE_FRAMES && mTD.fFrameThresh > 0. &&
+    (mTD.iSaveFlags & K2_SKIP_BELOW_THRESH);
 
   // The full sizes are chip sizes.  Divide them by binning to get size of image that
   // will be produced by camera, but not for K3 where we need to reduce image here
@@ -1559,6 +1566,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   td->outSumFrameIndex = 0;
   td->numOutSumsDoneAtIndex = 0;
   td->savedFrameList.clear();
+  if (saveOrFrameAlign)
+    sInputForComFile.clear();
 
   // Clear out any leftover information here so mdoc is based only on new call
   // Clear out dose rate info
@@ -1923,8 +1932,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 #ifdef _WIN64
 
           // IF dropping frames below threshold, now do the analysis of rapid mean
-          if (td->saveFrames && (td->iSaveFlags & K2_SKIP_BELOW_THRESH) && 
-            td->fFrameThresh > 0.) {
+          if (td->bDoingFrameTS) {
             int imType, numSample = 20000, sampXstart, sampYstart, sampXuse, sampYuse;
             float sampMean = 2 * td->fFrameThresh, fracSamp;
             unsigned char **imLinePtrs = makeLinePointers(imageData, td->width, 
@@ -1960,17 +1968,17 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
                 DeleteImageIfNeeded(td, image, &frameNeedsDelete);
                 continue;
               } else {
-                sliceForList = -1;
+                sliceForList = -1 - stackSlice;
                 DebugPrintf(td->strTemp, "Writing required frame %d with mean = %.2f but"
-                  " putting -1 in saved list\n",  stackSlice + 1, sampMean*sWriteScaling);
+                  " putting %d in saved list\n",  stackSlice + 1, sampMean*sWriteScaling, 
+                  sliceForList);
               }
             }
           }
 
           // Get dose rate for the second passed frame when skipping, otherwise for
           // the first frame then replace it with the half-way frame
-          if (td->saveFrames && (td->iSaveFlags & K2_SKIP_BELOW_THRESH) && 
-            td->fFrameThresh > 0.) {
+          if (td->bDoingFrameTS) {
               td->savedFrameList.push_back(sliceForList);
               getDose = usedSlice == 1;
           } else {
@@ -2190,8 +2198,11 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         DebugToResult(td->strTemp);
 
       if (!td->iErrorFromSave && td->bMakeAlignComFile) {
-        td->iErrorFromSave = WriteAlignComFile(td, 
-          td->strRootName + "." + td->strSaveExtension, false);
+        if (td->bSaveComAfterMdoc)
+          sInputForComFile = td->strRootName + "." + td->strSaveExtension;
+        else
+          td->iErrorFromSave = WriteAlignComFile(td,
+            td->strRootName + "." + td->strSaveExtension, 0);
       }
     }
 
@@ -2243,20 +2254,21 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     td->savedFrameList.clear();
   }
 
-  // Save frame mdoc if one is set up
+  // Save frame mdoc if one is set up - this will write the align com if it was deferred
   WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
   if (saveFrames && sMdocToSave.length() && sFrameMdocName.length()) {
     if (td->iFramesSaved) {
-      tmin = (int)sMdocToSave.find("NumSubFrames = ");
-      if (tmin > 0) {
-        tmax = (int)sMdocToSave.find("\n", tmin + 15);
-        if (tmax > 0) {
+      size_t eolInd, nsfInd = sMdocToSave.find("NumSubFrames = ");
+      if (nsfInd != string::npos) {
+        eolInd = sMdocToSave.find("\n", nsfInd + 15);
+        if (eolInd != string::npos) {
           sprintf(td->strTemp, "%d", td->iFramesSaved);
-          sMdocToSave.replace(tmin + 15, tmax - (tmin + 15), td->strTemp);
+          sMdocToSave.replace(nsfInd + 15, eolInd - (nsfInd + 15), td->strTemp);
         }
-      } else {
+      }
+      if (nsfInd == string::npos || eolInd == string::npos) {
         sprintf(td->strTemp, "NumSubFrames = %d", td->iFramesSaved);
-        sMdocToSave += td->strTemp;
+        AddLineToFrameMdoc(td->strTemp);
       }
       tmin = WriteFrameMdoc(td);
       if (!errorRet)
@@ -2266,6 +2278,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       sFrameMdocName.clear();
     }
   }
+  sThreadWorking = false;
   ReleaseMutex(sDataMutexHandle);
 #endif
 
@@ -4106,7 +4119,7 @@ static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice)
 /*
  * Write a com file for alignment with alignframes
  */
-static int WriteAlignComFile(ThreadData *td, string inputFile, bool ifMdoc)
+static int WriteAlignComFile(ThreadData *td, string inputFile, int ifMdoc)
 {
   string comStr, aliHead, inputPath, relPath, outputRoot, outputExt, temp, temp2;
   int ind, error = 0;
@@ -4151,6 +4164,11 @@ static int WriteAlignComFile(ThreadData *td, string inputFile, bool ifMdoc)
       td->iFaSubsetEnd);
     comStr += td->strTemp;
   }
+  if (td->fFaPartialStartThresh > 0. || td->fFaPartialEndThresh > 0.) {
+    sprintf(td->strTemp, "PartialFrameThresholds %f %f\n", td->fFaPartialStartThresh,
+      td->fFaPartialEndThresh);
+    comStr += td->strTemp;
+  }
 
   // get the relative path and make sure it is OK
   SplitFilePath(td->strAlignComName, aliHead, temp);
@@ -4159,15 +4177,17 @@ static int WriteAlignComFile(ThreadData *td, string inputFile, bool ifMdoc)
 
   // Set input file with the relative path and the right option
   inputPath = relPath + inputFile;
-  comStr += (ifMdoc ? "MetadataFile " : "InputFile ") + inputPath + "\n";
-  if (ifMdoc && relPath.length())
+  comStr += (ifMdoc == 1 ? "MetadataFile " : "InputFile ") + inputPath + "\n";
+  if (ifMdoc == 1 && relPath.length())
     comStr += "PathToFramesInMdoc " + relPath + "\n";
   if (ifMdoc)
     comStr += "AdjustAndWriteMdoc 1\n";
+  if (ifMdoc == 2)
+    comStr += "MetadataFile " + inputPath + ".mdoc\n";
 
   // Get the output file name, take 2 extension for an mdoc or replace .tif by .mrc
   SplitExtension(inputFile, outputRoot, outputExt);
-  if (ifMdoc) {
+  if (ifMdoc == 1) {
     temp = outputRoot;
     SplitExtension(temp, outputRoot, temp2);
     if (temp2.length())
@@ -4175,6 +4195,8 @@ static int WriteAlignComFile(ThreadData *td, string inputFile, bool ifMdoc)
   } else if (outputExt == ".tif" || outputExt == ".mrcs")
     outputExt = ".mrc";
   comStr += "OutputImageFile " + outputRoot + "_ali" + outputExt + "\n";
+  if (td->bDoingFrameTS)
+    comStr += "SavedFrameListFile " + relPath + outputRoot + "_saved.txt\n";
 
   // Truncation and scaling
   if (td->fFaTruncLimit > 0) {
@@ -4825,6 +4847,7 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
       // but can lose precision but can come out earlier when comparing last write time,
       // although they are given current access times.  Copies on the SSD RAID are given 
       // the original write time but a current creation and access time
+      // Comparisons could/should be done with CompareFileTime but this conversion works
       double copySec = 429.4967296 * findCopyData.ftCreationTime.dwHighDateTime + 
         1.e-7 * findCopyData.ftCreationTime.dwLowDateTime;
       /*sprintf(td->strTemp, "refSec  %f  copySec %f\n", td->curRefTime, copySec);
@@ -5049,6 +5072,7 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
   mTD.bAlignFrames = alignFrames && !mTD.bUseFrameAlign && !mTD.OneViewType;
   mTD.bMakeAlignComFile = doseFrac && saveFrames && (flags & K2_MAKE_ALIGN_COM) != 0 &&
     mTD.strAlignComName.size() > 0;
+  mTD.bSaveComAfterMdoc = mTD.bMakeAlignComFile && (flags & K2_SAVE_COM_AFTER_MDOC) != 0;
   mTD.bTakeBinnedFrames = doseFrac && (saveFrames || mTD.bUseFrameAlign) && 
     (flags & K2_TAKE_BINNED_FRAMES) != 0;
   if (rotationFlip >= 0)
@@ -5294,7 +5318,7 @@ int TemplatePlugIn::SaveFrameMdoc(char *strMdoc, long flags)
   // Add defect file now, it is known when the shot started
   if (mTD.bLastSaveHadDefects) {
     sprintf(m_strTemp, "DefectFile = %s\n", mTD.strLastDefectName.c_str());
-    sMdocToSave += m_strTemp;
+    AddLineToFrameMdoc(m_strTemp);
   }
 
   // Write it now or let thread do it
@@ -5316,7 +5340,7 @@ static int WriteFrameMdoc(ThreadData *td)
   if (sLastSaveNeededRef && sLastRefName.length()) {
     SplitFilePath(sLastRefName, refPath, refName);
     sprintf(td->strTemp, "GainReference = %s\n", refName.c_str());
-    sMdocToSave += td->strTemp;
+    AddLineToFrameMdoc(td->strTemp);
   }
   errno = 0;
   retval = WriteTextFile(sFrameMdocName.c_str(), sMdocToSave.c_str(),
@@ -5326,9 +5350,29 @@ static int WriteFrameMdoc(ThreadData *td)
       sFrameMdocName.c_str(), strerror(errno));
     DebugToResult(td->strTemp);
   }
+  if (sInputForComFile.length() > 0) {
+    WriteAlignComFile(td, sInputForComFile, 2);
+    sInputForComFile.clear();
+  }
   sFrameMdocName.clear();
   sMdocToSave.clear();
   return retval;
+}
+
+/*
+ * Adds the given line to the FrameSet section of the frame mdoc if it can find it, or
+ * just appends it
+ */
+static void AddLineToFrameMdoc(const char *line)
+{
+  size_t ind = sMdocToSave.find("[FrameSet");
+  if (ind != string::npos) {
+    ind = sMdocToSave.find('\n', ind);
+    if (ind != string::npos)
+      sMdocToSave.insert(ind + 1, line);
+  }
+  if (ind == string::npos)
+    sMdocToSave += line;
 }
 
 /*
@@ -5442,8 +5486,8 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
     double rad2Filt2, double rad2Filt3, double sigma2Ratio, 
     double truncLimit, long alignFlags, long gpuFlags, long numAllVsAll, long groupSize, 
     long shiftLimit, long antialiasType, long refineIter, double stopIterBelow, 
-    double refRad2, long nSumAndGrab, long frameStartEnd, long dumInt2, double dumDbl1, 
-    char *refName, char *defects, char *comName, long *error)
+    double refRad2, long nSumAndGrab, long frameStartEnd, long frameThreshes, 
+    double dumDbl1, char *refName, char *defects, char *comName, long *error)
 {
   string errStr;
   int newDefects = 0;
@@ -5453,8 +5497,8 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
   bool makingCom = (alignFlags & K2_MAKE_ALIGN_COM) != 0 && comName != NULL;
   double memory;
   gpuFlags = gpuFlags & ~(GPU_NUMBER_MASK << GPU_NUMBER_SHIFT);
-  sprintf(m_strTemp, "SetupFrameAligning called with flags %x  gpuFlags %x  %s\n", 
-    alignFlags, gpuFlags, comName ? comName : "");
+  sprintf(m_strTemp, "SetupFrameAligning called with flags %x  gpuFlags %x  thresh %d %s"
+    "\n", alignFlags, gpuFlags, frameThreshes, comName ? comName : "");
   DebugToResult(m_strTemp);
   if (m_HAcquireThread)
     WaitForAcquireThread(WAIT_FOR_THREAD);
@@ -5542,7 +5586,13 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
     mTD.iFaSubsetStart = frameStartEnd & K2FA_SUB_START_MASK;
     mTD.iFaSubsetEnd = frameStartEnd >> K2FA_SUB_END_SHIFT;
   }
-    
+  mTD.fFaPartialEndThresh = mTD.fFaPartialStartThresh = 0.;
+  if (frameThreshes > 0) {
+    mTD.fFaPartialStartThresh = (float)(frameThreshes & 0xFFFF) / K2FA_THRESH_SCALE;
+    mTD.fFaPartialEndThresh = (float)(frameThreshes >> 16) / K2FA_THRESH_SCALE;
+    B3DCLAMP(mTD.fFaPartialStartThresh, 0.f, 0.99f);
+    B3DCLAMP(mTD.fFaPartialEndThresh, 0.f, 0.99f);
+  }
   *error = ManageEarlyReturn(alignFlags, nSumAndGrab);
 #endif
 }
@@ -5599,7 +5649,7 @@ void TemplatePlugIn::MakeAlignComFile(long flags, long dumInt1, double dumDbl1,
     ErrorToResult(mTD.strTemp);
     return;
   }
-  *error = WriteAlignComFile(&mTD, mdocName, true);
+  *error = WriteAlignComFile(&mTD, mdocName, 1);
 }
 
 /*
@@ -6348,8 +6398,8 @@ void PlugInWrapper::SetupFrameAligning(long aliBinning, double rad2Filt1,
   double rad2Filt2, double rad2Filt3, double sigma2Ratio, 
   double truncLimit, long alignFlags, long gpuFlags, long numAllVsAll, long groupSize, 
   long shiftLimit, long antialiasType, long refineIter, double stopIterBelow, 
-    double refRad2, long nSumAndGrab, long frameStartEnd, long dumInt2, double dumDbl1, 
-    long *strings, long *error)
+  double refRad2, long nSumAndGrab, long frameStartEnd, long frameThreshes, 
+  double dumDbl1, long *strings, long *error)
 {
   mLastRetVal = 0;
   int nextInd = 0;
@@ -6359,7 +6409,7 @@ void PlugInWrapper::SetupFrameAligning(long aliBinning, double rad2Filt1,
   gTemplatePlugIn.SetupFrameAligning(aliBinning, rad2Filt1, rad2Filt2, rad2Filt3, 
     sigma2Ratio, truncLimit, alignFlags, gpuFlags, numAllVsAll, groupSize, 
     shiftLimit, antialiasType, refineIter, stopIterBelow, refRad2, nSumAndGrab, 
-    frameStartEnd,  dumInt2, dumDbl1, refName, defects, comName, error);
+    frameStartEnd, frameThreshes, dumDbl1, refName, defects, comName, error);
 }
 
 void PlugInWrapper::FrameAlignResults(double *rawDist, double *smoothDist, 

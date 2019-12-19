@@ -211,6 +211,8 @@ STDMETHODIMP CDMCamera::SetK2Parameters(long readMode, double scaling, long hard
 //     K2_TAKE_BINNED_FRAMES - For K3 only, acquire frames with binning by 2 to get 
 //         K2-style counting mode frames.
 //     K3_USE_CORR_DBL_SAMP - Use correlated double sampling (CDS) for K3 acquisition
+//     K2_SAVE_COM_AFTER_MDOC - Do not save the com file for alignment until after a
+//         frame mdoc file has been passed and saved (for frame tilt series)
 //
 STDMETHODIMP CDMCamera::SetK2Parameters2(long readMode, double scaling, long hardwareProc,
   BOOL doseFrac, double frameTime, BOOL alignFrames, BOOL saveFrames, long rotationFlip,
@@ -355,13 +357,13 @@ STDMETHODIMP CDMCamera::SetupFrameAligning(long aliBinning, double rad2Filt1,
   double rad2Filt2, double rad2Filt3, double sigma2Ratio, 
   double truncLimit, long alignFlags, long gpuFlags, long numAllVsAll, long groupSize, 
   long shiftLimit, long antialiasType, long refineIter, double stopIterBelow, 
-  double refRad2, long nSumAndGrab, long frameStartEnd, long dumInt2, double dumDbl1, 
+  double refRad2, long nSumAndGrab, long frameStartEnd, long frameThreshes,double dumDbl1, 
   long stringSize, long strings[], long *error)
 {
   gPlugInWrapper.SetupFrameAligning(aliBinning, rad2Filt1, rad2Filt2, rad2Filt3, 
     sigma2Ratio, truncLimit, alignFlags, gpuFlags, numAllVsAll, groupSize, 
   shiftLimit, antialiasType, refineIter, stopIterBelow, refRad2, nSumAndGrab,
-  frameStartEnd, dumInt2, dumDbl1, strings, error);
+  frameStartEnd, frameThreshes, dumDbl1, strings, error);
   return S_OK;
 }
 
