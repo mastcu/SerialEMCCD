@@ -131,6 +131,7 @@ static short *sContinuousArray = NULL;
 // Array for leaving the deferred sum after early return
 static short *sDeferredSum = NULL;
 static bool sValidDeferredSum = false;
+static bool sFloatDeferredSum = false;
 
 // Static data about loaded gain refs that needs to be set by the threads
 static float *sK2GainRefData[2] = {NULL, NULL};
@@ -283,6 +284,8 @@ struct ThreadData
   float fFaPartialStartThresh, fFaPartialEndThresh;
   bool K3type;
   bool OneViewType;
+  bool bReturnFloats;
+  int iExtraDivBy2;
   float fFrameThresh;
   bool bDoingFrameTS;
   bool bSaveComAfterMdoc;
@@ -309,7 +312,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam);
 static void ProcessImage(void *imageData, void *array, int dataSize, long width, 
                           long height, long divideBy2, long transpose, int byteSize, 
                           bool isInteger, bool isUnsignedInt, float floatScaling,
-                          float linearOffset, int useThreads = 0);
+                          float linearOffset, int useThreads = 0, int extraDivBy2 = 0);
 static int AlignOrSaveImage(ThreadData *td, short *outForRot, bool saveImage, 
   bool alignFrame, int slice, bool finalFrame, int &fileSlice, int &tmin, int &tmax,
   float &meanSum, double *procWall, double &saveWall, double &alignWall, 
@@ -871,6 +874,12 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     }
   }
 
+  // Disable float/extra div returns except for Oneview
+  if (!mTD.OneViewType) {
+    mTD.bReturnFloats = false;
+    mTD.iExtraDivBy2 = 0;
+  }
+
   // Get continuous mode information from processing, set flag to do it if no conflict
   mTD.bDoContinuous = false;
   if (procIn > 7) {
@@ -1062,7 +1071,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   mTD.iK2Binning = binning;
 
   // Intercept K2 asynchronous saving and continuous mode here
-  if (((saveFrames == SAVE_FRAMES || mTD.bUseFrameAlign) && mTD.bAsyncSave) || 
+  if (((saveFrames == SAVE_FRAMES || mTD.bUseFrameAlign) && mTD.bAsyncSave) ||
     mTD.bDoContinuous) {
       sprintf(m_strTemp, "Exit(0)");
       mTD.strCommand += m_strTemp;
@@ -1071,8 +1080,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       mTD.iCorrections = corrections;
 
       // Make call to acquire image or start continuous acquires
-      err = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
-        divideBy2, 0, DEL_IMAGE, saveFrames);
+      err = AcquireAndTransferImage((void *)array, mTD.bReturnFloats ? 4 : 2, arrSize, 
+        width, height, divideBy2, 0, DEL_IMAGE, saveFrames);
       ClearSpecialFlags();
 
       // Then fetch the first continuous frame if that was OK
@@ -1292,8 +1301,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
   //sprintf(m_strTemp, "Calling AcquireAndTransferImage with divideBy2 %d\n", divideBy2);
   //DebugToResult(m_strTemp);
-  int retval = AcquireAndTransferImage((void *)array, 2, arrSize, width, height,
-    divideBy2, 0, DEL_IMAGE, saveFrames); 
+  int retval = AcquireAndTransferImage((void *)array, mTD.bReturnFloats ? 4 : 2, arrSize, 
+    width, height, divideBy2, 0, DEL_IMAGE, saveFrames); 
   ClearSpecialFlags();
 
   return retval;
@@ -1404,6 +1413,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       mTDcopy = mTD;
       mTDcopy.isTDcopy = true;
       retTD = &mTDcopy;
+
       m_HAcquireThread = CreateThread(NULL, 0, AcquireProc, &mTDcopy, CREATE_SUSPENDED, 
         &threadID);
       if (!m_HAcquireThread) {
@@ -1436,7 +1446,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         retval, mTD.iErrorFromSave, mTD.iFramesSaved, retWidth, retHeight);
       DebugToResult(m_strTemp);
       if (!retval && !retTD->arrSize && retTD->iNumFramesToSum)
-        retTD->arrSize = retWidth * retHeight;
+        retTD->arrSize = retWidth * retHeight * (retTD->bReturnFloats ? 2 : 1);
   } else if (!retval) {
 
     retval = AcquireProc(&mTD);
@@ -1452,7 +1462,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   if (!retval && !retTD->arrSize)
     *arrSize = B3DMIN(1024, sizeOrig);
   else if (!retval && (retTD->iAntialias || retTD->bMakeSubarea || retTD->bUseFrameAlign))
-    *arrSize = retWidth * retHeight;
+    *arrSize = retWidth * retHeight * (retTD->bReturnFloats ? 2 : 1);
   else
     *arrSize = retTD->arrSize;
   return (int)retval;
@@ -1594,6 +1604,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       i = 1;
       if (td->iReadMode >= 0)
         i = (td->areFramesSuperRes) ? 4 : 1;
+      if (td->bReturnFloats)
+        i = 2;
       if (td->bMakeSubarea)
         outLimit = td->iFullSizeX * td->iFullSizeY * i;
       else
@@ -1816,12 +1828,13 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           }
           ProcessImage(imageData, array, td->dataSize, td->width, td->height, divideBy2, 
             transpose, td->byteSize, td->isInteger, td->isUnsignedInt, td->fFloatScaling,
-            td->fLinearOffset);
+            td->fLinearOffset, 0, td->iExtraDivBy2);
           GainNormalizeSum(td, array);
           SubareaAndAntialiasReduction(td, array, td->array);
           if (td->bMakeDeferredSum) {
             sDeferredSum = (short *)td->array;
             sValidDeferredSum = true;
+            sFloatDeferredSum = td->bReturnFloats;
             td->tempBuf = NULL;
             td->array = NULL;
           }
@@ -2067,12 +2080,12 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           // needs scaling or conversion
           // It goes from the DM array into the passed or temp array or grab stack
           if (needProc && (!alignBeforeProc || td->saveFrames) && !copiedToProc) {
-            ProcessImage(imageData, procOut,
-              (td->K3type && td->byteSize == 1 && td->isUnsignedInt && frameDivide > 0) ?
-              1 : td->dataSize, 
+            ProcessImage(imageData, procOut, B3DCHOICE(
+              td->K3type && td->byteSize == 1 && td->isUnsignedInt && frameDivide > 0, 1, 
+              td->bReturnFloats ? 2 : td->dataSize), 
               td->width, td->height, frameDivide, transpose, td->byteSize, td->isInteger,
               td->isUnsignedInt, td->fFloatScaling, td->fFrameOffset, 
-              (td->areFramesSuperRes ? 2 : 1) + (td->K3type ? 1 : 0));
+              (td->areFramesSuperRes ? 2 : 1) + (td->K3type ? 1 : 0), td->iExtraDivBy2);
             td->outData = (short *)procOut;  // WAS td->tempBuf;
             outForRot = td->rotBuf;
           }
@@ -2164,7 +2177,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       } else if (needSum && (!td->bEarlyReturn || td->bMakeDeferredSum)) {
         ProcessImage(td->sumBuf, procOut, td->dataSize, td->width, td->height,
           divideBy2, transpose, 4, !td->isFloat, false, td->fSavedScaling, 
-          td->fLinearOffset);
+          td->fLinearOffset, 0, td->iExtraDivBy2);
         GainNormalizeSum(td, procOut);
         if (td->iAntialias && td->bMakeDeferredSum) {
           sDeferredSum = (short *)td->sumBuf;
@@ -2182,6 +2195,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           sDeferredSum = NULL;
         } else if (!errorRet) {
           sValidDeferredSum = true;
+          sFloatDeferredSum = td->bReturnFloats;
         }
       }
 
@@ -2320,8 +2334,9 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
   delete unbinnedArray;
 
-  td->arrSize = (td->iAntialias || td->bMakeSubarea || td->bUseFrameAlign) ? 
-    td->iFinalWidth * td->iFinalHeight : td->width * td->height;
+  td->arrSize = B3DCHOICE(td->iAntialias || td->bMakeSubarea || td->bUseFrameAlign, 
+    td->iFinalWidth * td->iFinalHeight, td->width * td->height) * 
+    B3DCHOICE(td->bReturnFloats, 2, 1);
   sprintf(td->strTemp, "Leaving acquire %s with return value %d arrSize %d\n",
     td->isTDcopy ? "thread" : "proc", errorRet, td->arrSize); 
   //sThreadNumInd = (sThreadNumInd + 1) % 6;
@@ -2428,10 +2443,20 @@ static void ExtractSubarea(ThreadData *td, void *inArray, int iTop, int iLeft,
   int bottom = B3DMIN(iBottom, height);
   int right = B3DMIN(iRight, width);
   short *outArr = (short *)outArray;
-  for (iy = iTop; iy < bottom; iy++) {
-    short *line = ((short *)inArray) + iy * width;
-    for (ix = iLeft; ix < right; ix++)
-      *outArr++ = line[ix];
+  float *flOut = (float *)outArr;
+  if (td->bReturnFloats) {
+    for (iy = iTop; iy < bottom; iy++) {
+      float *fline = ((float *)inArray) + iy * width;
+      for (ix = iLeft; ix < right; ix++)
+        *flOut++ = fline[ix];
+    }
+
+  } else {
+    for (iy = iTop; iy < bottom; iy++) {
+      short *line = ((short *)inArray) + iy * width;
+      for (ix = iLeft; ix < right; ix++)
+        *outArr++ = line[ix];
+    }
   }
   width = right - iLeft;
   height = bottom - iTop;
@@ -2843,7 +2868,8 @@ static int RunContinuousAcquire(ThreadData *td)
       sJ++;
       ProcessImage(imageData, procOutArray, td->dataSize, td->width, td->height, 
         td->divideBy2, td->transpose, td->byteSize, td->isInteger, td->isUnsignedInt, 
-        td->fFloatScaling, td->iK2Binning * td->iK2Binning * td->fLinearOffset); sJ++;
+        td->fFloatScaling, td->iK2Binning * td->iK2Binning * td->fLinearOffset, 0, 
+        td->iExtraDivBy2); sJ++;
       delete imageLp; sJ++;
       imageLp = NULL; sJ++;
 
@@ -2898,7 +2924,8 @@ static int RunContinuousAcquire(ThreadData *td)
         sprintf(td->strTemp, "rotate %p  to %p w %d h %d\n", 
           needRedOut ? redOutArray : procOutArray, sContinuousArray, width, height); 
         DebugToResult(td->strTemp);      
-        rotateFlipImage(needRedOut ? redOutArray : procOutArray, MRC_MODE_SHORT, width, 
+        rotateFlipImage(needRedOut ? redOutArray : procOutArray, 
+          td->bReturnFloats ? MRC_MODE_FLOAT : MRC_MODE_SHORT, width, 
           height, rotationFlip, 1, 0, 0, sContinuousArray, &nxout, &nyout, 0);
         td->iFinalWidth = td->width = nxout;
         td->iFinalHeight = td->height = nyout;
@@ -2909,7 +2936,7 @@ static int RunContinuousAcquire(ThreadData *td)
       sJ++;
       ReleaseMutex(sImageMutexHandle); sJ++;
       WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT); sJ++;
-      td->arrSize = td->width * td->height;
+      td->arrSize = td->width * td->height * (td->bReturnFloats ? 2 : 1);
       td->iContWidth = td->width;
       td->iContHeight = td->height;
 
@@ -3244,6 +3271,8 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
       sWriteScaling /= 2.;
     else if (frameDivide == -1 || frameDivide == -3 )
       sWriteScaling = SUPERRES_FRAME_SCALE;
+    if (td->OneViewType && td->iExtraDivBy2)
+      sWriteScaling /= (float)pow(2., td->iExtraDivBy2);
   }
 
   // Set the byte size for a grab stack if any
@@ -4092,8 +4121,8 @@ static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice)
 
   // Get it scaled to integers and trimmed down to an expected size
   // K3 data were never passed in to nextFrame before processing
-  ProcessImage(aliSum, procOut, 2, nxOut, nyOut, td->divideBy2, 0, 4, false, false, 
-    finalScale, td->fLinearOffset);
+  ProcessImage(aliSum, procOut, td->bReturnFloats ? 4 : 2, nxOut, nyOut, td->divideBy2, 0, 
+    4, false, false, finalScale, td->fLinearOffset);
   ix = (nxOut - td->iFinalWidth) / 2;
   iy = (nyOut - td->iFinalHeight) / 2;
   sprintf(td->strTemp, "Sizes: %d %d %d %d offsets %d %d   alignScaled %.2f  "
@@ -4103,8 +4132,9 @@ static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice)
   if (ix < 0 || iy < 0) {
     ErrorToResult("Unswapped sizes were sent\n");
   } else if (nxOut > td->iFinalWidth || nyOut > td->iFinalHeight) {
-    extractWithBinning(procOut, SLICE_MODE_SHORT, nxOut, ix, ix + td->iFinalWidth - 1, iy,
-    iy + td->iFinalHeight - 1, 1, procOut, 0, &err, &nyOut);
+    extractWithBinning(procOut, td->bReturnFloats ? SLICE_MODE_FLOAT : SLICE_MODE_SHORT, 
+      nxOut, ix, ix + td->iFinalWidth - 1, iy, iy + td->iFinalHeight - 1, 1, procOut, 0, 
+      &err, &nyOut);
   }
   delete [] xShifts;
   delete [] yShifts;
@@ -4246,7 +4276,7 @@ static int WriteAlignComFile(ThreadData *td, string inputFile, int ifMdoc)
 static void ProcessImage(void *imageData, void *array, int dataSize, long width, 
                          long height, long divideBy2, long transpose, int byteSize, 
                          bool isInteger, bool isUnsignedInt, float floatScaling,
-                         float linearOffset, int useThreads)
+                         float linearOffset, int useThreads, int extraDivBy2)
 {
   int i, j, iy, ix = 0;
   unsigned int *uiData;
@@ -4262,11 +4292,12 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
   float *flIn, *flOut = NULL, flTmp;
   int operations[4] = {1, 5, 7, 3};
   char mess[512];
-  int numThreads;
+  int numThreads, totalDivBy2 = divideBy2 + extraDivBy2;
 
-  /*if (sDebug && isInteger &&  byteSize > 2) {
+  /*if (sDebug && byteSize > 2) {
     iData = (int *)imageData;
     uiData = (unsigned int *)imageData;
+    flIn = (float *)imageData;
 
     double mean, sd, sum = 0.;
     double tmin = 1.e10, tmax = -1.e10;
@@ -4278,13 +4309,17 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
         if (uiData[i] > tmax)
           tmax = uiData[i];
       }
-    } else {
+    } else if (isInteger) {
       for (i = 0; i < width * height; i++) {
         sum += iData[i];
-       if (iData[i] < tmin)
-          tmin = iData[i];
-        if (iData[i] > tmax)
-          tmax = iData[i];
+        ACCUM_MIN(tmin, iData[i]);
+        ACCUM_MAX(tmax, iData[i]);
+      }
+    } else {
+      for (i = 0; i < width * height; i++) {
+        sum += flIn[i];
+        ACCUM_MIN(tmin, flIn[i]);
+        ACCUM_MAX(tmax, flIn[i]);
       }
     }
     mean = sum / (width * height);
@@ -4292,9 +4327,12 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
     if (isUnsignedInt) {
       for (i = 0; i < width * height; i++)
         sum += pow(uiData[i] - mean, 2);
-    } else {
+    } else if (isInteger) {
       for (i = 0; i < width * height; i++)
         sum += pow(iData[i] - mean, 2);
+    } else {
+      for (i = 0; i < width * height; i++)
+        sum += pow(flIn[i] - mean, 2);
     }
     sd = sqrt(B3DMAX(0., sum) / (width * height));
     sprintf(mess, "min = %f  max = %f  mean = %f  sd = %f\n", tmin, tmax, mean, sd);
@@ -4304,7 +4342,8 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
    
   // Do a simple copy if sizes match and not dividing by 2 and not transposing
   // or if bytes are passed in
-  if ((dataSize == byteSize && !divideBy2 && floatScaling == 1.) || 
+  if ((dataSize == byteSize && !divideBy2 && !extraDivBy2 && floatScaling == 1. && 
+    (dataSize < 4 || !isInteger)) || 
     (byteSize == 1 && !isUnsignedInt) || divideBy2 == -2 || 
     (byteSize == 1 && isUnsignedInt && divideBy2 > 0 && dataSize == 1)) {
     
@@ -4457,11 +4496,48 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
     for (i = 0; i < width * height; i++)
       usData[i] = (unsigned short)(flIn[i] * scale + 0.5f);
 
+  } else if (dataSize == 4) { // The rest of the float output, divided or not
+    
+    flOut = (float *)array;
+    if (isUnsignedInt) {
+
+      uiData = (unsigned int *)imageData;
+      if (totalDivBy2 > 0) {
+        DebugPrintf(mess, "Division of unsigned long by 2^%d to floats\n", totalDivBy2);
+        for (i = 0; i < width * height; i++)
+          flOut[i] = (float)(uiData[i] >> totalDivBy2);
+      } else {
+        DebugToResult("Conversion of unsigned long to floats\n");
+        for (i = 0; i < width * height; i++)
+          flOut[i] = (float)uiData[i];
+      }
+    } else if (isInteger) {
+
+      iData = (int *)imageData;
+      if (totalDivBy2 > 0) {
+        DebugPrintf(mess, "Division of signed long by 2^%d to floats\n", totalDivBy2);
+        for (i = 0; i < width * height; i++)
+          flOut[i] = (float)(iData[i] >> totalDivBy2);
+      } else {
+        DebugToResult("Conversion of signed long to floats\n");
+        for (i = 0; i < width * height; i++)
+          flOut[i] = (float)iData[i];
+      }
+
+    } else {
+      scale = floatScaling / (float)pow(2., totalDivBy2);
+      flIn = (float *)imageData;
+      DebugPrintf(mess, "Division of floats by 2^%d and scaling by %f to floats\n", 
+        totalDivBy2, floatScaling);
+      for (i = 0; i < width * height; i++)
+        flOut[i] = scale * flIn[i];
+    }
+
   } else if (divideBy2 > 0) {
 
-    // Divide by 2
+    // Divide by 2 to signed shorts mostly
     outData = (short *)array;
-    if (isUnsignedInt) {
+    if (isUnsignedInt) {  // unsigned int
       if (byteSize == 1) {
         bData = (unsigned char *)imageData;
         if (floatScaling == 1.) {
@@ -4493,11 +4569,22 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
           outData[i] = (short)((float)usData[i] * floatScaling / 2.f + 0.5f);
       } else if (floatScaling == 1.) {
 
-        // unsigned long to short
-        DebugToResult("Dividing unsigned integers by 2\n");
-        uiData = (unsigned int *)imageData;
-        for (i = 0; i < width * height; i++)
-          outData[i] = (short)(uiData[i] / 2);
+        if (extraDivBy2 > 0) {
+
+          // unsigned long to short divide by 2^n
+          DebugPrintf(mess, "Dividing unsigned integers by 2*2^%d into shorts\n",
+            extraDivBy2);
+          uiData = (unsigned int *)imageData;
+          for (i = 0; i < width * height; i++)
+            outData[i] = (short)(uiData[i] >> totalDivBy2);
+        } else {
+
+          // unsigned long to short divide by 2
+          DebugToResult("Dividing unsigned integers by 2\n");
+          uiData = (unsigned int *)imageData;
+          for (i = 0; i < width * height; i++)
+            outData[i] = (short)(uiData[i] / 2);
+        }
       } else {
 
         // unsigned long to short with scaling and possible offset
@@ -4528,7 +4615,7 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
           }
         }
       }
-    } else if (isInteger) {
+    } else if (isInteger) {       // Signed int
       if (byteSize == 2 && floatScaling == 1.) {
 
         // signed short to short
@@ -4545,11 +4632,22 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
           outData[i] = (short)((float)sData[i] * floatScaling / 2.f + 0.5f);
       } else if (floatScaling == 1.) {
 
-        // signed long to short
-        DebugToResult("Dividing signed integers by 2\n");
-        iData = (int *)imageData;
-        for (i = 0; i < width * height; i++)
-          outData[i] = (short)(iData[i] / 2);
+        if (extraDivBy2 > 0) {
+
+          // signed long to short divide by 2^n
+          DebugPrintf(mess, "Dividing signed integers by 2*2^%d into shorts\n",
+            extraDivBy2);
+          iData = (int *)imageData;
+          for (i = 0; i < width * height; i++)
+            outData[i] = (short)(iData[i] >> totalDivBy2);
+        } else {
+
+          // signed long to short divide by 2
+          DebugToResult("Dividing signed integers by 2\n");
+          iData = (int *)imageData;
+          for (i = 0; i < width * height; i++)
+            outData[i] = (short)(iData[i] / 2);
+        }
       } else {
 
         // signed long to short with scaling
@@ -4568,7 +4666,8 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
 
       // Float to short
       char mess[512];
-      sprintf(mess, "Dividing floats by 2 with scaling by %f\n", floatScaling);
+      sprintf(mess, "Dividing floats by 2^%d to short with scaling by %f\n", totalDivBy2,
+        floatScaling);
       DebugToResult(mess);
       flIn = (float *)imageData;
       if (useThreads > 1) {  // K2 super-res
@@ -4586,15 +4685,18 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
           }
         }
       } else {
+
+        // other float to short with division by 2^n
+        scale = floatScaling / (float)pow(2., totalDivBy2);
         for (i = 0; i < width * height; i++) {
-          flTmp = flIn[i] * floatScaling / 2.f + 0.5f;
+          flTmp = flIn[i] * scale + 0.5f;
           B3DCLAMP(flTmp, -32767.f, 32767.f);
           outData[i] = (short)flTmp;
         }
       }
     }
 
-  } else {
+  } else {  // NOt dividedBy2: to unsigned shorts or floats
 
     // No division by 2: Convert long integers to unsigned shorts
     usData = (unsigned short *)array;
@@ -4625,11 +4727,20 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
 
       } else if (floatScaling == 1.) {
 
-        // If these are long integers and they are unsigned, just transfer
-        DebugToResult("Converting unsigned integers to unsigned shorts\n");
         uiData = (unsigned int *)imageData;
-        for (i = 0; i < width * height; i++)
-          usData[i] = (unsigned short)uiData[i];
+        if (extraDivBy2 > 0) {
+
+          // Long integers with division to unsigned short
+          DebugToResult("Extra dividing unsigned integers to unsigned shorts\n");
+          for (i = 0; i < width * height; i++)
+            usData[i] = (unsigned short)(uiData[i] >> extraDivBy2);
+        } else {
+
+          // If these are long integers and they are unsigned, just transfer
+          DebugToResult("Converting unsigned integers to unsigned shorts\n");
+          for (i = 0; i < width * height; i++)
+            usData[i] = (unsigned short)uiData[i];
+        }
       } else {
 
         // Or scale them
@@ -4684,18 +4795,22 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
       } else if (floatScaling == 1.) {
 
         // Otherwise there are ints: need to truncate at zero to copy signed to unsigned
-        DebugToResult("Converting signed integers to unsigned shorts with "
-          "truncation\n");
         iData = (int *)imageData;
-        for (i = 0; i < width * height; i++) {
-          if (iData[i] >= 0)
-            usData[i] = (unsigned short)iData[i];
-          else
-            usData[i] = 0;
+        if (extraDivBy2 > 0) {
+          DebugToResult("Extra dividing signed integers to unsigned shorts with "
+            "truncation\n");
+          for (i = 0; i < width * height; i++)
+            usData[i] = B3DMAX(0, (unsigned short)(iData[i] >> extraDivBy2));
+        } else {
+
+          DebugToResult("Converting signed integers to unsigned shorts with "
+            "truncation\n");
+          for (i = 0; i < width * height; i++)
+              usData[i] = B3DMAX(0, (unsigned short)iData[i]);
         }
       } else {
 
-        // Scaling, convert to usigned and truncate at 0
+        // Scaling, convert to unsigned and truncate at 0
           postOffset = 0.5f - linearOffset * floatScaling;
           sprintf(mess,"Truncating signed integers to unsigned shorts,  scaling by "
             "%f  offset %f -> %f\n", floatScaling, linearOffset, postOffset);
@@ -4728,8 +4843,10 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
           }
         } 
       } else {
+        scale = floatScaling / (float)pow(2., B3DMAX(0, extraDivBy2));
+        DebugPrintf(mess, "fsc %f  d2 %d  scale %f\n", floatScaling, extraDivBy2, scale);
         for (i = 0; i < width * height; i++) {
-          flTmp = flIn[i] * floatScaling + 0.5f;
+          flTmp = flIn[i] * scale + 0.5f;
           B3DCLAMP(flTmp, 0.f, 65535.f);
           usData[i] = (unsigned short)flTmp;
         }
@@ -4826,16 +4943,16 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   // Otherwise look for all matching files in directory
   if (sLastRefName.length() && strstr(sLastRefName.c_str(), (prefStr + "Ref").c_str())
     && !sLastRefDir.compare(saveDir)) {
-    //sprintf(td->strTemp, "Finding %s\n", sLastRefName.c_str());
+    sprintf(td->strTemp, "Finding %s\n", sLastRefName.c_str());
     hFindCopy = FindFirstFile(sLastRefName.c_str(), &findCopyData);
     namesOK = true;
   } else {
     sprintf(td->strTemp, "%s\\%sRef_*.%s", saveDir.c_str(), prefStr.c_str(),
       extension[extInd]);
     hFindCopy = FindFirstFile(td->strTemp, &findCopyData);
-    //sprintf(td->strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefStr.c_str());
+    sprintf(td->strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefStr.c_str());
   }
-  //DebugToResult(td->strTemp);
+  DebugToResult(td->strTemp);
 
   // Test that file or all candidate files in the directory and stop if find one
   // is sufficiently newer then the ref
@@ -4850,8 +4967,8 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
       // Comparisons could/should be done with CompareFileTime but this conversion works
       double copySec = 429.4967296 * findCopyData.ftCreationTime.dwHighDateTime + 
         1.e-7 * findCopyData.ftCreationTime.dwLowDateTime;
-      /*sprintf(td->strTemp, "refSec  %f  copySec %f\n", td->curRefTime, copySec);
-      DebugToResult(td->strTemp);*/
+      sprintf(td->strTemp, "refSec  %f  copySec %f\n", td->curRefTime, copySec);
+      DebugToResult(td->strTemp);
       needCopy = td->curRefTime > copySec + 10.;
       maxCopySec = B3DMAX(maxCopySec, copySec);
       if (!needCopy || !FindNextFile(hFindCopy, &findCopyData))
@@ -4939,8 +5056,13 @@ static int CheckK2ReferenceTime(ThreadData *td)
     return 1;
   } 
   FindClose(hFindRef);
-  td->curRefTime = 429.4967296 * findRefData.ftCreationTime.dwHighDateTime + 
-        1.e-7 * findRefData.ftCreationTime.dwLowDateTime;
+
+  // 5/11/20: With K3 GMS 3.32 on Server 2012, the creation time did not change with a new
+  // reference.  So switch from creation time to its max with the modification time.
+  td->curRefTime = B3DMAX(429.4967296 * findRefData.ftCreationTime.dwHighDateTime + 
+    1.e-7 * findRefData.ftCreationTime.dwLowDateTime, 
+    429.4967296 * findRefData.ftLastWriteTime.dwHighDateTime +
+    1.e-7 * findRefData.ftLastWriteTime.dwLowDateTime);
   return 0;
 }
 
@@ -5081,6 +5203,10 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
     strncpy(mTD.strFilterName, filter, MAX_FILTER_NAME - 1);
     mTD.strFilterName[MAX_FILTER_NAME - 1] = 0x00;
   }
+  mTD.bReturnFloats = (flags & PLUGCAM_RETURN_FLOAT) && mTD.OneViewType;
+  mTD.iExtraDivBy2 = 0;
+  if (flags & PLUGCAM_DIV_BY_MORE)
+    mTD.iExtraDivBy2 = (flags >> PLUGCAM_MOREDIV_BITS) & PLUGCAM_MOREDIV_MASK;
   m_bSaveFrames = saveFrames;
   mTD.iAntialias = flags & K2_ANTIALIAS_MASK;
   mTD.bUseCorrDblSamp = (flags & K3_USE_CORR_DBL_SAMP) != 0;
@@ -5659,6 +5785,7 @@ int TemplatePlugIn::ReturnDeferredSum(short *array, long *arrSize, long *width,
 		long *height)
 {
   bool useFinal = mTDcopy.iAntialias || mTDcopy.bMakeSubarea || mTDcopy.bUseFrameAlign;
+  int sizeScale = sFloatDeferredSum ? 2 : 1;
   m_bNextSaveResultsFromCopy = true;
   if (m_HAcquireThread && WaitForAcquireThread(WAIT_FOR_THREAD))
     return 1;
@@ -5671,11 +5798,11 @@ int TemplatePlugIn::ReturnDeferredSum(short *array, long *arrSize, long *width,
     sprintf(mTD.strTemp, "Warning: deferred sum is larger than the supplied array (sum "
       "%dx%d = %d, array %d)\n", *width, *height, *width * *height, *arrSize);
     ProblemToResult(mTD.strTemp);
-    *width = *arrSize / *height;
+    *width = *arrSize / (*height * sizeScale);
   }
-  *arrSize = *width * *height;
+  *arrSize = *width * *height * sizeScale;
   if (*arrSize)
-    memcpy(array, sDeferredSum, *arrSize * 2);
+    memcpy(array, sDeferredSum, *arrSize * 2 * sizeScale);
   delete [] sDeferredSum;
   sDeferredSum = NULL;
   sValidDeferredSum = false;

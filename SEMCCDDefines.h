@@ -4,7 +4,7 @@
  */
 #ifndef SEMCCD_DEFINES_H
 
-#define SEMCCD_PLUGIN_VERSION    115
+#define SEMCCD_PLUGIN_VERSION    116
 
 // Error codes
 enum {IMAGE_NOT_FOUND = 1, WRONG_DATA_TYPE, DM_CALL_EXCEPTION, NO_STACK_ID, STACK_NOT_3D,
@@ -51,6 +51,12 @@ FRAMEDOC_OPEN_ERR, FRAMEDOC_WRITE_ERR, NULL_IMAGE};
 #define K2_MAKE_ALIGN_COM      (1 << 11)
 #define K2_SAVE_COM_AFTER_MDOC (1 << 13)
 #define K2_REDUCED_Y_SCALE     100000.
+
+// Definitions for camera return types: to be sent with SetK2Parameters flags
+#define PLUGCAM_RETURN_FLOAT  (1 << 16)
+#define PLUGCAM_DIV_BY_MORE   (1 << 17)
+#define PLUGCAM_MOREDIV_BITS    18
+#define PLUGCAM_MOREDIV_MASK    15    // bits 18-21 #'d from 0
 
 // Flags for SetupFrameAligning (bit 1 is apply gain ref, bit 7 is for early return)
 // (And bit 5 is for synchronous align/save, and bit 6 for apply defects, 
