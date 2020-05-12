@@ -4943,16 +4943,16 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   // Otherwise look for all matching files in directory
   if (sLastRefName.length() && strstr(sLastRefName.c_str(), (prefStr + "Ref").c_str())
     && !sLastRefDir.compare(saveDir)) {
-    sprintf(td->strTemp, "Finding %s\n", sLastRefName.c_str());
+    //sprintf(td->strTemp, "Finding %s\n", sLastRefName.c_str());
     hFindCopy = FindFirstFile(sLastRefName.c_str(), &findCopyData);
     namesOK = true;
   } else {
     sprintf(td->strTemp, "%s\\%sRef_*.%s", saveDir.c_str(), prefStr.c_str(),
       extension[extInd]);
     hFindCopy = FindFirstFile(td->strTemp, &findCopyData);
-    sprintf(td->strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefStr.c_str());
+    //sprintf(td->strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefStr.c_str());
   }
-  DebugToResult(td->strTemp);
+  //DebugToResult(td->strTemp);
 
   // Test that file or all candidate files in the directory and stop if find one
   // is sufficiently newer then the ref
@@ -4967,8 +4967,8 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
       // Comparisons could/should be done with CompareFileTime but this conversion works
       double copySec = 429.4967296 * findCopyData.ftCreationTime.dwHighDateTime + 
         1.e-7 * findCopyData.ftCreationTime.dwLowDateTime;
-      sprintf(td->strTemp, "refSec  %f  copySec %f\n", td->curRefTime, copySec);
-      DebugToResult(td->strTemp);
+      /*sprintf(td->strTemp, "refSec  %f  copySec %f\n", td->curRefTime, copySec);
+      DebugToResult(td->strTemp);*/
       needCopy = td->curRefTime > copySec + 10.;
       maxCopySec = B3DMAX(maxCopySec, copySec);
       if (!needCopy || !FindNextFile(hFindCopy, &findCopyData))
