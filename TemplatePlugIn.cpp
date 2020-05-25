@@ -51,6 +51,7 @@ using namespace Gatan;
 #include "TemplatePlugIn.h"
 #include <string>
 #include <vector>
+#include <queue>
 using namespace std ;
 
 #include <stdio.h>
@@ -95,7 +96,8 @@ void CorDefUserToRotFlipCCD(int operation, int binning, int &camSizeX, int &camS
 enum {CHAN_UNUSED = 0, CHAN_ACQUIRED, CHAN_RETURNED};
 enum {NO_SAVE = 0, SAVE_FRAMES};
 enum {NO_DEL_IM = 0, DEL_IMAGE};
-enum {WAIT_FOR_THREAD = 0, WAIT_FOR_RETURN, WAIT_FOR_NEW_SHOT, WAIT_FOR_CONTINUOUS};
+enum {WAIT_FOR_THREAD = 0, WAIT_FOR_RETURN, WAIT_FOR_NEW_SHOT, WAIT_FOR_CONTINUOUS,
+  WAIT_FOR_TILT_QUEUE };
 
 // Mapping from program read modes (0-2) to values for K2, and from special modes used to 
 // signal K3 linear and super-res (3 and 4).  The read mode index >= 0 is
@@ -132,6 +134,19 @@ static short *sContinuousArray = NULL;
 static short *sDeferredSum = NULL;
 static bool sValidDeferredSum = false;
 static bool sFloatDeferredSum = false;
+
+// queue for frame tilt sums and their properties; properties of tilt sum last returned
+static queue<short *> sTiltSumQueue;
+static queue<int> sNumInTiltSum;
+static queue<int> sIndexOfTiltSum;
+static queue<int> sStartSliceOfTiltSum;
+static queue<int> sEndSliceOfTiltSum;
+static int sTiltQueueSize = 0;
+static int sLastNumInTiltSum = 0;
+static int sLastIndexOfTiltSum = 0;
+static int sLastStartOfTiltSum = 0;
+static int sLastEndOfTiltSum = 0;
+
 
 // Static data about loaded gain refs that needs to be set by the threads
 static float *sK2GainRefData[2] = {NULL, NULL};
@@ -288,7 +303,13 @@ struct ThreadData
   int iExtraDivBy2;
   float fFrameThresh;
   bool bDoingFrameTS;
+  float fThreshFrac;
+  int iMinGapForTilt;
+  int iNumDropInSum;
+  vector<float> tiltAngles;
+  bool bMakeTiltSums;
   bool bSaveComAfterMdoc;
+  bool bAlignOfTiltFailed;
   
   // Items needed internally in save routine and its functions
   FILE *fp;
@@ -317,6 +338,10 @@ static int AlignOrSaveImage(ThreadData *td, short *outForRot, bool saveImage,
   bool alignFrame, int slice, bool finalFrame, int &fileSlice, int &tmin, int &tmax,
   float &meanSum, double *procWall, double &saveWall, double &alignWall, 
   double &wallStart);
+static int AlignSaveGrabbedImage(ThreadData *td, short *outForRot, int grabInd, 
+  int grabSlice, int maxGrabInd, int onlyAorS, int &fileSlice, int &tmin, int &tmax, 
+  float &meanSum, double *procWall, double &saveWall, double &alignWall, 
+  double &wallStart, int &errorRet);
 static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, int slice, 
   bool finalFrame, bool openForFirstSum, int &fileSlice, int &tmin, int &tmax, 
   float &meanSum, double *procWall, double &saveWall, double &wallStart);
@@ -329,8 +354,11 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
 static void SimulateSuperRes(ThreadData *td, void *image, double time);
 static int InitializeFrameAlign(ThreadData *td);
 static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice);
+static void CleanUpFrameAlign(ThreadData *td);
 static int WriteAlignComFile(ThreadData *td, string inputFile, int ifMdoc);
 static void AddToSum(ThreadData *td, void *data, void *sumArray);
+static void AddTiltSumToQueue(ThreadData *td, int divideBy2, int transpose, int numInTilt,
+  int tiltIndex, int firstSlice, int lastSlice);
 static void AccumulateWallTime(double &cumTime, double &wallStart);
 static void DeleteImageIfNeeded(ThreadData *td, DM::Image &image, bool *needsDelete);
 static void SetWatchedDataValue(int &member, int value);
@@ -392,9 +420,9 @@ public:
     double frameTime, BOOL alignFrames, BOOL saveFrames, long rotationFlip, long flags, 
     double dummy1, double dummy2, double dummy3, double dummy4, char *filter);
   void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, long flags,
-    double nSumAndGrab, double frameThresh, double dummy3, double dummy4, char *dirName, 
-    char *rootName, char *refName, char *defects, char *command, char *sumList, 
-    char *frameTitle, long *error);
+    double nSumAndGrab, double frameThresh, double threshFracPlus, double dummy4, 
+    char *dirName, char *rootName, char *refName, char *defects, char *command, 
+    char *sumList, char *frameTitle, char *tiltString, long *error);
   void GetFileSaveResult(long *numSaved, long *error);
   int GetDefectList(short xyPairs[], long *arrSize, long *numPoints, 
     long *numTotal);
@@ -413,6 +441,8 @@ public:
   void MakeAlignComFile(long flags, long dumInt1, double dumDbl1, 
     double dumDbl2, char *mdocName, char *mdocFileOrText, long *error);
   int ReturnDeferredSum(short array[], long *arrSize, long *width, long *height); 
+  void GetTiltSumProperties(long *index, long *numFrames, double *angle,
+    long *firstSlice, long *lastSlice, long *dumInt1, double *dumDbl1, double *dumDbl2);
   double ExecuteClientScript(char *strScript, BOOL selectCamera);
   int AcquireAndTransferImage(void *array, int dataSize, long *arrSize, long *width,
     long *height, long divideBy2, long transpose, long delImage, long saveFrames);
@@ -444,6 +474,7 @@ public:
   int WaitUntilReady(long which);
   void ClearSpecialFlags() {mTD.iAntialias = 0; mTD.bGainNormSum = false;
     mTD.bMakeSubarea = false;};
+  void ClearTiltSums();
   int ManageEarlyReturn(int flags, int iSumAndGrab);
   virtual void Start();
   virtual void Run();
@@ -807,6 +838,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   // Save incoming processing and strip the continuous flags
   procIn = processing;
   processing &= 7;
+  ClearTiltSums();
 
   // Process flags to do with saving/aligning for consistency
   if (m_bSaveFrames && frameCapable && mTD.bDoseFrac && mTD.strSaveDir.length() && 
@@ -822,11 +854,13 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     mTD.iExpectedFrames = B3DNINT(exposure / mTD.dFrameTime);
   if (mTD.iExpectedFrames < 2)
     mTD.bUseFrameAlign = false;
-  if (saveFrames == NO_SAVE && !mTD.bUseFrameAlign) {
+  if (saveFrames == NO_SAVE && (!mTD.bUseFrameAlign || !mTD.bEarlyReturn)) {
     mTD.bEarlyReturn = false;
     mTD.bMakeDeferredSum = false;
   }
-  if (mTD.bUseFrameAlign && mTD.bEarlyReturn)
+  if (!(mTD.iSaveFlags & K2_SKIP_BELOW_THRESH) || mTD.fFrameThresh <= 0)
+    mTD.bMakeTiltSums = false;
+  if (mTD.bUseFrameAlign && mTD.bEarlyReturn && !mTD.bMakeTiltSums)
     mTD.bMakeDeferredSum = true;
   if (saveFrames == SAVE_FRAMES)
     sLastSaveFloatScaling = mTD.fFloatScaling / (divideBy2 ? 2.f : 1.f);
@@ -1046,8 +1080,9 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     saveFrames == SAVE_FRAMES && newProc == NEWCM_GAIN_NORMALIZED;
   if (mTD.bSaveSuperReduced)
     mTD.bSaveTimes100 = false;
-  mTD.bDoingFrameTS = saveFrames == SAVE_FRAMES && mTD.fFrameThresh > 0. &&
-    (mTD.iSaveFlags & K2_SKIP_BELOW_THRESH);
+  mTD.bDoingFrameTS = (saveFrames == SAVE_FRAMES || 
+    (mTD.bUseFrameAlign && mTD.bMakeTiltSums)) && 
+    mTD.fFrameThresh > 0. && (mTD.iSaveFlags & K2_SKIP_BELOW_THRESH);
 
   // The full sizes are chip sizes.  Divide them by binning to get size of image that
   // will be produced by camera, but not for K3 where we need to reduce image here
@@ -1314,6 +1349,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 int TemplatePlugIn::GetGainReference(float *array, long *arrSize, long *width, 
                   long *height, long binning)
 {
+  ClearTiltSums();
+ 
   // It seems that the gain reference is not flipped when images are
   int retval, tmp;
   long transpose = 0;
@@ -1435,7 +1472,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         "Started thread, going into wait loop\n");
       if (mTD.bDoContinuous)
         return 0;
-      retval = WaitForAcquireThread(mTD.bEarlyReturn ? WAIT_FOR_RETURN : WAIT_FOR_THREAD);
+      retval = WaitForAcquireThread(B3DCHOICE(mTD.bMakeTiltSums, WAIT_FOR_TILT_QUEUE,
+        mTD.bEarlyReturn ? WAIT_FOR_RETURN : WAIT_FOR_THREAD));
       mTD.iErrorFromSave = mTDcopy.iErrorFromSave;
       mTD.iFramesSaved = mTDcopy.iFramesSaved;
       useFinal = mTDcopy.iAntialias || mTDcopy.bMakeSubarea || mTDcopy.bUseFrameAlign &&
@@ -1475,9 +1513,10 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 DWORD TemplatePlugIn::WaitForAcquireThread(int waitType)
 {
   const char *messages[] = {"thread to end", "exposure and frame sum to complete",
-    "ready for single-shot", "continuous exposure to end"};
+    "ready for single-shot", "continuous exposure to end", "a tilt sum to be ready"};
   double quitStart = -1.;
   double waitStart = GetTickCount();
+  bool done;
   DWORD retval;
   sprintf(m_strTemp, "Waiting for %s  %d\n", messages[waitType], 
     waitType == WAIT_FOR_CONTINUOUS ? sJ : 0);
@@ -1489,8 +1528,14 @@ DWORD TemplatePlugIn::WaitForAcquireThread(int waitType)
       m_HAcquireThread = NULL;
       return retval;
     }
-    if ((waitType == WAIT_FOR_RETURN && GetWatchedDataValue(mTDcopy.iReadyToReturn)) ||
-      (waitType == WAIT_FOR_NEW_SHOT && GetWatchedDataValue(mTDcopy.iReadyToAcquire)))
+    WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
+
+    done = (waitType == WAIT_FOR_RETURN && mTDcopy.iReadyToReturn) ||
+      (waitType == WAIT_FOR_NEW_SHOT && mTDcopy.iReadyToAcquire) ||
+      (waitType == WAIT_FOR_TILT_QUEUE && (sTiltQueueSize > 0 ||
+        mTDcopy.iReadyToAcquire));
+    ReleaseMutex(sDataMutexHandle);
+    if (done)
       return 0;
     if (waitType == WAIT_FOR_CONTINUOUS && TickInterval(waitStart) > 5000.) {
       /*sprintf(m_strTemp, "Giving up on thread ending, counter %d  time %.3f\n", sJ,
@@ -1533,16 +1578,21 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 #else
   ImageData::image_data_t fData;
 #endif
-  std::string filter = td->bAlignFrames ? td->strFilterName : "";
+  string filter = td->bAlignFrames ? td->strFilterName : "";
   void *imageData;
   short *outForRot;
   short *procOut;
+  vector<float> frameMeans;
+  vector<float> tiltMeans;
+  int firstSliceAboveThresh, lastSliceAboveThresh = -1, numInTilt = 0, tiltIndex = 0;
   bool doingStack, needProc, needTemp, needSum, exposureDone, copiedToProc, getDose = 0;
   bool stackAllReady, doingAsyncSave, frameNeedsDelete = false;
   double retval, saveWall, getFrameWall, wallStart, alignWall, procSum = 0.;
   double procWall[6] = {0., 0., 0., 0., 0., 0.};
-  int fileSlice, tmin, tmax, numSlices, grabInd, grabSlice;
-  float meanSum, binForDose; 
+  int fileSlice, tmin, tmax, numSlices;
+  int grabInd = -1, grabSlice = -1, maxGrabInd = -1, grabProcInd = 0;
+  float meanSum, binForDose, threshForTilt = td->fFrameThresh; 
+  float avgTilt, sdTilt, SEMtilt, diff, minDiff;
   bool saveOrFrameAlign = saveFrames || td->bUseFrameAlign;
   bool useOldAPI = GMS_SDK_VERSION < 31 || td->bUseOldAPI;
   bool alignBeforeProc = td->bFaKeepPrecision && !td->iNumGrabAndStack;
@@ -1564,14 +1614,17 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   needTemp = saveOrFrameAlign && td->bEarlyReturn;
   needSum = (saveFrames && 
     ((td->iNumFramesToSum != 0 && (!useOldAPI || (useOldAPI && td->bEarlyReturn))) || 
-    (!useOldAPI && td->bMakeDeferredSum))) ||
-    (td->bUseFrameAlign && td->bEarlyReturn && td->iNumFramesToSum != 0); 
+    (!useOldAPI && (td->bMakeDeferredSum || (td->bMakeTiltSums && !td->bUseFrameAlign)))))
+    || (td->bUseFrameAlign && td->bEarlyReturn && td->iNumFramesToSum != 0); 
   td->iifile = NULL;
   td->fp = NULL;
   td->rotBuf = td->tempBuf = NULL;
   td->sumBuf = NULL;
   td->outSumBuf = NULL;
   td->pack4bitBuf = NULL;
+  td->bAlignOfTiltFailed = false;
+  if (td->bUseFrameAlign)
+    td->iNumDropInSum = 0;
   td->numAddedToOutSum = 0;
   td->outSumFrameIndex = 0;
   td->numOutSumsDoneAtIndex = 0;
@@ -1867,19 +1920,35 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           if (td->bAsyncSave) {
             wallStart = wallTime();
             while (1) {
-              image = stack->GetNextFrame(&exposureDone);   j++;
-              frameNeedsDelete = image.IsValid();
-              if (frameNeedsDelete) {
-                double elapsed = 0.;
-                bool elapsedRet = stack->GetElapsedExposureTime(elapsed);
-                sprintf(td->strTemp, "Got frame %d of %d   exp done %d  "
-                  "elapsed %s %.2f\n", stackSlice + 1, numSlices, exposureDone ? 1:0, 
-                  elapsedRet ? "T" : "F", elapsed);
-                DebugToResult(td->strTemp);
+              double elapsed = 0.;
+              bool elapsedRet;
+              if (grabProcInd < maxGrabInd && stack->GetElapsedExposureTime(elapsed) &&
+                elapsed < td->dFrameTime * (stackSlice + 1)) {
+                DebugPrintf(td->strTemp, "Processing frame %d from grab stack\n", 
+                  grabProcInd);
+                i = AlignSaveGrabbedImage(td, outForRot, grabProcInd, grabSlice,
+                  maxGrabInd, td->bMakeTiltSums ? 1 : 0, fileSlice, tmin, tmax, meanSum, 
+                  procWall, saveWall, alignWall, wallStart, errorRet);
+                delete[] td->grabStack[grabProcInd];
+                td->grabStack[grabProcInd] = NULL;
+                grabProcInd++;
+                if (i)
+                  break;
+              } else {
+                image = stack->GetNextFrame(&exposureDone);   j++;
+                frameNeedsDelete = image.IsValid();
+                if (frameNeedsDelete) {
+                  elapsed = 0.;
+                  elapsedRet = stack->GetElapsedExposureTime(elapsed);
+                  sprintf(td->strTemp, "Got frame %d of %d   exp done %d  "
+                    "elapsed %s %.2f\n", stackSlice + 1, numSlices, exposureDone ? 1 : 0,
+                    elapsedRet ? "T" : "F", elapsed);
+                  DebugToResult(td->strTemp);
+                }
+                if (frameNeedsDelete || stackSlice >= numSlices)
+                  break;
               }
-              if (frameNeedsDelete || stackSlice >= numSlices)
-                break;
-
+ 
               // Sleep while processing events.  If it returns false, it is a quit,
               // so break and let the loop finish
               if (!SleepMsg(10) || GetWatchedDataValue(td->iDMquitting)) {
@@ -1947,8 +2016,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           // IF dropping frames below threshold, now do the analysis of rapid mean
           if (td->bDoingFrameTS) {
             int imType, numSample = 20000, sampXstart, sampYstart, sampXuse, sampYuse;
-            float sampMean = 2 * td->fFrameThresh, fracSamp;
-            unsigned char **imLinePtrs = makeLinePointers(imageData, td->width, 
+            float sampMean = 2 * threshForTilt / sWriteScaling, fracSamp;
+            unsigned char **imLinePtrs = makeLinePointers(imageData, td->width,
               td->height, td->byteSize);
             if (td->byteSize == 1)
               imType = 0;
@@ -1970,10 +2039,67 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
                 sampXstart, sampYstart, sampXuse, sampYuse, &sampMean);
             }
             free(imLinePtrs);
-            if (sampMean * sWriteScaling < td->fFrameThresh) {
+            sampMean *= sWriteScaling;
+
+            // Start a new tilt now if a big enough gap has occurred and there have
+            // been frames in a previous tilt
+            if (stackSlice - lastSliceAboveThresh > td->iMinGapForTilt && numInTilt > 0) {
+              DebugPrintf(td->strTemp, "Starting a new tilt %f   tilts %d  framemeans %d"
+                "\n", td->fThreshFrac > 0, td->tiltAngles.size(), frameMeans.size());
+
+              // If doing dynamic frame thresholds first get median/mean for last tilt
+              if (td->fThreshFrac > 0 && td->tiltAngles.size()) {
+                if ((int)frameMeans.size() <= 4)
+                  avgSD(&frameMeans[0], (int)frameMeans.size(), &avgTilt, &sdTilt,
+                    &SEMtilt);
+                else
+                  rsFastMedianInPlace(&frameMeans[0], (int)frameMeans.size(), &avgTilt);
+                tiltMeans.push_back(avgTilt);
+
+                // Next find nearest tilt angle and adjust threshold, or leave it alone
+                // if we've run out of angles
+                minDiff = 1.e10;
+                float minAngle;
+                if (tiltMeans.size() < td->tiltAngles.size()) {
+                  for (i = 0; i < (int)tiltMeans.size(); i++) {
+                    diff = td->tiltAngles[tiltMeans.size()] - td->tiltAngles[i];
+                    if (diff < minDiff) {
+                      minDiff = diff;
+                      threshForTilt = tiltMeans[i] * td->fThreshFrac;
+                      minAngle = td->tiltAngles[i];
+                    }
+                  }
+                  DebugPrintf(td->strTemp, "Threshold set to %f for %.1f based on mean at"
+                    " %.1f\n", threshForTilt, td->tiltAngles[tiltMeans.size()], minAngle);
+                }
+                frameMeans.clear();
+              }
+
+              // If saving tilt sums, call the routine to process and put array on queue
+              // Drop an isolated first frame (CDS mode starts out too high)
+              if (td->bMakeTiltSums && numInTilt > td->iNumDropInSum) {
+                if (numInTilt > 1 || lastSliceAboveThresh > 0) {
+                  if (!td->bAlignOfTiltFailed)
+                    AddTiltSumToQueue(td, divideBy2, transpose, numInTilt, tiltIndex,
+                      firstSliceAboveThresh, lastSliceAboveThresh);
+                } else {
+                  if (td->bUseFrameAlign) {
+                    CleanUpFrameAlign(td);
+                  } else
+                    memset(td->sumBuf, 0, td->width * td->height * 4);
+                }
+              }
+
+              // Adjust other variables for new tilt
+              if (numInTilt > 1 || lastSliceAboveThresh > 0)
+                tiltIndex++;
+              numInTilt = 0;
+            }
+
+            if (sampMean < threshForTilt) {
               if (stackSlice > 0 && (stackSlice < numSlices - 1 || !stackAllReady)) {
                 sprintf(td->strTemp, "Skipping frame %d with mean = %.2f\n",
-                  stackSlice + 1, sampMean * sWriteScaling);
+                  stackSlice + 1, sampMean);
                 DebugToResult(td->strTemp);
                 stackSlice++;
                 delete imageLp;
@@ -1983,8 +2109,25 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
               } else {
                 sliceForList = -1 - stackSlice;
                 DebugPrintf(td->strTemp, "Writing required frame %d with mean = %.2f but"
-                  " putting %d in saved list\n",  stackSlice + 1, sampMean*sWriteScaling, 
-                  sliceForList);
+                  " putting %d in saved list\n", stackSlice + 1, sampMean, sliceForList);
+              }
+            } else {
+              if (numInTilt == td->iNumDropInSum)
+                firstSliceAboveThresh = stackSlice;
+              lastSliceAboveThresh = stackSlice;
+              numInTilt++;
+              if (td->fThreshFrac > 0 && td->tiltAngles.size())
+                frameMeans.push_back(sampMean);
+              if (td->bMakeTiltSums) {
+                if (td->bUseFrameAlign && numInTilt == 1) {
+                  i = InitializeFrameAlign(td);
+                  td->bAlignOfTiltFailed = i != 0;
+                  if (i)
+                    CleanUpFrameAlign(td);
+
+                } else if (!td->bUseFrameAlign && numInTilt > td->iNumDropInSum) {
+                  AddToSum(td, imageData, td->sumBuf);
+                }
               }
             }
           }
@@ -2032,12 +2175,14 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
           // For frame alignment with high precision data, pass the float frame for
           // alignment now if there is no grabbing at all or if it is counting
-          if (alignBeforeProc) {
+          if (alignBeforeProc && !td->bAlignOfTiltFailed && 
+            !(td->bMakeTiltSums && !numInTilt)) {
             i = AlignOrSaveImage(td, td->outData, false, true, usedSlice, false, 
               fileSlice, tmin, tmax, meanSum, procWall, saveWall, alignWall, wallStart);
             if (i) {
               errorRet = td->iErrorFromSave;
-              break;
+              if (errorRet == FRAMEALI_NEXT_FRAME && !td->bMakeTiltSums)
+                break;
             }
           }
 
@@ -2050,9 +2195,17 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 #endif
           copiedToProc = false;
 
+          // Grabbing starts when the possible number of remaining slices fits in stack
+          // Record the usedSlice value at that time, and base index on usedSlice
+          if (numSlices - stackSlice <= td->iNumGrabAndStack) {
+            if (grabSlice < 0) {
+              grabSlice = usedSlice;
+              DebugToResult("Starting to grab frames from rest of stack\n");
+            }
+            grabInd = usedSlice - grabSlice;
+          }
+
           // If grabbing frames at this point, allocate the frame, copy over if not proc
-          // Don't worry about stackSlice / usedSlice: grabbing is forbidden with skipping
-          grabInd = stackSlice - (numSlices - td->iNumGrabAndStack);
           if (grabInd >= 0) {
             try {
               td->grabStack[grabInd] = new char[td->width * td->height * 
@@ -2066,6 +2219,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
               break;
             }
             procOut = (short *)td->grabStack[grabInd];
+            maxGrabInd = grabInd;
 
             // Copy the array over either if no processing is needed or if doing high 
             // precision counting mode align
@@ -2091,27 +2245,30 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           }
           AccumulateWallTime(procWall[1], wallStart);
 
-          // If just grabbing, set slice number first time, skip other steps
-          if (grabInd >= 0) {
-            if (!grabInd) {
-              grabSlice = stackSlice;
-              DebugToResult("Starting to grab frames from rest of stack\n");
-            }
-          } else {
-
+          // If just grabbing, skip other steps
+          if (grabInd < 0) {
             i = AlignOrSaveImage(td, outForRot, td->saveFrames == SAVE_FRAMES, 
-              td->bUseFrameAlign && !alignBeforeProc, usedSlice, 
+              td->bUseFrameAlign && !alignBeforeProc && !td->bAlignOfTiltFailed && 
+              !(td->bMakeTiltSums && !numInTilt), usedSlice,
               stackAllReady && stackSlice == numSlices - 1, fileSlice, tmin, tmax,
               meanSum, procWall, saveWall, alignWall, wallStart);
-            if (td->iErrorFromSave == FRAMEALI_NEXT_FRAME)
+            if (td->iErrorFromSave == FRAMEALI_NEXT_FRAME) 
               errorRet = td->iErrorFromSave;
 
             // Save the image to file; keep going on error if need a sum
-            if (errorRet || (i && !(needSum && usedSlice < td->iNumFramesToSum)))
+            if ((errorRet && !td->bAlignOfTiltFailed) || 
+              (i && !(needSum && usedSlice < td->iNumFramesToSum)))
               break;
 
-          }
+            // Except if aligning and saving in frame TS, align now so result is available
+            // ASAP
+          } else if (td->bUseFrameAlign && td->bMakeTiltSums && !td->bAlignOfTiltFailed &&
+            !(td->bMakeTiltSums && !numInTilt)) {
+            i = AlignSaveGrabbedImage(td, outForRot, grabInd, grabSlice,
+              maxGrabInd, -1, fileSlice, tmin, tmax, meanSum,
+              procWall, saveWall, alignWall, wallStart, errorRet);
 
+          }
           // Increment slice, clean up image at end of slice loop
           stackSlice++;
           usedSlice++;
@@ -2121,26 +2278,34 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         } while (stackSlice < numSlices || !stackAllReady);  // End of slice loop
         AccumulateWallTime(procWall[1], wallStart);
 
+        // Add a final tilt sum if one was still underway at end of exposure
+        if (td->bMakeTiltSums && numInTilt > td->iNumDropInSum && !td->bAlignOfTiltFailed) {
+          AddTiltSumToQueue(td, divideBy2, transpose, numInTilt, tiltIndex,
+            firstSliceAboveThresh, lastSliceAboveThresh);
+        } 
+
+        // If there have been no tilt sums prior to this, or none at all, something is
+        // throwing an exception (here?) which comes through when the thread exits before
+        // the return to caller.  This lets the wait for queue end and allow return first
+        if (td->bMakeTiltSums && !tiltIndex) {
+          SetWatchedDataValue(td->iReadyToAcquire, 1);
+          Sleep(50);
+        }
+
         DeleteImageIfNeeded(td, image, &frameNeedsDelete);
 
         // If there are stacked frames, align and/or rotate/flip and save them
         if (!td->iErrorFromSave && td->iNumGrabAndStack) {
 
           // Signal that we are done with the DM stack and then process
-          DebugToResult("Done with stack, processing grabbed frames\n");
+          DebugPrintf(td->strTemp, "Done with stack, processing grabbed frames %d to %d\n"
+            , grabProcInd, maxGrabInd);
           SetWatchedDataValue(td->iReadyToAcquire, 1);
-          for (grabInd = 0; grabInd < td->iNumGrabAndStack; grabInd++) {
-            td->outData = (short *)td->grabStack[grabInd];
-            i = AlignOrSaveImage(td, outForRot, td->saveFrames == SAVE_FRAMES, 
-              td->bUseFrameAlign,
-              grabSlice + grabInd, grabInd == td->iNumGrabAndStack - 1, fileSlice, tmin,
-              tmax, meanSum, procWall, saveWall, alignWall, wallStart);
-            if (td->iErrorFromSave == FRAMEALI_NEXT_FRAME)
-              errorRet = td->iErrorFromSave;
-            if (i)
+          for (grabInd = grabProcInd; grabInd <= maxGrabInd; grabInd++) {
+            if (AlignSaveGrabbedImage(td, outForRot, grabInd, grabSlice, maxGrabInd,
+              td->bMakeTiltSums ? 1 : 0,  fileSlice, tmin,
+              tmax, meanSum, procWall, saveWall, alignWall, wallStart, errorRet))
               break;
-            delete [] td->grabStack[grabInd];
-            td->grabStack[grabInd] = NULL;
           }
         }
       }
@@ -2161,33 +2326,36 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
       // For a deferred sum, simply direct the output to the temp buf and make it the 
       // deferred sum array
-      procOut = (short *)(td->bUseFrameAlign ? td->array : array);
-      if (td->bMakeDeferredSum) {
-        procOut = td->tempBuf;
-        sDeferredSum = procOut;
-        td->tempBuf = NULL;
-      }
-
-      // Return the full sum here after all temporary use of array is over
-      if (td->bUseFrameAlign) {
-        i = FinishFrameAlign(td, procOut, usedSlice);
-        if (i)
-          errorRet = td->iErrorFromSave;
-        AccumulateWallTime(alignWall, wallStart);
-      } else if (needSum && (!td->bEarlyReturn || td->bMakeDeferredSum)) {
-        ProcessImage(td->sumBuf, procOut, td->dataSize, td->width, td->height,
-          divideBy2, transpose, 4, !td->isFloat, false, td->fSavedScaling, 
-          td->fLinearOffset, 0, td->iExtraDivBy2);
-        GainNormalizeSum(td, procOut);
-        if (td->iAntialias && td->bMakeDeferredSum) {
-          sDeferredSum = (short *)td->sumBuf;
-          td->array = sDeferredSum;
-          td->sumBuf = NULL;
+      // Skip this all when making tilt sums
+      if (!td->bMakeTiltSums) {
+        procOut = (short *)(td->bUseFrameAlign ? td->array : array);
+        if (td->bMakeDeferredSum) {
+          procOut = td->tempBuf;
+          sDeferredSum = procOut;
+          td->tempBuf = NULL;
         }
-        SubareaAndAntialiasReduction(td, procOut, td->array);
-        if (td->iAntialias && td->bMakeDeferredSum) 
-          td->array = NULL;
-        AccumulateWallTime(procWall[5], wallStart);
+
+        // Return the full sum here after all temporary use of array is over
+        if (td->bUseFrameAlign) {
+          i = FinishFrameAlign(td, procOut, usedSlice);
+          if (i)
+            errorRet = td->iErrorFromSave;
+          AccumulateWallTime(alignWall, wallStart);
+        } else if (needSum && (!td->bEarlyReturn || td->bMakeDeferredSum)) {
+          ProcessImage(td->sumBuf, procOut, td->dataSize, td->width, td->height,
+            divideBy2, transpose, 4, !td->isFloat, false, td->fSavedScaling,
+            td->fLinearOffset, 0, td->iExtraDivBy2);
+          GainNormalizeSum(td, procOut);
+          if (td->iAntialias && td->bMakeDeferredSum) {
+            sDeferredSum = (short *)td->sumBuf;
+            td->array = sDeferredSum;
+            td->sumBuf = NULL;
+          }
+          SubareaAndAntialiasReduction(td, procOut, td->array);
+          if (td->iAntialias && td->bMakeDeferredSum)
+            td->array = NULL;
+          AccumulateWallTime(procWall[5], wallStart);
+        }
       }
       if (td->bMakeDeferredSum) {
         if (errorRet && sDeferredSum) {
@@ -2252,8 +2420,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   }
   td->fp = NULL;
 
-  // Save list of frames actually saved if thresholding used
-  if (td->savedFrameList.size()) {
+  // Save list of frames actually saved if thresholding used and frames saved
+  if (saveFrames && td->savedFrameList.size()) {
     string listString;
     for (i = 0; i < (int)td->savedFrameList.size(); i++) {
       sprintf(td->strTemp, "%d\n", td->savedFrameList[i]);
@@ -2305,7 +2473,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     delete [] td->tempBuf;
   if (td->iNumGrabAndStack) {
     if (td->grabStack)
-      for (grabInd = 0; grabInd < td->iNumGrabAndStack; grabInd++)
+      for (grabInd = grabProcInd; grabInd < td->iNumGrabAndStack; grabInd++)
         delete [] td->grabStack[grabInd];
     delete [] td->grabStack;
   }
@@ -2323,14 +2491,9 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         DebugToResult("Cannot find stack for deleting it\n");
     }
   }
-#ifdef _WIN64
   if (td->bUseFrameAlign) {
-    if (td->bFaUseShrMemFrame)
-      sShrMemAli.cleanup();
-    else
-      sFrameAli.cleanup();
+    CleanUpFrameAlign(td);
   }
-#endif
 
   delete unbinnedArray;
 
@@ -3290,7 +3453,7 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
   } else if (!td->K3type && td->bSaveSuperReduced)
     td->iFaDataMode = MRC_MODE_BYTE;
 
-  if (td->bUseFrameAlign && InitializeFrameAlign(td))
+  if (td->bUseFrameAlign && !td->bMakeTiltSums && InitializeFrameAlign(td))
     return 1;
 
   td->iErrorFromSave = ROTBUF_MEMORY_ERROR;
@@ -3478,6 +3641,9 @@ static int InitializeFrameAlign(ThreadData *td)
   float kFactor = 4.5f;
   float maxMaxWeight = 0.1f;
   float divideScale = td->divideBy2 ? 0.5f : 1.f;
+  int expected = td->iExpectedFrames;
+  if (td->bMakeTiltSums && td->tiltAngles.size())
+    expected /= (int)td->tiltAngles.size();
 
   // Get the scaling that will be applied to the images being aligned
   if (td->bFaKeepPrecision)
@@ -3514,14 +3680,14 @@ static int InitializeFrameAlign(ThreadData *td)
       td->iFaNumAllVsAll, td->iFaRefineIter, td->iFaHybridShifts, 
       (td->iFaDeferGpuSum | td->iFaSmoothShifts) ? 1 : 0, td->iFaGroupSize, td->width, 
       td->height, fullTaperFrac, taperFrac, td->iFaAntialiasType, 0., radius2, sigma1, 
-      sigma2, numFilters, td->iFaShiftLimit, kFactor, maxMaxWeight,0, td->iExpectedFrames, 
+      sigma2, numFilters, td->iFaShiftLimit, kFactor, maxMaxWeight,0, expected, 
       0, td->iFaGpuFlags, B3DCHOICE(sDebug, B3DMAX(1, sEnvDebug), 0));
   } else {
     ind = sFrameAli.initialize(td->iFinalBinning, td->iFaAliBinning, trimFrac, 
       td->iFaNumAllVsAll, td->iFaRefineIter, td->iFaHybridShifts, 
       (td->iFaDeferGpuSum | td->iFaSmoothShifts) ? 1 : 0, td->iFaGroupSize, td->width, 
       td->height, fullTaperFrac, taperFrac, td->iFaAntialiasType, 0., radius2, sigma1, 
-      sigma2, numFilters, td->iFaShiftLimit, kFactor, maxMaxWeight,0, td->iExpectedFrames, 
+      sigma2, numFilters, td->iFaShiftLimit, kFactor, maxMaxWeight,0, expected,
       0, td->iFaGpuFlags, B3DCHOICE(sDebug, B3DMAX(1, sEnvDebug), 0));
   }
   td->fFaRawDist = td->fFaSmoothDist = 0.;
@@ -3533,6 +3699,29 @@ static int InitializeFrameAlign(ThreadData *td)
     return 1;
   }
 #endif
+  return 0;
+}
+
+// Convenience routine for processing a grabbed image
+static int AlignSaveGrabbedImage(ThreadData *td, short *outForRot, int grabInd,
+  int grabSlice, int maxGrabInd, int onlyAorS, int &fileSlice, int &tmin, int &tmax, 
+  float &meanSum, double *procWall, double &saveWall, double &alignWall, 
+  double &wallStart, int &errorRet)
+{
+  int i;
+  td->outData = (short *)td->grabStack[grabInd];
+  i = AlignOrSaveImage(td, outForRot, td->saveFrames == SAVE_FRAMES && onlyAorS >= 0,
+    td->bUseFrameAlign && onlyAorS <= 0,
+    grabSlice + grabInd, grabInd == maxGrabInd, fileSlice, tmin,
+    tmax, meanSum, procWall, saveWall, alignWall, wallStart);
+  if (td->iErrorFromSave == FRAMEALI_NEXT_FRAME)
+    errorRet = td->iErrorFromSave;
+  if (i)
+    return i;
+  if (onlyAorS < 0)
+    return 0;
+  delete[] td->grabStack[grabInd];
+  td->grabStack[grabInd] = NULL;
   return 0;
 }
 
@@ -3574,7 +3763,12 @@ static int AlignOrSaveImage(ThreadData *td, short *outForRot, bool saveFrame,
     AccumulateWallTime(alignWall, wallStart);
     if (i) {
       td->iErrorFromSave = FRAMEALI_NEXT_FRAME;
-      return i;
+      if (td->bMakeTiltSums) {
+        td->bAlignOfTiltFailed = true;
+        CleanUpFrameAlign(td);
+      } else {
+        return i;
+      }
     }
   }
   if (saveFrame) {
@@ -4093,10 +4287,7 @@ static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice)
     td->iErrorFromSave = FRAMEALI_FINISH_ALIGN;
     delete [] xShifts;
     delete [] yShifts;
-    if (td->bFaUseShrMemFrame)
-      sShrMemAli.cleanup();
-    else
-      sFrameAli.cleanup();
+    CleanUpFrameAlign(td);
     return td->iErrorFromSave;
   }
 
@@ -4138,12 +4329,19 @@ static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice)
   }
   delete [] xShifts;
   delete [] yShifts;
+  CleanUpFrameAlign(td);
+#endif
+  return 0;
+}
+
+static void CleanUpFrameAlign(ThreadData *td)
+{
+#ifdef _WIN64
   if (td->bFaUseShrMemFrame)
     sShrMemAli.cleanup();
   else
     sFrameAli.cleanup();
 #endif
-  return 0;
 }
 
 /*
@@ -4903,6 +5101,50 @@ static void AddToSum(ThreadData *td, void *data, void *sumArray)
   }
 }
  
+/*
+* Saves a tilt sum in the queue: gets an array, processes into it, adds to the queue
+*/
+static void AddTiltSumToQueue(ThreadData *td, int divideBy2, int transpose, int numInTilt,
+  int tiltIndex, int firstSlice, int lastSlice)
+{
+  int err;
+  short *procOut, *tiltArray;
+  try {
+    tiltArray = new short[td->width * td->height];
+    if (td->bUseFrameAlign) {
+      err = FinishFrameAlign(td, tiltArray, numInTilt);
+      if (err)
+        return;
+    } else {
+      numInTilt -= td->iNumDropInSum;
+      procOut = tiltArray;
+      if (td->bMakeSubarea || td->iAntialias)
+        procOut = td->tempBuf;
+      ProcessImage(td->sumBuf, procOut, td->dataSize, td->width, td->height,
+        divideBy2, transpose, 4, !td->isFloat, false, td->fSavedScaling,
+        td->fFrameOffset * numInTilt);
+      GainNormalizeSum(td, procOut);
+      SubareaAndAntialiasReduction(td, procOut, tiltArray);
+    }
+    WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
+    sTiltSumQueue.push(tiltArray);
+    sTiltQueueSize++;
+    sNumInTiltSum.push(numInTilt);
+    sIndexOfTiltSum.push(tiltIndex);
+    sStartSliceOfTiltSum.push(firstSlice);
+    sEndSliceOfTiltSum.push(lastSlice);
+    ReleaseMutex(sDataMutexHandle);
+    DebugPrintf(td->strTemp, "Tilt sum %d added to queue by thread\n",
+      tiltIndex);
+  }
+  catch (...) {
+  }
+
+  // Clear the sum buffer
+  if (!td->bUseFrameAlign)
+    memset(td->sumBuf, 0, td->width * td->height * 4);
+}
+
 
 /*
  * Copy or write a gain reference file to the directory if there is not a newer one
@@ -5228,11 +5470,10 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
  * Setup properties for saving frames in files.  See DMCamera.cpp for call documentation
  */
 void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage, 
-                                     double pixelSize, long flags, double nSumAndGrab, 
-                                     double frameThresh, double dummy3, double dummy4, 
-                                     char *dirName, char *rootName, char *refName,
-                                     char *defects, char *command, char *sumList, 
-                                     char *frameTitle, long *error)
+  double pixelSize, long flags, double nSumAndGrab, double frameThresh, 
+  double threshFracPlus, double dummy4, char *dirName, char *rootName, char *refName,
+  char *defects, char *command, char *sumList, char *frameTitle, char *tiltString,
+  long *error)
 {
   struct _stat statbuf;
   FILE *fp;
@@ -5306,17 +5547,48 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     }
   }
 
-  // Forbid grab stack when skipping frames below threshold
-  if ((iSumAndGrab >> 16) > 0 && (flags & K2_SKIP_BELOW_THRESH) != 0 && frameThresh > 0.){
-    *error = GRAB_AND_SKIP_ERR;
-    return;
-  }
-
   // Get number of frames to sum from low 16 bits and number to stack fast from high
   *error = ManageEarlyReturn(flags, iSumAndGrab);
   if (*error)
     return;
   mTD.bMakeDeferredSum = mTD.bEarlyReturn && (flags & K2_MAKE_DEFERRED_SUM) != 0;
+  mTD.bMakeTiltSums = false;
+  mTD.iMinGapForTilt = FRAME_TS_MIN_GAP_DFLT;
+  mTD.iNumDropInSum = 0;
+  mTD.fThreshFrac = 0.;
+  mTD.tiltAngles.clear();
+  ClearTiltSums();
+
+  // Set up to use tilt angles and/or save tilt sums for frame TS
+  if ((flags & K2_SKIP_BELOW_THRESH) && frameThresh > 0.) {
+    if (flags & K2_SKIP_THRESH_PLUS) {
+      mTD.iNumDropInSum = B3DNINT(threshFracPlus / THRESH_PLUS_DROP_SCALE);
+      threshFracPlus -= THRESH_PLUS_DROP_SCALE * mTD.iNumDropInSum;
+      mTD.iMinGapForTilt = B3DNINT(threshFracPlus / THRESH_PLUS_GAP_SCALE);
+      mTD.fThreshFrac = (float)(threshFracPlus - THRESH_PLUS_GAP_SCALE * 
+        mTD.iMinGapForTilt);
+      mTD.iMinGapForTilt = B3DMAX(1, mTD.iMinGapForTilt);
+    }
+
+    // If deferred sum set, turn that flag off and set flag for tilt sums
+    if (mTD.bMakeDeferredSum) {
+      mTD.bMakeDeferredSum = false;
+      mTD.bMakeTiltSums = true;
+    }
+
+    // Tilt angles are required in either case
+    if (mTD.fThreshFrac > 0 || mTD.bMakeTiltSums) {
+      if (!tiltString) {
+        *error = FRAMETS_NO_ANGLES;
+        return;
+      }
+      strForTok = tiltString;
+      while ((token = strtok(strForTok, " ")) != NULL) {
+        strForTok = NULL;
+        mTD.tiltAngles.push_back((float)atof(token));
+      }
+    }
+  }
 
   sprintf(m_strTemp, "SetupFileSaving called with flags %x rf %d frf %d %s fpi %s pix %f"
     " ER %s A2R %s sum %d grab %d\n  copy %s \n  dir %s root %s\n", flags, rotationFlip,
@@ -5421,6 +5693,27 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     DebugToResult(m_strTemp);
   }
 }
+
+/*
+ * Clean up from making tilt sums even if they haven't been picked up
+ */
+void TemplatePlugIn::ClearTiltSums()
+{
+  while (sTiltSumQueue.size()) {
+    delete[] sTiltSumQueue.front();
+    sTiltSumQueue.pop();
+  }
+  while (sNumInTiltSum.size())
+    sNumInTiltSum.pop();
+  while (sIndexOfTiltSum.size())
+    sIndexOfTiltSum.pop();
+  while (sStartSliceOfTiltSum.size())
+    sStartSliceOfTiltSum.pop();
+  while (sEndSliceOfTiltSum.size())
+    sEndSliceOfTiltSum.pop();
+  sTiltQueueSize = 0;
+}
+
 
 /* 
  * Save a frame Mdoc file for the last frame-saving acquisition, or store it for saving 
@@ -5684,6 +5977,11 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
       return;
   }
 
+  if (!(alignFlags & K2_SKIP_BELOW_THRESH)) {
+    mTD.iSaveFlags &= ~K2_SKIP_BELOW_THRESH;
+    mTD.fFrameThresh = 0.;
+  }
+
   mTD.bUseFrameAlign = true;    // Probably useless, SetK2Parameters must have flag
   mTD.iFaAliBinning = aliBinning;
   mTD.fFaRadius2[0] = (float)rad2Filt1;
@@ -5785,29 +6083,74 @@ int TemplatePlugIn::ReturnDeferredSum(short *array, long *arrSize, long *width,
 		long *height)
 {
   bool useFinal = mTDcopy.iAntialias || mTDcopy.bMakeSubarea || mTDcopy.bUseFrameAlign;
+  bool getTilt = mTDcopy.bMakeTiltSums;
+  short *useSum;
   int sizeScale = sFloatDeferredSum ? 2 : 1;
   m_bNextSaveResultsFromCopy = true;
-  if (m_HAcquireThread && WaitForAcquireThread(WAIT_FOR_THREAD))
+  if (m_HAcquireThread && 
+    WaitForAcquireThread(getTilt ? WAIT_FOR_TILT_QUEUE : WAIT_FOR_THREAD))
     return 1;
-  if (!sValidDeferredSum || !sDeferredSum) {
+
+  useSum = sDeferredSum;
+  if ((!getTilt && (!sValidDeferredSum || !sDeferredSum)) || 
+    (getTilt && !GetWatchedDataValue(sTiltQueueSize))) {
     return NO_DEFERRED_SUM;
   }
   *width = useFinal ? mTDcopy.iFinalWidth : mTDcopy.width;
   *height = useFinal ? mTDcopy.iFinalHeight : mTDcopy.height;
-  if (*width * *height > *arrSize) {
+  if (*width * *height * sizeScale > *arrSize) {
     sprintf(mTD.strTemp, "Warning: deferred sum is larger than the supplied array (sum "
       "%dx%d = %d, array %d)\n", *width, *height, *width * *height, *arrSize);
     ProblemToResult(mTD.strTemp);
-    *width = *arrSize / (*height * sizeScale);
+    *height = *arrSize / (*width * sizeScale);
   }
   *arrSize = *width * *height * sizeScale;
+
+  // Getting a tilt sum: get the data mutex and get it off the queue, adjust size
+  if (getTilt) {
+    WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
+    useSum = sTiltSumQueue.front();
+    sTiltSumQueue.pop();
+    sTiltQueueSize--;
+    sLastNumInTiltSum = sNumInTiltSum.front();
+    sNumInTiltSum.pop();
+    sLastIndexOfTiltSum = sIndexOfTiltSum.front();
+    sIndexOfTiltSum.pop();
+    sLastStartOfTiltSum = sStartSliceOfTiltSum.front();
+    sStartSliceOfTiltSum.pop();
+    sLastEndOfTiltSum = sEndSliceOfTiltSum.front();
+    sEndSliceOfTiltSum.pop();
+    ReleaseMutex(sDataMutexHandle);
+    sLastDoseRate = 0.;
+    DebugPrintf(mTD.strTemp, "returned tilt index %d from queue, %d left %d %d %d %d\n", 
+      sLastIndexOfTiltSum, sTiltQueueSize, sLastStartOfTiltSum, sLastEndOfTiltSum);
+  }
   if (*arrSize)
-    memcpy(array, sDeferredSum, *arrSize * 2 * sizeScale);
-  delete [] sDeferredSum;
-  sDeferredSum = NULL;
-  sValidDeferredSum = false;
-  sLastDoseRate = sDeferredDoseRate;
+    memcpy(array, useSum, *arrSize * 2 * sizeScale);
+  delete [] useSum;
+  if (!getTilt) {
+    sDeferredSum = NULL;
+    sValidDeferredSum = false;
+    sLastDoseRate = sDeferredDoseRate;
+  }
   return 0;
+}
+
+/*
+ * Return the index, angle, and frame information of last tilt sum returned
+ */
+void TemplatePlugIn::GetTiltSumProperties(long *index, long *numFrames, double *angle,
+  long *firstSlice, long *lastSlice, long *dumInt1, double *dumDbl1, double *dumDbl2)
+{
+  *index = sLastIndexOfTiltSum;
+  *numFrames = sLastNumInTiltSum;
+  *angle = 0.;
+  if (sLastIndexOfTiltSum >= 0 && sLastIndexOfTiltSum < (int)mTD.tiltAngles.size())
+    *angle = mTD.tiltAngles[sLastIndexOfTiltSum];
+  *firstSlice = sLastStartOfTiltSum;
+  *lastSlice = sLastEndOfTiltSum;
+  *dumInt1 = 0;
+  *dumDbl1 = *dumDbl2 = 0.;
 }
 
 /*
@@ -6021,6 +6364,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
   double fullExpTime = *height * (*width * pixelTime + m_dFlyback + 
     (lineSync ? m_dSyncMargin : 0.)) / 1000.;
   ClearSpecialFlags();
+  ClearTiltSums();
 
   // If continuing with continuous, 
   if (continuous < 0) {
@@ -6445,9 +6789,9 @@ int PlugInWrapper::GetImage(short *array, long *arrSize, long *width,
               long right, long shutter, double settling, long shutterDelay,
               long divideBy2, long corrections)
 {
-  return (mLastRetVal = gTemplatePlugIn.GetImage(array, arrSize, width, height, 
-    processing, exposure, binning, top, left, bottom, right, shutter, settling, 
-    shutterDelay, divideBy2, corrections));
+  return (mLastRetVal = gTemplatePlugIn.GetImage(array, arrSize, width, height,
+      processing, exposure, binning, top, left, bottom, right, shutter, settling,
+      shutterDelay, divideBy2, corrections));
 }
 
 int PlugInWrapper::GetGainReference(float *array, long *arrSize, long *width, 
@@ -6481,9 +6825,8 @@ void PlugInWrapper::SetK2Parameters(long readMode, double scaling, long hardware
 }
 
 void PlugInWrapper::SetupFileSaving(long rotationFlip, BOOL filePerImage, 
-                                    double pixelSize, long flags, double nSumAndGrab, 
-                                    double frameThresh, double dummy3, double dummy4, 
-                                    long *names, long *error)
+  double pixelSize, long flags, double nSumAndGrab, double frameThresh, 
+  double threshFracPlus, double dummy4, long *names, long *error)
 {
   char *cnames = (char *)names;
   int rootind = (int)strlen(cnames) + 1;
@@ -6493,10 +6836,11 @@ void PlugInWrapper::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   char *command = UnpackString((flags & K2_RUN_COMMAND) != 0, names, nextInd);
   char *sumList = UnpackString((flags & K2_SAVE_SUMMED_FRAMES) != 0, names, nextInd);
   char *frameTitle = UnpackString((flags & K2_ADD_FRAME_TITLE) != 0, names, nextInd);
+  char *tiltString = UnpackString((flags & K2_USE_TILT_ANGLES) != 0, names, nextInd);
   mLastRetVal = 0;
   gTemplatePlugIn.SetupFileSaving(rotationFlip, filePerImage, pixelSize, flags, 
-    nSumAndGrab, frameThresh, dummy3, dummy4, cnames, &cnames[rootind], refName, defects, 
-    command, sumList, frameTitle, error);
+    nSumAndGrab, frameThresh, threshFracPlus, dummy4, cnames, &cnames[rootind], refName, 
+    defects, command, sumList, frameTitle, tiltString, error);
 }
 
 void PlugInWrapper::GetFileSaveResult(long *numSaved, long *error)
@@ -6570,6 +6914,14 @@ int PlugInWrapper::ReturnDeferredSum(short *array, long *arrSize, long *width,
 		long *height)
 {
   return (mLastRetVal = gTemplatePlugIn.ReturnDeferredSum(array, arrSize, width, height)); 
+}
+
+void PlugInWrapper::GetTiltSumProperties(long *index, long *numFrames, double *angle,
+  long *firstSlice, long *lastSlice, long *dumInt1, double *dumDbl1, double *dumDbl2)
+{
+  mLastRetVal = 0;
+  gTemplatePlugIn.GetTiltSumProperties(index, numFrames, angle, firstSlice, 
+    lastSlice, dumInt1, dumDbl1, dumDbl2);
 }
 
 int PlugInWrapper::GetNumberOfCameras()

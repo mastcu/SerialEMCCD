@@ -120,6 +120,8 @@ STDMETHODIMP CDMCamera::SaveFrameMdoc(long size, long strMdoc[], long flags)
 	return S_OK;
 }
 
+// arrSize is the number of shorts, or twice the number of bytes in array; it needs to be
+// twice as big when taking floats
 STDMETHODIMP CDMCamera::GetAcquiredImage(short array[], long *arrSize, long *width, 
 										 long *height, long processing, double exposure,
 										 long binning, long top, long left, long bottom, 
@@ -213,6 +215,11 @@ STDMETHODIMP CDMCamera::SetK2Parameters(long readMode, double scaling, long hard
 //     K3_USE_CORR_DBL_SAMP - Use correlated double sampling (CDS) for K3 acquisition
 //     K2_SAVE_COM_AFTER_MDOC - Do not save the com file for alignment until after a
 //         frame mdoc file has been passed and saved (for frame tilt series)
+//     PLUGCAM_RETURN_FLOAT - Return floats in the next image call, which must supply a
+//         float array with arrSize twice as big (OneView/Rio only)
+//     PLUGCAM_DIV_BY_MORE - Divide by additional factors of 2, returning unsigned shorts
+//         if divideBy2 is not set.  Bits 18-21 have the factor from 1 to 15; i.e., the
+//         flags value includes (factor << PLUGCAM_MOREDIV_BITS) (OneView/Rio only)
 //
 STDMETHODIMP CDMCamera::SetK2Parameters2(long readMode, double scaling, long hardwareProc,
   BOOL doseFrac, double frameTime, BOOL alignFrames, BOOL saveFrames, long rotationFlip,
@@ -269,6 +276,12 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 //                               saving and save as shorts/ushorts
 //      K2_SKIP_BELOW_THRESH  - Ignore frames that would have a mean when saved below the
 //                              value in frameThresh
+//      K2_ADD_FRAME_TITLE - Add one or more titles to the frame file header
+//      K2_SKIP_THRESH_PLUS  - Use the values provided in the thresFracPlus argument
+//      K2_USE_TILT_ANGLES - Tilt angles are included in the names string; these are 
+//                           require when either using a dynamic frame threshold or 
+//                           getting deferred simple or aligned sums after an early return
+//                             
 //   numGrabSum is relevant when doing an early return; it should be set from an unsigned
 //      int with the number of frames to sum in the low 16 bits and, for GMS >= 2.3.1,
 //      the number of frames to grab into a local stack in the high 16 bits.  The local
@@ -276,6 +289,12 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 //      in DM has been fully accessed.  The number of frames to grab must be 0 if
 //      skipping frames below a threshold.
 //   frameThresh is relevant if K2_SKIP_BELOW_THRESH is set and is ignored otherwise
+//   thresFracPlus is relevant if K2_SKIP_BELOW_THRESH and K2_SKIP_THRESH_PLUS are set and
+//      is ignored otherwise.  It should contain the sum of: a relative fraction for 
+//      setting a threshold for skipping frames dynamically based on the counts at the 
+//      nearest tilt angle; the minimum gap size for recognizing separate tilts times
+//      THRESH_PLUS_GAP_SCALE; and the number of initial frames to drop from simple sums
+//      times THRESH_PLUS_DROP_SCALE.
 //   nameSize should contain the number of longs passed in names
 //   names should contain concatenated null-terminated strings as follows:
 //      directory name
@@ -287,6 +306,10 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 //           the number of summed frames to save of a certain size, the second value is
 //           the number of frames to sum into each of those saved sums
 //           All values separated by spaces
+//      if K2_ADD_FRAME_TITLE is set, a string with one or more titles for the MRC header
+//           or TIFF description, separated by newlines (\n)
+//      if K2_USE_TILT_ANGLES is set, a string with tilt angles in order separated by 
+//           spaces
 //   
 // The caller is responsible for knowing how much memory is available and for choosing
 // whether to set K2_ASYNC_IN_RAM (with or without an early return) and for setting the
@@ -295,17 +318,16 @@ STDMETHODIMP CDMCamera::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 // regardless of mode; the grabbed stack is usually stored in twice that space for 
 // super-res; but if saving times 100, the super-res takes 4 times that space, or if
 // keeping precision in alignment, counting takes twice the RAM stack space and super-res
-// takes 4 times the RAM stack space. M`emory is freed from the RAM stack in DM as soon as
+// takes 4 times the RAM stack space. Memory is freed from the RAM stack in DM as soon as
 // the frame is accessed.  See SerialEM code for handling of this.
 //
 STDMETHODIMP CDMCamera::SetupFileSaving2(long rotationFlip, BOOL filePerImage, 
-                                        double pixelSize, long flags, double numGrabSum,
-                                        double frameThresh, double dummy3, double dummy4,
-                                        long nameSize, long names[], long *error)
+  double pixelSize, long flags, double numGrabSum, double frameThresh, 
+  double threshFracPlus, double dummy4, long nameSize, long names[], long *error)
 {
 
   gPlugInWrapper.SetupFileSaving(rotationFlip, filePerImage, pixelSize, flags, numGrabSum,
-    frameThresh, dummy3, dummy4, names, error);
+    frameThresh, threshFracPlus, dummy4, names, error);
   return S_OK;
 }
 
@@ -392,6 +414,7 @@ STDMETHODIMP CDMCamera::MakeAlignComFile(long flags, long dumInt1, double dumDbl
   return S_OK;
 }
 
+// Return a deferred sum or a tilt sum from one tilt angle
 STDMETHODIMP CDMCamera::ReturnDeferredSum(short *array, long *arrSize, long *width, 
 		long *height)
 {
@@ -399,6 +422,17 @@ STDMETHODIMP CDMCamera::ReturnDeferredSum(short *array, long *arrSize, long *wid
 	if (retval)
 		return E_FAIL;
 	return S_OK;
+}
+
+// Return properties of the tilt sum last returned with ReturnDeferredSum: the tilt index
+// numbered from 0, the number of frames, the tilt angle at the given index, the first and
+// last frame numbered included in the sum
+STDMETHODIMP CDMCamera::GetTiltSumProperties(long *index, long *numFrames, double *angle,
+  long *firstSlice, long *lastSlice, long *dumInt1, double *dumDbl1, double *dumDbl2)
+{
+  gPlugInWrapper.GetTiltSumProperties(index, numFrames, angle, firstSlice, 
+    lastSlice, dumInt1, dumDbl1, dumDbl2);
+  return S_OK;
 }
 
 STDMETHODIMP CDMCamera::GetNumberOfCameras(long *numCameras)

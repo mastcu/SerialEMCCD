@@ -117,6 +117,7 @@ static ArgDescriptor sFuncTable[] = {
   {GS_GetLastDoseRate,      0, 0, 0,   0, 0, 1,   FALSE},
   {GS_SaveFrameMdoc,        2, 0, 0,   0, 0, 0,   TRUE},
   {GS_GetDMVersionAndBuild, 0, 0, 0,   2, 0, 0,   FALSE},
+  {GS_GetTiltSumProperties, 0, 0, 0,   5, 0, 3,   FALSE},
   {-1, 0,0,0,0,0,0,FALSE}
 };
 
@@ -697,6 +698,12 @@ static int ProcessCommand(int numBytes)
       imArray = new short[sLongArgs[1]];
       SendImageBack(gPlugInWrapper.ReturnDeferredSum(imArray, &sLongArgs[1], 
         &sLongArgs[2], &sLongArgs[3]), imArray, 2); 
+      break;
+
+    case GS_GetTiltSumProperties:
+      gPlugInWrapper.GetTiltSumProperties(&sLongArgs[1], &sLongArgs[2], &sDoubleArgs[0],
+        &sLongArgs[3], &sLongArgs[4], &sLongArgs[5], &sDoubleArgs[1], &sDoubleArgs[2]);
+      SendArgsBack(0);
       break;
 
     case GS_GetNumberOfCameras:

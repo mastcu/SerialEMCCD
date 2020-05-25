@@ -52,8 +52,8 @@ public:
     double frameTime, BOOL alignFrames, BOOL saveFrames, long rotationFlip, long flags, 
     double dummy1, double dummy2, double dummy3, double dummy4, char *filter);
   void SetupFileSaving(long rotationFlip, BOOL filePerImage, double pixelSize, long flags,
-    double nSumAndGrab, double frameThresh, double dummy3, double dummy4, long *names,
-    long *error);
+    double nSumAndGrab, double frameThresh, double threshFracPlus, double dummy4, 
+    long *names, long *error);
   void GetFileSaveResult(long *numSaved, long *error);
   int GetDefectList(short xyPairs[], long *arrSize, long *numPoints, 
     long *numTotal);
@@ -72,6 +72,8 @@ public:
   void MakeAlignComFile(long flags, long dumInt1, double dumDbl1, 
     double dumDbl2, long *strings, long *error);
   int ReturnDeferredSum(short array[], long *arrSize, long *width, long *height); 
+  void GetTiltSumProperties(long *index, long *numFrames, double *angle,
+    long *firstSlice, long *lastSlice, long *dumInt1, double *dumDbl1, double *dumDbl2);
 	int GetImage(short *array, long *arrSize, long *width, 
 		long *height, long processing, double exposure,
 		long binning, long top, long left, long bottom, 
