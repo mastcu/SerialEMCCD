@@ -1105,6 +1105,14 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   mTD.dK2Exposure = exposure;
   mTD.iK2Binning = binning;
 
+  // Check if View is active
+#if GMS_SDK_VERSION >= 300
+  if (Gatan::Camera::IsViewActive()) {
+    ProblemToResult("The continuous View is active, cannot take an image for SerialEM");
+    return VIEW_IS_ACTIVE;
+  }
+#endif
+
   // Intercept K2 asynchronous saving and continuous mode here
   if (((saveFrames == SAVE_FRAMES || mTD.bUseFrameAlign) && mTD.bAsyncSave) ||
     mTD.bDoContinuous) {
