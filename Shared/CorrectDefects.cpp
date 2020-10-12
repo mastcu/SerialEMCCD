@@ -439,8 +439,8 @@ static void CorrectColumn(void *array, int type, int nx, int ny, int xStride, in
   float fLeft, fRight, fill, fsum, fmean;
   static int pseudo = 456789;
   bool fivePlusOK;
-  int ind, i, col, indLeft, indRight, fullStart, fullEnd, ifx1, iy1, ifx2, iy2;
-  int irem, isum, imean, nloop, loop, base;
+  int ind, i, col, indLeft, indRight, fullStart, fullEnd, ifx1, iy1;
+  int irem, isum, imean, nloop, loop;
   float maxVary = 0.33f;
   float ranFac = maxVary / (float)0x1FFFF;
   int sideStarts[2 * MAX_AVG_SUPER_RES];
@@ -933,7 +933,7 @@ float CorDefSurroundingMean(void *frame, int type, int nx, int ny, float truncLi
 // Scale defects for a K2 up or down by AND set the flag that it has been scaled
 void CorDefScaleDefectsForK2(CameraDefects *param, bool scaleDown)
 {
-  int i, upFac = scaleDown ? 1 : 2, downFac = scaleDown ? 2 : 1;
+  int upFac = scaleDown ? 1 : 2, downFac = scaleDown ? 2 : 1;
   int addFac = scaleDown ? 0 : 1;
   param->wasScaled = scaleDown ? -1 : 1;
   ScaleDefectsByFactors(param, upFac, downFac, addFac);
@@ -1900,12 +1900,10 @@ int CorDefFillDefectArray(CameraDefects *param, int camSizeX, int camSizeY,
                           unsigned char *array, int nx, int ny, bool doFalconPad)
 {
   int jx, jy, badX, badY, ind, row, col, xLowExtra, xHighExtra, yLowExtra, yHighExtra;
-  int numSides;
   int ix, iy;   // THESE ARE USED IN SET_PIXEL, DO NOT REUSE
   int ixOffset = (nx - camSizeX) / 2;
   int iyOffset = (ny - camSizeY) / 2;
   int numPix = param->wasScaled > 1 ? 4 : 2;
-  int sideStarts[2 * MAX_AVG_SUPER_RES];
   if (nx <= 0 || ny <= 0 || camSizeX <= 0 || camSizeY <= 0)
     return 1;
   memset(array, 0, nx * ny);

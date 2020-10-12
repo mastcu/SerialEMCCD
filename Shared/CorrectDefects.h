@@ -48,7 +48,7 @@ float CorDefSurroundingMean(void *frame, int type, int nx, int ny, float truncLi
                             int ix, int iy);
 void CorDefScaleDefectsForK2(CameraDefects *param, bool scaleDown);
 void CorDefScaleDefectsForFalcon(CameraDefects *param, int factor);
-Void CorDefFlipDefectsInY(CameraDefects *param, int camSizeX, int camSizeY, int wasScaled);
+void CorDefFlipDefectsInY(CameraDefects *param, int camSizeX, int camSizeY, int wasScaled);
 void CorDefMergeDefectLists(CameraDefects &defects, unsigned short *xyPairs, 
                             int numPoints, int camSizeX, int camSizeY, int rotationFlip);
 void CorDefMirrorCoords(int size, int binning, int &start, int &end);
