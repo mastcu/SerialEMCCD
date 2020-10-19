@@ -745,15 +745,17 @@ static double ExecuteScript(char *strScript)
 {
   double retval;
   char last, retstr[128];
-  DebugToResult(strScript, "DMCamera executing script :\n\n");
-  if (sDebug) {
+  if (strstr(strScript, "if (IFCGetFilterMode() == 0)") != strScript) {
+    DebugToResult(strScript, "DMCamera executing script :\n\n");
+    if (sDebug) {
 
-    // 11/15/06: switch to this from using strlen which falied with DMSDK 3.8.2
-    for (int i = 0; strScript[i]; i++)
-      last = strScript[i];
-    if (last != '\n' && last != '\r')
+      // 11/15/06: switch to this from using strlen which falied with DMSDK 3.8.2
+      for (int i = 0; strScript[i]; i++)
+        last = strScript[i];
+      if (last != '\n' && last != '\r')
+        DM::Result("\n");
       DM::Result("\n");
-    DM::Result("\n");
+    }
   }
   try {
     retval = DM::ExecuteScriptString(strScript);
@@ -3536,6 +3538,8 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
   td->iErrorFromSave = 0;
 
   sLastSaveNeededRef = false;
+  DebugPrintf(td->strTemp, "sf %d  srorcm %d fl %d pr %d flag %d len %d\n", td->saveFrames, (td->isSuperRes || td->isCounting) ? 1 : 0,
+    td->isFloat ? 1 : 0, td->iK2Processing, td->iSaveFlags & K2_COPY_GAIN_REF, td->strGainRefToCopy.length());
   if (td->saveFrames && ((td->isSuperRes || td->isCounting) && !td->isFloat && 
     td->iK2Processing != NEWCM_GAIN_NORMALIZED) && 
     (td->iSaveFlags & K2_COPY_GAIN_REF) && td->strGainRefToCopy.length()) {
@@ -5193,16 +5197,16 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   // Otherwise look for all matching files in directory
   if (sLastRefName.length() && strstr(sLastRefName.c_str(), (prefStr + "Ref").c_str())
     && !sLastRefDir.compare(saveDir)) {
-    //sprintf(td->strTemp, "Finding %s\n", sLastRefName.c_str());
+    sprintf(td->strTemp, "Finding %s\n", sLastRefName.c_str());
     hFindCopy = FindFirstFile(sLastRefName.c_str(), &findCopyData);
     namesOK = true;
   } else {
     sprintf(td->strTemp, "%s\\%sRef_*.%s", saveDir.c_str(), prefStr.c_str(),
       extension[extInd]);
     hFindCopy = FindFirstFile(td->strTemp, &findCopyData);
-    //sprintf(td->strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefStr.c_str());
+    sprintf(td->strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefStr.c_str());
   }
-  //DebugToResult(td->strTemp);
+  DebugToResult(td->strTemp);
 
   // Test that file or all candidate files in the directory and stop if find one
   // is sufficiently newer then the ref
@@ -5217,8 +5221,8 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
       // Comparisons could/should be done with CompareFileTime but this conversion works
       double copySec = 429.4967296 * findCopyData.ftCreationTime.dwHighDateTime + 
         1.e-7 * findCopyData.ftCreationTime.dwLowDateTime;
-      /*sprintf(td->strTemp, "refSec  %f  copySec %f\n", td->curRefTime, copySec);
-      DebugToResult(td->strTemp);*/
+      sprintf(td->strTemp, "refSec  %f  copySec %f\n", td->curRefTime, copySec);
+      DebugToResult(td->strTemp);
       needCopy = td->curRefTime > copySec + 10.;
       maxCopySec = B3DMAX(maxCopySec, copySec);
       if (!needCopy || !FindNextFile(hFindCopy, &findCopyData))
