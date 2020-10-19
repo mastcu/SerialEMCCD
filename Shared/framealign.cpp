@@ -718,7 +718,7 @@ int FrameAlign::gpuAvailable(int nGPU, float *memory, int debug)
     // Give message on definite failure to load
     if (!sGpuModule) {
       if (err)
-        utilPrint("GPU is not available, could not load FrameGPU.dll\n");
+        utilPrint("GPU is not directly available, SEMCCD could not load FrameGPU.dll\n");
       mGpuLibLoaded = 0;
       return 0;
     }
