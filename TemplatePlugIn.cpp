@@ -4159,10 +4159,10 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
     td->iifile->amax = (float)tmax;
     td->iifile->amean = tmean;
     i = tiffParallelWrite(td->iifile, td->outData, td->iTiffCompression, 1, 
-      B3DNINT(2.54e8 / td->dPixelSize), td->iTiffQuality, &didParallel);
+      B3DNINT(1.e8 / td->dPixelSize), td->iTiffQuality, &didParallel);
     if (i && didParallel)
       i = tiffWriteSection(td->iifile, td->outData, td->iTiffCompression, 1, 
-        B3DNINT(2.54e8 / td->dPixelSize), td->iTiffQuality);
+        B3DNINT(1.e8 / td->dPixelSize), td->iTiffQuality);
 
     if (i) {
       td->iErrorFromSave = WRITE_DATA_ERROR;
