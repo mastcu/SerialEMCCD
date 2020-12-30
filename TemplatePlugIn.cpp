@@ -5901,8 +5901,12 @@ int TemplatePlugIn::IsGpuAvailable(long gpuNum, double *gpuMemory, bool shrMem)
   float memory1 = 0., memory2 = 0.;
   if (!shrMem)
     m_iPluginGpuOK = sFrameAli.gpuAvailable(gpuNum, &memory1, sDebug);
-  if (shrMem || m_iPluginGpuOK <= 0)
+  if (shrMem || m_iPluginGpuOK <= 0) {
     m_iProcessGpuOK = sShrMemAli.gpuAvailable(gpuNum, &memory2, sDebug);
+    if (!shrMem && m_iProcessGpuOK > 0)
+      ErrorToResult("But the GPU WILL be available through the shrmemframe frame "
+        "alignment program", "SerialEMCCD: ");
+  }
   m_iGpuAvailable = B3DMAX(m_iProcessGpuOK, m_iPluginGpuOK);
   if (m_iGpuAvailable)
     *gpuMemory = B3DMAX(memory1, memory2);
