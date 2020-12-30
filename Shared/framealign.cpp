@@ -3326,3 +3326,36 @@ bool FrameAlign::preprocPadGpuMemoryFits(int unpaddedX, int unpaddedY, int dataS
     needsMem += 4.f * unpadBytes / (float)binning;
   return needsMem < freeMem;
 }
+
+/*
+ * Set the truncation limit to use: pass it on if >= 0, or find mean/sd and get threshold
+ * if it is negative # of SD's.  This is here for convenience of framealign callers
+ * Returns 1 for error making line pointers, or 2 for error getting sample arrays
+ */
+int FrameAlign::setTruncationLimit(void *array, int nx, int ny, int useMode,
+                                   float truncLimit, float &truncUse)
+{
+  int err, type = typeForSampleMean(useMode);
+  int dataSize, temp;
+  int numSample = 20000;
+  unsigned char **linePtrs;
+  float sample, mean, sd;
+  int trim = B3DMIN(nx, ny) / 20;
+  int nxUse = nx - 2 * trim;
+  int nyUse = ny - 2 * trim;
+  truncUse = truncLimit;
+  if (truncLimit >= 0.)
+    return 0;
+  dataSizeForMode(useMode, &dataSize, &temp);
+  linePtrs = makeLinePointers(array, nx, ny, dataSize);
+  if (!linePtrs)
+    return 1;
+  sample = B3DMIN(numSample, nxUse * nyUse) / (float)(nxUse * nyUse);
+  err = sampleMeanSD(linePtrs, type, nx, ny, sample, trim, trim, nxUse, nyUse,
+                     &mean, &sd);
+  free(linePtrs);
+  if (err)
+    return 2;
+  truncUse = mean - truncLimit * sd;
+  return 0;
+}
