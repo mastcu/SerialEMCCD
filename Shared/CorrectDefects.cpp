@@ -2244,6 +2244,30 @@ void CorDefRefineSuperResRef(float *ref, int nx, int ny, int superFac,
   }
 }
 
+
+#define FDCE_LINE_DIFFS(typ, dat, nex, dif, lsm, dsm) \
+  dat = (typ *)array + iy * nx;   \
+  nex = dat + (1 - 2 * idir) * nx;  \
+  for (ix = xStart; ix < xEnd; ix++) {  \
+    dif = nex[ix] - dat[ix];    \
+    lsm += dat[ix];    \
+    dsm += dif;     \
+    diffSumSq += (double)dif * dif;    \
+  }
+
+#define FDCE_COL_SUMS(typ, dat, dif, lsm, dsm) \
+  dat = (typ *)array + iy * nx;  \
+  for (wid = 0; wid < maxWidth; wid++) {   \
+    ind = wid + loop * maxWidth;  \
+    dif = dat[ix + idir] - dat[ix];  \
+    lsm[ind] += dat[ix];   \
+    dsm[ind] += dif;   \
+    xDiffSumSq[ind] += (double)dif * dif;   \
+    ix += idir;  \
+  }
+
+//void  PrintfToLog(char *fmt, ...);
+
 // Find edges of an image that are dark because drift correction was done without filling
 // the area outside and frames that were added in.  analyzeLen is the extent to analyze 
 // along each edge, maxWidth is the width to analyze.  The mean and SD are measured for
@@ -2263,21 +2287,24 @@ int CorDefFindDriftCorrEdges(void *array, int type, int nx, int ny, int analyzeL
   int yStart = B3DMAX(0, ny / 2 - analyzeLen / 2);
   int xEnd = B3DMIN(nx, xStart + analyzeLen);
   int yEnd = B3DMIN(ny, yStart + analyzeLen);
+  bool isFloat = type == SLICE_MODE_FLOAT;
   unsigned short *usData, *usNext;
   short *sData, *sNext;
-  float maxBelow, ratioMedian, ratioMADN, minAbove;
+  float *fData, *fNext;
+  float maxBelow, ratioMedian, ratioMADN, minAbove, fDiff, fLineSum, fDiffSum;
   float *lineMean, *diffMean, *diffSD, *diffRatio, *temp;
-  int *xLineSums, *xDiffSums;
+  b3dFloat *fxLineSums, *fxDiffSums;
+  b3dInt32 *xLineSums, *xDiffSums;
   double *xDiffSumSq;
 
-  if (type != SLICE_MODE_SHORT && type != SLICE_MODE_USHORT)
+  if (type != SLICE_MODE_SHORT && type != SLICE_MODE_USHORT && type != SLICE_MODE_FLOAT)
     return 1;
   lineMean = B3DMALLOC(float, 4 * maxWidth);
   diffMean = B3DMALLOC(float, 4 * maxWidth);
   diffSD = B3DMALLOC(float, 4 * maxWidth);
   diffRatio = B3DMALLOC(float, 4 * maxWidth);
-  xLineSums = B3DMALLOC(int, 2 * maxWidth);
-  xDiffSums = B3DMALLOC(int, 2 * maxWidth);
+  xLineSums = B3DMALLOC(b3dInt32, 2 * maxWidth);
+  xDiffSums = B3DMALLOC(b3dInt32, 2 * maxWidth);
   xDiffSumSq = B3DMALLOC(double, 2 * maxWidth);
   if (!lineMean || !diffMean || !diffSD || !xLineSums || !xDiffSums || !xDiffSumSq ||
       !diffRatio) {
@@ -2291,8 +2318,10 @@ int CorDefFindDriftCorrEdges(void *array, int type, int nx, int ny, int analyzeL
     return 2;
   }
   temp = (float *)xDiffSumSq;
-  memset(xLineSums, 0, 2 * maxWidth * sizeof(int));
-  memset(xDiffSums, 0, 2 * maxWidth * sizeof(int));
+  fxLineSums = (b3dFloat *)xLineSums;
+  fxDiffSums = (b3dFloat *)xDiffSums;
+  memset(xLineSums, 0, 2 * maxWidth * sizeof(b3dInt32));
+  memset(xDiffSums, 0, 2 * maxWidth * sizeof(b3dInt32));
   memset(xDiffSumSq, 0, 2 * maxWidth * sizeof(double));
 
   // Do lines at Y levels, store their results first in arrays
@@ -2301,29 +2330,22 @@ int CorDefFindDriftCorrEdges(void *array, int type, int nx, int ny, int analyzeL
       iy = idir ? ny - 1 - wid : wid;
       lineSum = diffSum = 0;
       diffSumSq = 0.;
-      if (type == SLICE_MODE_SHORT) {
-        sData = (short *)array + iy * nx;
-        sNext = sData + (1 - 2 * idir) * nx;
-        for (ix = xStart; ix < xEnd; ix++) {
-          diff = sNext[ix] - sData[ix];
-          lineSum += sData[ix];
-          diffSum += diff;
-          diffSumSq += (double)diff * diff;
-        }
+      if (isFloat) {
+        fLineSum = fDiffSum = 0.;
+        FDCE_LINE_DIFFS(b3dFloat, fData, fNext, fDiff, fLineSum, fDiffSum);
       } else {
-        usData = (unsigned short *)array + iy * nx;
-        usNext = usData + idir * nx;
-        for (ix = xStart; ix < xEnd; ix++) {
-          diff = usNext[ix] - usData[ix];
-          lineSum += usData[ix];
-          diffSum += diff;
-          diffSumSq += (double)diff * diff;
+        if (type == SLICE_MODE_SHORT) {
+          FDCE_LINE_DIFFS(short, sData, sNext, diff, lineSum, diffSum);
+        } else {
+          FDCE_LINE_DIFFS(unsigned short, usData, usNext, diff, lineSum, diffSum);
         }
+        fDiffSum = (float)diffSum;
+        fLineSum = (float)lineSum;
       }
       ind = idir * maxWidth + wid;
-      sumsToAvgSDdbl((double)diffSum, diffSumSq, 1, xEnd - xStart, &diffMean[ind],
+      sumsToAvgSDdbl(fDiffSum, diffSumSq, 1, xEnd - xStart, &diffMean[ind],
                      &diffSD[ind]);
-      lineMean[ind] = (float)lineSum / (float)(xEnd - xStart);
+      lineMean[ind] = fLineSum / (float)(xEnd - xStart);
       diffRatio[ind] = diffMean[ind] / B3DMAX(0.1f, diffSD[ind]);
     }
   }
@@ -2332,27 +2354,13 @@ int CorDefFindDriftCorrEdges(void *array, int type, int nx, int ny, int analyzeL
   for (iy = yStart; iy < yEnd; iy++) {
     for (loop = 0; loop < 2; loop++) {
       idir = 1 - 2 * loop;
-      ix = loop ? nx - 1: 0;
-      if (type == SLICE_MODE_SHORT) {
-        sData = (short *)array + iy * nx;
-        for (wid = 0; wid < maxWidth; wid++) {
-          ind = wid + loop * maxWidth;
-          diff = sData[ix + idir] - sData[ix];
-          xLineSums[ind] += sData[ix];
-          xDiffSums[ind] += diff;
-          xDiffSumSq[ind] += (double)diff * diff;
-          ix += idir;
-        }
+      ix = loop ? nx - 1 : 0;
+      if (isFloat) {
+        FDCE_COL_SUMS(b3dFloat, fData, fDiff, fxLineSums, fxDiffSums);
+      } else if (type == SLICE_MODE_SHORT) {
+        FDCE_COL_SUMS(short, sData, diff, xLineSums, xDiffSums);
       } else {
-        usData = (unsigned short *)array + iy * nx;
-        for (wid = 0; wid < maxWidth; wid++) {
-          ind = wid + loop * maxWidth;
-          diff = usData[ix + idir] - usData[ix];
-          xLineSums[ind] += usData[ix];
-          xDiffSums[ind] += diff;
-          xDiffSumSq[ind] += (double)diff * diff;
-          ix += idir;
-        }
+        FDCE_COL_SUMS(unsigned short, usData, diff, xLineSums, xDiffSums);
       }
     }
   }
@@ -2360,9 +2368,10 @@ int CorDefFindDriftCorrEdges(void *array, int type, int nx, int ny, int analyzeL
   // Get the mean and SD and ratio for each column
   for (wid = 0; wid < 2 * maxWidth; wid++) {
     ind = wid + 2 * maxWidth;
-    sumsToAvgSDdbl((double)xDiffSums[wid], xDiffSumSq[wid], 1, yEnd - yStart, 
-      &diffMean[ind], &diffSD[ind]);
-    lineMean[ind] = (float)xLineSums[wid] / (float)(yEnd - yStart);
+    sumsToAvgSDdbl(B3DCHOICE(isFloat, fxDiffSums[wid], (double)xDiffSums[wid]),
+      xDiffSumSq[wid], 1, yEnd - yStart, &diffMean[ind], &diffSD[ind]);
+    lineMean[ind] = B3DCHOICE(isFloat, fxLineSums[wid], (float)xLineSums[wid]) / 
+      (float)(yEnd - yStart);
     diffRatio[ind] = diffMean[ind] / B3DMAX(0.1f, diffSD[ind]);
   }
 
@@ -2378,7 +2387,7 @@ int CorDefFindDriftCorrEdges(void *array, int type, int nx, int ny, int analyzeL
     else
       ACCUM_MIN(minAbove, temp[ind]);
   }
-  /* printf("Last ratio deviations below and above threshold = %.2f  %.2f MADNs\n", 
+  /* PrintfToLog("Last ratio deviations below and above threshold = %.2f  %.2f MADNs\r\n",
      maxBelow, minAbove); */
 
   // Find first line, if any, where the deviation exceeds the criterion
@@ -2391,13 +2400,13 @@ int CorDefFindDriftCorrEdges(void *array, int type, int nx, int ny, int analyzeL
         break;
       }
     }
-    /* if (indAbove[loop] >= 0) {
-      for (wid = 0; wid <= B3DMIN(maxWidth - 1, indAbove[loop] + 3); wid++) {
-        ind = wid + loop * maxWidth;
-        printf("%d  %2d  %7.1f  %7.1f  %7.1f  %7.2f  %7.2f\n", loop, wid, lineMean[ind],
-               diffMean[ind], diffSD[ind], diffRatio[ind], temp[ind]);
-               }
-               } */
+     /*if (indAbove[loop] >= 0) {
+       for (wid = 0; wid <= B3DMIN(maxWidth - 1, indAbove[loop] + 3); wid++) {
+         ind = wid + loop * maxWidth;
+         PrintfToLog("%d  %2d  %7.1f  %7.1f  %7.1f  %7.2f  %7.2f\r\n", loop, wid, lineMean[ind],
+           diffMean[ind], diffSD[ind], diffRatio[ind], temp[ind]);
+       }
+               }*/
   }
 
   // Just return the limits.  Correction by partial filling is problematic and not as 
