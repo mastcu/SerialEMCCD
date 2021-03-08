@@ -5700,9 +5700,9 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
 
   if (*error) {
     stdStr = string(m_strTemp);
-    sprintf(m_strTemp, "SetupFileSaving error is %d for file: %s : %s\n", *error, 
+    sprintf(m_strTemp, "   SetupFileSaving error is %d for file: %s : %s\n", *error, 
       stdStr.c_str(), strerror(errno));
-    DebugToResult(m_strTemp);
+    ErrorToResult(m_strTemp, "An error occurred setting up frame-saving for SerialEM:\n");
   }
 }
 
