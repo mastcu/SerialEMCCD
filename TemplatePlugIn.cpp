@@ -1934,6 +1934,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
               bool elapsedRet;
               if (grabProcInd < maxGrabInd && stack->GetElapsedExposureTime(elapsed) &&
                 elapsed < td->dFrameTime * (stackSlice + 1)) {
+                if (!td->bMakeTiltSums)
                 DebugPrintf(td->strTemp, "Processing frame %d from grab stack\n", 
                   grabProcInd);
                 i = AlignSaveGrabbedImage(td, outForRot, grabProcInd, grabSlice,
@@ -1953,7 +1954,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
                   sprintf(td->strTemp, "Got frame %d of %d   exp done %d  "
                     "elapsed %s %.2f\n", stackSlice + 1, numSlices, exposureDone ? 1 : 0,
                     elapsedRet ? "T" : "F", elapsed);
-                  DebugToResult(td->strTemp);
+                  if (!td->bMakeTiltSums)
+                    DebugToResult(td->strTemp);
                 }
                 if (frameNeedsDelete || stackSlice >= numSlices)
                   break;
@@ -2126,6 +2128,9 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
                 firstSliceAboveThresh = stackSlice;
               lastSliceAboveThresh = stackSlice;
               numInTilt++;
+              sprintf(td->strTemp, "Using frame %d with mean = %.2f\n",
+                stackSlice + 1, sampMean);
+              DebugToResult(td->strTemp);
               if (td->fThreshFrac > 0 && td->tiltAngles.size())
                 frameMeans.push_back(sampMean);
               if (td->bMakeTiltSums) {
@@ -5603,10 +5608,11 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   }
 
   sprintf(m_strTemp, "SetupFileSaving called with flags %x rf %d frf %d %s fpi %s pix %f"
-    " ER %s A2R %s sum %d grab %d\n  copy %s \n  dir %s root %s\n", flags, rotationFlip,
-    mTD.iFrameRotFlip, mTD.bWriteTiff ? "TIFF" : "MRC", filePerImage ? "Y":"N", pixelSize, 
-    mTD.bEarlyReturn ? "Y":"N", mTD.bAsyncToRAM ? "Y":"N", mTD.iNumFramesToSum,
-    mTD.iNumGrabAndStack, (flags & K2_COPY_GAIN_REF) ? mTD.strGainRefToCopy.c_str() :"NO",
+    " ER %s A2R %s sum %d grab %d\n  thresh %.2f copy %s \n  dir %s root %s\n", flags, 
+    rotationFlip, mTD.iFrameRotFlip, mTD.bWriteTiff ? "TIFF" : "MRC", 
+    filePerImage ? "Y":"N", pixelSize, mTD.bEarlyReturn ? "Y":"N", 
+    mTD.bAsyncToRAM ? "Y":"N", mTD.iNumFramesToSum, mTD.iNumGrabAndStack,mTD.fFrameThresh, 
+    (flags & K2_COPY_GAIN_REF) ? mTD.strGainRefToCopy.c_str() :"NO",
     mTD.strSaveDir.c_str(), mTD.strRootName.c_str());
   DebugToResult(m_strTemp);
 
