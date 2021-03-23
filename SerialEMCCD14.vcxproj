@@ -952,7 +952,7 @@ regsvr32 /s SerialEMCCDps.dll
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/force:unresolved /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>DMPlugInBasic.lib;Foundation.lib;Ws2_32.lib;libiimod-14-64.lib;libifft-14-64.lib;libcfshr-14-64.lib;libimxml-14-64.lib;libtiff-14-64.lib;libjpeg-14-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>DMPlugInBasic.lib;Foundation.lib;Ws2_32.lib;libiimod-noHDF-14-64.lib;libifft-14-64.lib;libcfshr-14-64.lib;libimxml-14-64.lib;libtiff-14-64.lib;libjpeg-14-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>.\$(OutDir)SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS_MINOR_VERSION)-64.dll</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>..\SerialEMLibs;$(GMS2-64_SDK)\lib\x64\Release;$(GMS2-64_SDK)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
