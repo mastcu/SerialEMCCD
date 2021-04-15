@@ -227,7 +227,7 @@ struct ThreadData
   int iNumSummed;
   int iNumGrabAndStack;
   bool bEarlyReturn;
-  bool bAsyncToRAM;
+  int iAsyncToRAM;
   float fLinearOffset;
   float fFrameOffset;
   bool isTDcopy;
@@ -1756,13 +1756,13 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       CM::SetFrameExposure(acqParams, td->dFrameTime + (td->dFrameTime > 0.05 ? 0.0001 : 0.00002));  j++;
       CM::SetDoAcquireStack(acqParams, 1);  j++;
       CM::SetStackFormat(acqParams, CM::StackFormat::Series);  j++;
-      CM::SetDoAsyncReadout(acqParams, td->bAsyncToRAM ? 1 : 0);   j++;
+      CM::SetDoAsyncReadout(acqParams, td->iAsyncToRAM);   j++;
 
       // Switched from setting inverse transpose to canceling it this way
       CM::SetTotalTranspose(camera, acqParams, Imaging::Transpose2d::RotateNoneFlipNone);
       /*sprintf(td->strTemp, "Set corr %d  filt %s frame %f asyncRAM %d transp %d\n", 
         td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0,
-        filter.c_str(), td->dFrameTime + 0.0001,td->bAsyncToRAM ? 1 : 0, i);
+        filter.c_str(), td->dFrameTime + 0.0001, td->iAsyncToRAM, i);
       DebugToResult(td->strTemp);*/
 
       j = 10;
@@ -5608,10 +5608,10 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
   }
 
   sprintf(m_strTemp, "SetupFileSaving called with flags %x rf %d frf %d %s fpi %s pix %f"
-    " ER %s A2R %s sum %d grab %d\n  thresh %.2f copy %s \n  dir %s root %s\n", flags, 
+    " ER %s A2R %d sum %d grab %d\n  thresh %.2f copy %s \n  dir %s root %s\n", flags, 
     rotationFlip, mTD.iFrameRotFlip, mTD.bWriteTiff ? "TIFF" : "MRC", 
     filePerImage ? "Y":"N", pixelSize, mTD.bEarlyReturn ? "Y":"N", 
-    mTD.bAsyncToRAM ? "Y":"N", mTD.iNumFramesToSum, mTD.iNumGrabAndStack,mTD.fFrameThresh, 
+    mTD.iAsyncToRAM, mTD.iNumFramesToSum, mTD.iNumGrabAndStack,mTD.fFrameThresh, 
     (flags & K2_COPY_GAIN_REF) ? mTD.strGainRefToCopy.c_str() :"NO",
     mTD.strSaveDir.c_str(), mTD.strRootName.c_str());
   DebugToResult(m_strTemp);
@@ -5820,7 +5820,9 @@ int TemplatePlugIn::ManageEarlyReturn(int flags, int iSumAndGrab)
 {
   mTD.bAsyncSave = (flags & K2_SAVE_SYNCHRON) == 0;
   mTD.bEarlyReturn = (flags & K2_EARLY_RETURN) != 0;
-  mTD.bAsyncToRAM = (flags & K2_ASYNC_IN_RAM) != 0;
+  // "1" broke in 3.43, use 2 (allow DM to choose whether to do it) instead at 3.40 on
+  mTD.iAsyncToRAM = B3DCHOICE((flags & K2_ASYNC_IN_RAM) != 0,
+    m_iDMVersion >= 50400 ? 2 : 1, 0);    
   mTD.iNumFramesToSum = 65535;
   mTD.iNumGrabAndStack = 0;
   if (mTD.bEarlyReturn) {
