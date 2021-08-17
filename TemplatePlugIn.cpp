@@ -2196,7 +2196,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
               fileSlice, tmin, tmax, meanSum, procWall, saveWall, alignWall, wallStart);
             if (i) {
               errorRet = td->iErrorFromSave;
-              if (errorRet == FRAMEALI_NEXT_FRAME && !td->bMakeTiltSums)
+              if ((errorRet == FRAMEALI_NEXT_FRAME && !td->bMakeTiltSums) || 
+                errorRet == FILE_OPEN_ERROR)
                 break;
             }
           }
@@ -2267,11 +2268,13 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
               !(td->bMakeTiltSums && !numInTilt), usedSlice,
               stackAllReady && stackSlice == numSlices - 1, fileSlice, tmin, tmax,
               meanSum, procWall, saveWall, alignWall, wallStart);
-            if (td->iErrorFromSave == FRAMEALI_NEXT_FRAME) 
+            if (td->iErrorFromSave == FRAMEALI_NEXT_FRAME || 
+              td->iErrorFromSave == FILE_OPEN_ERROR)
               errorRet = td->iErrorFromSave;
 
             // Save the image to file; keep going on error if need a sum
             if ((errorRet && !td->bAlignOfTiltFailed) || 
+              (i && td->iErrorFromSave == FILE_OPEN_ERROR) ||
               (i && !(needSum && usedSlice < td->iNumFramesToSum)))
               break;
 
@@ -2282,6 +2285,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             i = AlignSaveGrabbedImage(td, outForRot, grabInd, grabSlice,
               maxGrabInd, -1, fileSlice, tmin, tmax, meanSum,
               procWall, saveWall, alignWall, wallStart, errorRet);
+            if (i && td->iErrorFromSave == FILE_OPEN_ERROR) {
+              errorRet = td->iErrorFromSave;
+              break;
+            }
 
           }
           // Increment slice, clean up image at end of slice loop
@@ -2317,9 +2324,12 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             , grabProcInd, maxGrabInd);
           SetWatchedDataValue(td->iReadyToAcquire, 1);
           for (grabInd = grabProcInd; grabInd <= maxGrabInd; grabInd++) {
-            if (AlignSaveGrabbedImage(td, outForRot, grabInd, grabSlice, maxGrabInd,
-              td->bMakeTiltSums ? 1 : 0,  fileSlice, tmin,
-              tmax, meanSum, procWall, saveWall, alignWall, wallStart, errorRet))
+            i = AlignSaveGrabbedImage(td, outForRot, grabInd, grabSlice, maxGrabInd,
+              td->bMakeTiltSums ? 1 : 0, fileSlice, tmin,
+              tmax, meanSum, procWall, saveWall, alignWall, wallStart, errorRet);
+            if (i && td->iErrorFromSave == FILE_OPEN_ERROR)
+              errorRet = td->iErrorFromSave;
+            if (i)
               break;
           }
         }
@@ -5013,15 +5023,15 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
         iData = (int *)imageData;
         if (extraDivBy2 > 0) {
           DebugToResult("Extra dividing signed integers to unsigned shorts with "
-            "truncation\n");
+            "truncation at 0\n");
           for (i = 0; i < width * height; i++)
-            usData[i] = B3DMAX(0, (unsigned short)(iData[i] >> extraDivBy2));
+            usData[i] = (unsigned short)B3DMAX(0, (iData[i] >> extraDivBy2));
         } else {
 
           DebugToResult("Converting signed integers to unsigned shorts with "
-            "truncation\n");
+            "truncation at 0\n");
           for (i = 0; i < width * height; i++)
-              usData[i] = B3DMAX(0, (unsigned short)iData[i]);
+              usData[i] = (unsigned short)B3DMAX(0, iData[i]);
         }
       } else {
 
