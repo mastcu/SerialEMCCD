@@ -928,7 +928,7 @@ regsvr32 /s SerialEMCCDps.dll
       <Optimization>MaxSpeed</Optimization>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
       <AdditionalIncludeDirectories>$(GMS2-64_SDK)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>GMS_MAJOR_VERSION=$(GMS_MAJOR_VERSION);GMS_MINOR_VERSION=$(GMS_MINOR_VERSION);NDEBUG;WIN32;GMS2;_DMSDK;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;DELAY_LOAD_FGPU;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>GMS_MAJOR_VERSION=$(GMS_MAJOR_VERSION);GMS_MINOR_VERSION=$(GMS_MINOR_VERSION);NDEBUG;WIN32;GMS2;_DMSDK;DM_SDK;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;DELAY_LOAD_FGPU;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
