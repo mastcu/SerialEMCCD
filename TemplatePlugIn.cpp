@@ -3991,6 +3991,7 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
   unsigned char **linePtrs;
   string refName, refPath, titles, line;
   bool needRef = sLastSaveNeededRef && sLastRefName.length();
+  bool skipRot = (td->iSaveFlags & K2_SKIP_FRAME_ROTFLIP) != 0;
 
   // 12/4/19: There was bad bug before where the fraction sampled in X was determined
   // by sampleFrac * fraction in Y instead of / fraction in Y.  K2 was sampling 1000
@@ -4047,11 +4048,12 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
 
     // Set up title/description line
     if (td->save4bit)
-      sprintf(td->strTemp, "SerialEMCCD: Dose frac. image, 4 bits packed  r/f %d",
-        td->iFrameRotFlip);
+      sprintf(td->strTemp, "SerialEMCCD: Dose frac. image, 4 bits packed  %s %d",
+        skipRot ? "nrf" : "r/f", skipRot ? td->iRotationFlip : td->iFrameRotFlip);
     else
-      sprintf(td->strTemp, "SerialEMCCD: Dose frac. image, scaled by %.2f  r/f %d", 
-        sWriteScaling, td->iFrameRotFlip);
+      sprintf(td->strTemp, "SerialEMCCD: Dose frac. image, scaled by %.2f  %s %d", 
+        sWriteScaling, skipRot ? "nrf" : "r/f", 
+        skipRot ? td->iRotationFlip : td->iFrameRotFlip);
     if (needRef)
       SplitFilePath(sLastRefName, refPath, refName);
 
