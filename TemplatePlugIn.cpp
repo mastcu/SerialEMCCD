@@ -310,6 +310,7 @@ struct ThreadData
   bool bMakeTiltSums;
   bool bSaveComAfterMdoc;
   bool bAlignOfTiltFailed;
+  bool useMotionCor;
   
   // Items needed internally in save routine and its functions
   FILE *fp;
@@ -991,9 +992,12 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
   // Cancel asynchronous save if aligning and saving frames since we need to use
   // the old API, and that is set up to happen only through script calls
-  mTD.bUseOldAPI = saveFrames == SAVE_FRAMES && mTD.bAlignFrames;
+  mTD.useMotionCor = mTD.bAlignFrames && mTD.K3type;
+  mTD.bUseOldAPI = saveFrames == SAVE_FRAMES && mTD.bAlignFrames && !mTD.K3type;
   if (mTD.bUseOldAPI)
     mTD.bAsyncSave = false;
+  if (mTD.useMotionCor)
+    corrections |= OVW_DRIFT_CORR_FLAG;
 
   // Get binning and width/height needed to test if final size is correct
   // binning is passed as binning to be used in the call or, for super-res, binning to be
@@ -1224,7 +1228,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       } else {
 
         // NEW API
-        if (!mTD.OneViewType) {
+        if (!mTD.OneViewType && !mTD.K3type) {
           sprintf(m_strTemp, "CM_SetAlignmentFilter(acqParams, \"%s\")\n",
             mTD.bAlignFrames ? mTD.strFilterName : "");
           mTD.strCommand += m_strTemp;
@@ -1624,7 +1628,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   needTemp = saveOrFrameAlign && td->bEarlyReturn;
   needSum = (saveFrames && 
     ((td->iNumFramesToSum != 0 && (!useOldAPI || (useOldAPI && td->bEarlyReturn))) || 
-    (!useOldAPI && (td->bMakeDeferredSum || (td->bMakeTiltSums && !td->bUseFrameAlign)))))
+    (!useOldAPI && ((td->bMakeDeferredSum && !td->useMotionCor) || 
+      (td->bMakeTiltSums && !td->bUseFrameAlign)))))
     || (td->bUseFrameAlign && td->bEarlyReturn && td->iNumFramesToSum != 0); 
   td->iifile = NULL;
   td->fp = NULL;
@@ -1750,10 +1755,14 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         j++;
       }
 #endif
-      if (!td->OneViewType)
+      if (!td->OneViewType && !td->K3type)
         CM::SetAlignmentFilter(acqParams, filter); 
       j++;
-      CM::SetFrameExposure(acqParams, td->dFrameTime + (td->dFrameTime > 0.05 ? 0.0001 : 0.00002));  j++;
+      if (td->useMotionCor)
+        CM::SetCorrections(acqParams, OVW_DRIFT_CORR_FLAG, OVW_DRIFT_CORR_FLAG);
+      j++;
+      CM::SetFrameExposure(acqParams, 
+        td->dFrameTime + (td->dFrameTime > 0.05 ? 0.0001 : 0.00002));  j++;
       CM::SetDoAcquireStack(acqParams, 1);  j++;
       CM::SetStackFormat(acqParams, CM::StackFormat::Series);  j++;
       CM::SetDoAsyncReadout(acqParams, td->iAsyncToRAM);   j++;
@@ -1781,7 +1790,14 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       if (retval >= 0.001)
         Sleep((DWORD)(retval * 1000. + 0.5));
 
-      stack = CM::AcquireImageStack(camera, acqParams);   j++;
+      // When using motionCor, define a sum image and use a different call, loop twice
+      if (td->useMotionCor) {
+        sumImage = CM::CreateImageForAcquire(camera, acqParams, "Sum");
+        stack = CM::AcquireImageStack(camera, acqParams, sumImage, false);
+        numLoop = 2;
+      } else
+        stack = CM::AcquireImageStack(camera, acqParams);
+      j++;
       numSlices = stack->GetNumFrames();
       stackAllReady = true;
       td->iNumFramesToSum = B3DMIN(td->iNumFramesToSum, numSlices);
@@ -1839,11 +1855,12 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     delete imageLp;
     imageLp = NULL;
 
-    // Second time through (old GMS), substitute the sum image or its ID
+    // Second time through (old GMS or K3 align), substitute the sum image or its ID
     if (loop) {
-      if (doingAsyncSave) 
+      if (doingAsyncSave) {
+        stack->ProcessSum();
         image = sumImage;
-      else
+      } else
         ID = imageID;
     }
     try {
@@ -1855,9 +1872,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       }
 
       // Get regular image if no frame alignment and getting a deferred sum in old API,
-      // or whenever not saving with an early return or need for a sum
+      // or whenever not saving with an early return or need for a sum, or when using
+      // motionCor to get aligned sum after saving stack
       if (!doingStack && !td->bUseFrameAlign && ((useOldAPI && td->bMakeDeferredSum) || 
-        !(saveFrames && (needSum || td->bEarlyReturn)))) {
+        !(saveFrames && (needSum || td->bEarlyReturn)) || td->useMotionCor)) {
           j = 20;
 
           // REGULAR OLD IMAGE
@@ -1875,7 +1893,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           j++;
           imageLp = new GatanPlugIn::ImageDataLocker( image );   j++;
           numDim = DM::ImageGetNumDimensions(image.get());   j++;
-          if (numDim != 2) {
+          if (numDim != 2 && !td->useMotionCor) {
             sprintf(td->strTemp, "image with ID %d has %d dimensions!\n", ID, numDim);
             DebugToResult(td->strTemp);
           }
@@ -1889,7 +1907,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             if (!(td->iAntialias || td->bMakeSubarea))
               array = td->tempBuf;
           }
-          ProcessImage(imageData, array, td->dataSize, td->width, td->height, divideBy2, 
+          ProcessImage(imageData, array, td->dataSize, td->width, td->height, divideBy2,
             transpose, td->byteSize, td->isInteger, td->isUnsignedInt, td->fFloatScaling,
             td->fLinearOffset, 0, td->iExtraDivBy2);
           GainNormalizeSum(td, array);
@@ -1956,9 +1974,14 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
                     elapsedRet ? "T" : "F", elapsed);
                   if (!td->bMakeTiltSums)
                     DebugToResult(td->strTemp);
+                } else {
+                  sprintf(td->strTemp, "No more frames available after frame %d even "
+                    "though GetNumFrames returned %d\n", stackSlice, numSlices);
+                  ProblemToResult(td->strTemp);
+                  numSlices = stackSlice;
+                  td->iNumFramesToSum = B3DMIN(td->iNumFramesToSum, numSlices);
                 }
-                if (frameNeedsDelete || stackSlice >= numSlices)
-                  break;
+                break;
               }
  
               // Sleep while processing events.  If it returns false, it is a quit,
@@ -2351,8 +2374,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
       // For a deferred sum, simply direct the output to the temp buf and make it the 
       // deferred sum array
-      // Skip this all when making tilt sums
-      if (!td->bMakeTiltSums) {
+      // Skip this all when making tilt sums or using motionCor (no full sum here)
+      if (!td->bMakeTiltSums && !td->useMotionCor) {
         procOut = (short *)(td->bUseFrameAlign ? td->array : array);
         if (td->bMakeDeferredSum) {
           procOut = td->tempBuf;
@@ -2382,7 +2405,9 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           AccumulateWallTime(procWall[5], wallStart);
         }
       }
-      if (td->bMakeDeferredSum) {
+
+      // And for motionCor, deferred sum wil be made from that aligned sum
+      if (td->bMakeDeferredSum && !td->useMotionCor) {
         if (errorRet && sDeferredSum) {
           delete [] sDeferredSum;
           sDeferredSum = NULL;
@@ -5915,7 +5940,8 @@ int TemplatePlugIn::GetDefectList(short xyPairs[], long *arrSize,
  */
 int TemplatePlugIn::IsGpuAvailable(long gpuNum, double *gpuMemory, bool shrMem)
 {
-  int m_iGpuAvailable = 0;
+  static int lastProcOK = -1;
+  int gpuAvailable = 0;
   *gpuMemory = 0;
 #ifdef _WIN64
   float memory1 = 0., memory2 = 0.;
@@ -5923,15 +5949,16 @@ int TemplatePlugIn::IsGpuAvailable(long gpuNum, double *gpuMemory, bool shrMem)
     m_iPluginGpuOK = sFrameAli.gpuAvailable(gpuNum, &memory1, sDebug);
   if (shrMem || m_iPluginGpuOK <= 0) {
     m_iProcessGpuOK = sShrMemAli.gpuAvailable(gpuNum, &memory2, sDebug);
-    if (!shrMem && m_iProcessGpuOK > 0)
+    if (!shrMem && m_iProcessGpuOK > 0 && lastProcOK != m_iProcessGpuOK)
       ErrorToResult("But the GPU WILL be available through the shrmemframe frame "
         "alignment program\n", "SerialEMCCD: ");
+    lastProcOK = m_iProcessGpuOK;
   }
-  m_iGpuAvailable = B3DMAX(m_iProcessGpuOK, m_iPluginGpuOK);
-  if (m_iGpuAvailable)
+  gpuAvailable = B3DMAX(m_iProcessGpuOK, m_iPluginGpuOK);
+  if (gpuAvailable)
     *gpuMemory = B3DMAX(memory1, memory2);
 #endif
-  return m_iGpuAvailable;
+  return gpuAvailable;
 }
 
 /*
