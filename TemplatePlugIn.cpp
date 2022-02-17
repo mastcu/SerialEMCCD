@@ -1606,13 +1606,13 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   int fileSlice, tmin, tmax, numSlices;
   int grabInd = -1, grabSlice = -1, maxGrabInd = -1, grabProcInd = 0;
   float meanSum, binForDose, threshForTilt = td->fFrameThresh; 
-  float avgTilt, sdTilt, SEMtilt, diff, minDiff;
   bool saveOrFrameAlign = saveFrames || td->bUseFrameAlign;
   bool useOldAPI = GMS_SDK_VERSION < 31 || td->bUseOldAPI;
   bool alignBeforeProc = td->bFaKeepPrecision && !td->iNumGrabAndStack;
   int stackSlice = 0, usedSlice = 0, sliceForList;
   int errorRet = 0;
 #ifdef _WIN64
+  float avgTilt, sdTilt, SEMtilt, diff, minDiff;
   DM::ScriptObject dummyObj;
   CM::ImageStackPtr stack;
 #endif
@@ -1792,9 +1792,11 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
       // When using motionCor, define a sum image and use a different call, loop twice
       if (td->useMotionCor) {
+#if GMS_SDK_VERSION >= 331
         sumImage = CM::CreateImageForAcquire(camera, acqParams, "Sum");
         stack = CM::AcquireImageStack(camera, acqParams, sumImage, false);
         numLoop = 2;
+#endif
       } else
         stack = CM::AcquireImageStack(camera, acqParams);
       j++;
@@ -1858,8 +1860,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     // Second time through (old GMS or K3 align), substitute the sum image or its ID
     if (loop) {
       if (doingAsyncSave) {
+#if GMS_SDK_VERSION >= 331
         stack->ProcessSum();
         image = sumImage;
+#endif
       } else
         ID = imageID;
     }
