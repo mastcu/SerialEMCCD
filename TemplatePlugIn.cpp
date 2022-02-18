@@ -4077,11 +4077,11 @@ static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, i
 
     // Set up title/description line
     if (td->save4bit)
-      sprintf(td->strTemp, "SerialEMCCD: Dose frac. image, 4 bits packed  %s %d",
-        skipRot ? "nrf" : "r/f", skipRot ? td->iRotationFlip : td->iFrameRotFlip);
+      sprintf(td->strTemp, "SerialEMCCD: Frames . ., 4 bits packed  %s %d",
+        skipRot ? "r/f 0 need" : "r/f", skipRot ? td->iRotationFlip : td->iFrameRotFlip);
     else
-      sprintf(td->strTemp, "SerialEMCCD: Dose frac. image, scaled by %.2f  %s %d", 
-        sWriteScaling, skipRot ? "nrf" : "r/f", 
+      sprintf(td->strTemp, "SerialEMCCD: Frames . ., scaled by %.2f  %s %d", 
+        sWriteScaling, skipRot ? "r/f 0 need" : "r/f", 
         skipRot ? td->iRotationFlip : td->iFrameRotFlip);
     if (needRef)
       SplitFilePath(sLastRefName, refPath, refName);
