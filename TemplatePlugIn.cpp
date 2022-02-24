@@ -3905,68 +3905,119 @@ static int SumFrameIfNeeded(ThreadData *td, bool finalFrame, bool &openForFirstS
   short *sData, *sSum;
   unsigned char *bData;
   unsigned short *usData, *usSum;
+  unsigned int *iData, *iSum;
 
   // Here the fact that they are bytes is only relevant if binned frames are normalized
   bool bytesPassedIn = td->bSaveSuperReduced ||
     (td->bTakeBinnedFrames && td->iK2Processing == NEWCM_GAIN_NORMALIZED);
+  bool fastBytes = !bytesPassedIn && td->fileMode == MRC_MODE_BYTE &&
+    td->iK2Processing != NEWCM_GAIN_NORMALIZED && (nxout * nyout % 4) == 0;
+  bool lastInSum = td->numAddedToOutSum + 1 >= td->numFramesInOutSum[td->outSumFrameIndex]
+    || finalFrame;
 
     // Sum frame first if flag is set, and there is a count
   if (td->bSaveSummedFrames && td->outSumFrameIndex < (int)td->outSumFrameList.size()) {
     if (td->numFramesInOutSum[td->outSumFrameIndex] > 1 || bytesPassedIn) {
 
-      // If there is just one frame in this sum, just go on and use it,
-      // Otherwise add frame to sum: zero sum first if it is the first one
-      if (!td->numAddedToOutSum)
-        memset(td->outSumBuf, 0, 2 * nxout * nyout);
 
-      // Super-res summing can be usefully parallelized
-      if (td->areFramesSuperRes)
-        numThreads = numOMPthreads(td->K3type ? 6 : 2);
-      if (numThreads > 1) {
+      // If there is just one frame in this sum, just go on and use it
+      // Otherwise, need to sum: for fast bytes, copy the first frame into the sum buffer
+      if (fastBytes && !td->numAddedToOutSum) {
+        numThreads = numOMPthreads((td->areFramesSuperRes && td->K3type) ? 3 : 1);
+        if (numThreads > 1) {
+          iSum = (unsigned int *)td->outSumBuf;
+          iData = (unsigned int *)td->outData;
+#pragma omp parallel for num_threads(numThreads) \
+  shared(iSum, iData, nxout, nyout)  \
+  private(i)
+          for (i = 0; i < nxout * nyout / 4; i++)
+            iSum[i] = iData[i];
+        } else {
+          memcpy(td->outSumBuf, td->outData, nxout * nyout);
+        }
+
+      } else {
+
+        // Otherwise add frame to sum: zero sum first if it is the first one in non-fast
+        if (!fastBytes && !td->numAddedToOutSum) {
+          memset(td->outSumBuf, 0, 2 * nxout * nyout);
+        }
+
+
+        // Fast bytes can be added as integers, and for the last frame the sum can be
+        // added to the output frame, avoiding copy
+        if (fastBytes) {
+          if (lastInSum) {
+            iData = (unsigned int *)td->outSumBuf;
+            iSum = (unsigned int *)td->outData;
+          } else {
+            iSum = (unsigned int *)td->outSumBuf;
+            iData = (unsigned int *)td->outData;
+          }
+          if (td->areFramesSuperRes)
+            numThreads = numOMPthreads(td->K3type ? 6 : 2);
+          if (numThreads > 1) {
+#pragma omp parallel for num_threads(numThreads) \
+              shared(iSum, iData, nxout, nyout)  \
+                private(i)
+            for (i = 0; i < nxout * nyout / 4; i++)
+              iSum[i] += iData[i];
+          } else {
+            for (i = 0; i < nxout * nyout / 4; i++)
+              iSum[i] += iData[i];
+          }
+
+        } else {
+          // Super-res summing can be usefully parallelized
+          if (td->areFramesSuperRes)
+            numThreads = numOMPthreads(td->K3type ? 6 : 2);
+
+          if (numThreads > 1) {
 #pragma omp parallel for num_threads(numThreads) \
   shared(td, nxout, nyout)  \
   private(i, j, sSum, usSum, usData, sData, bData)
-        for (i = 0; i < nyout; i++) {
-          sSum = ((short *)td->outSumBuf) + i * nxout;
-          usSum = (unsigned short *)sSum;
-          if (td->fileMode == MRC_MODE_USHORT && !bytesPassedIn) {
-            usData = ((unsigned short *)td->outData) + i * nxout;
-            for (j = 0; j < nxout; j++)
-              *(usSum++) += *(usData++);
-          } else if (td->fileMode == MRC_MODE_SHORT && !bytesPassedIn) {
-            sData = td->outData + i * nxout;
-            for (j = 0; j < nxout; j++)
-              *(sSum++) += *(sData++);
+            for (i = 0; i < nyout; i++) {
+              sSum = ((short *)td->outSumBuf) + i * nxout;
+              usSum = (unsigned short *)sSum;
+              if (td->fileMode == MRC_MODE_USHORT && !bytesPassedIn) {
+                usData = ((unsigned short *)td->outData) + i * nxout;
+                for (j = 0; j < nxout; j++)
+                  *(usSum++) += *(usData++);
+              } else if (td->fileMode == MRC_MODE_SHORT && !bytesPassedIn) {
+                sData = td->outData + i * nxout;
+                for (j = 0; j < nxout; j++)
+                  *(sSum++) += *(sData++);
+              } else {
+                bData = ((unsigned char *)td->outData) + i * nxout;
+                for (j = 0; j < nxout; j++)
+                  *(usSum++) += *(bData++);
+              }
+            }
           } else {
-            bData = ((unsigned char *)td->outData) + i * nxout;
-            for (j = 0; j < nxout; j++)
-              *(usSum++) += *(bData++);
-          }
-        }
-      } else {
-        for (i = 0; i < nyout; i++) {
-          sSum = ((short *)td->outSumBuf) + i * nxout;
-          usSum = (unsigned short *)sSum;
-          if (td->fileMode == MRC_MODE_USHORT && !bytesPassedIn) {
-            usData = ((unsigned short *)td->outData) + i * nxout;
-            for (j = 0; j < nxout; j++)
-              *(usSum++) += *(usData++);
-          } else if (td->fileMode == MRC_MODE_SHORT && !bytesPassedIn) {
-            sData = td->outData + i * nxout;
-            for (j = 0; j < nxout; j++)
-              *(sSum++) += *(sData++);
-          } else {
-            bData = ((unsigned char *)td->outData) + i * nxout;
-            for (j = 0; j < nxout; j++)
-              *(usSum++) += *(bData++);
+            for (i = 0; i < nyout; i++) {
+              sSum = ((short *)td->outSumBuf) + i * nxout;
+              usSum = (unsigned short *)sSum;
+              if (td->fileMode == MRC_MODE_USHORT && !bytesPassedIn) {
+                usData = ((unsigned short *)td->outData) + i * nxout;
+                for (j = 0; j < nxout; j++)
+                  *(usSum++) += *(usData++);
+              } else if (td->fileMode == MRC_MODE_SHORT && !bytesPassedIn) {
+                sData = td->outData + i * nxout;
+                for (j = 0; j < nxout; j++)
+                  *(sSum++) += *(sData++);
+              } else {
+                bData = ((unsigned char *)td->outData) + i * nxout;
+                for (j = 0; j < nxout; j++)
+                  *(usSum++) += *(bData++);
+              }
+            }
           }
         }
       }
 
       // Increment count; if it still short, return
       td->numAddedToOutSum++;
-      if (td->numAddedToOutSum < td->numFramesInOutSum[td->outSumFrameIndex] && 
-        !finalFrame) {
+      if (!lastInSum) {
         AccumulateWallTime(procWall[2], wallStart);
         return 1;
       }
@@ -3978,7 +4029,7 @@ static int SumFrameIfNeeded(ThreadData *td, bool finalFrame, bool &openForFirstS
       if ((td->fileMode != MRC_MODE_BYTE && !td->bSaveSuperReduced) ||
         td->bTakeBinnedFrames && td->iK2Processing == NEWCM_GAIN_NORMALIZED) {
           td->outData = td->outSumBuf;
-      } else {
+      } else if (!fastBytes) {
         usSum = (unsigned short *)td->outSumBuf;
         bData = (unsigned char *)td->outData;
         for (i = 0; i < nxout * nyout; i++) {
