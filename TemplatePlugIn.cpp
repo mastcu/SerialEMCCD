@@ -3906,17 +3906,18 @@ static int SumFrameIfNeeded(ThreadData *td, bool finalFrame, bool &openForFirstS
   unsigned char *bData;
   unsigned short *usData, *usSum;
   unsigned int *iData, *iSum;
-
+  bool lastInSum;
   // Here the fact that they are bytes is only relevant if binned frames are normalized
   bool bytesPassedIn = td->bSaveSuperReduced ||
     (td->bTakeBinnedFrames && td->iK2Processing == NEWCM_GAIN_NORMALIZED);
   bool fastBytes = !bytesPassedIn && td->fileMode == MRC_MODE_BYTE &&
     td->iK2Processing != NEWCM_GAIN_NORMALIZED && (nxout * nyout % 4) == 0;
-  bool lastInSum = td->numAddedToOutSum + 1 >= td->numFramesInOutSum[td->outSumFrameIndex]
-    || finalFrame;
 
     // Sum frame first if flag is set, and there is a count
   if (td->bSaveSummedFrames && td->outSumFrameIndex < (int)td->outSumFrameList.size()) {
+    lastInSum = td->numAddedToOutSum + 1 >= td->numFramesInOutSum[td->outSumFrameIndex]
+      || finalFrame;
+
     if (td->numFramesInOutSum[td->outSumFrameIndex] > 1 || bytesPassedIn) {
 
 
@@ -4549,7 +4550,7 @@ static int WriteAlignComFile(ThreadData *td, string inputFile, int ifMdoc)
   if (sLastSaveNeededRef) {
     SplitFilePath(sLastRefName, temp, temp2);
     comStr += "GainReferenceFile " + relPath + temp2 + "\n";
-    comStr += "RotationAndFlip -1\n";
+    comStr += "RotationAndFlip -2\n";
   }
 
   // Write the file
