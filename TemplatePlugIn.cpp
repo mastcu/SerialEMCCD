@@ -5543,7 +5543,7 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
 
   // Override the DM align option with framealign option
   mTD.bUseFrameAlign = doseFrac && (flags & K2_USE_FRAMEALIGN) != 0;
-  mTD.bAlignFrames = alignFrames && !mTD.bUseFrameAlign && !mTD.OneViewType;
+  mTD.bAlignFrames = alignFrames && doseFrac && !mTD.bUseFrameAlign && !mTD.OneViewType;
   mTD.bMakeAlignComFile = doseFrac && saveFrames && (flags & K2_MAKE_ALIGN_COM) != 0 &&
     mTD.strAlignComName.size() > 0;
   mTD.bSaveComAfterMdoc = mTD.bMakeAlignComFile && (flags & K2_SAVE_COM_AFTER_MDOC) != 0;
@@ -5571,8 +5571,9 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
     mTD.iFullSizeY = B3DNINT(fullSizes / K2_REDUCED_Y_SCALE);
     mTD.iFullSizeX = B3DNINT(fullSizes - K2_REDUCED_Y_SCALE * mTD.iFullSizeY);
   }
-  sprintf(m_strTemp, "SetK2Parameters called with save %s  flags 0x%x  scaling %f\n", 
-    m_bSaveFrames ? "Y":"N", flags, scaling);
+  sprintf(m_strTemp, "SetK2Parameters called with save %s  align %d mtdalign %d flags "
+    "0x%x  scaling %f\n", m_bSaveFrames ? "Y":"N", alignFrames, mTD.bAlignFrames, flags, 
+    scaling);
   DebugToResult(m_strTemp);
 }
 
