@@ -2975,7 +2975,7 @@ static int RunContinuousAcquire(ThreadData *td)
     needRedOut = td->iAntialias && rotationFlip;
     if (transpose || td->bMakeSubarea || td->iAntialias) {
       try {
-        procOutArray = new short[outLimit];
+        procOutArray = new short[outLimit * (td->bReturnFloats ? 2 : 1)];
       }
       catch (...) {
         DELETE_CONTINUOUS;
@@ -2984,7 +2984,8 @@ static int RunContinuousAcquire(ThreadData *td)
       try {
         redOutArray = procOutArray;
         if (needRedOut)
-          redOutArray = new short[td->iFinalWidth * td->iFinalHeight];
+          redOutArray = new short[td->iFinalWidth * td->iFinalHeight * 
+          (td->bReturnFloats ? 2 : 1)];
       }
       catch (...) {
         delete procOutArray;
