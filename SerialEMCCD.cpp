@@ -37,8 +37,6 @@ extern "C"
 BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID /*lpReserved*/)
 {
   HRESULT hRes;
-  HANDLE hMutex = CreateMutex(NULL, FALSE, "b3dregsvrMutex");
-  BOOL regsvr = hMutex && GetLastError() == ERROR_ALREADY_EXISTS;
   if (dwReason == DLL_PROCESS_ATTACH) {
     hRes = CoInitialize(NULL);
     _ASSERTE(SUCCEEDED(hRes));
@@ -47,6 +45,8 @@ BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID /*lpReserved*/)
     _Module.Init(ObjectMap, hInstance, &LIBID_SERIALEMCCDLib);
     initialized = true;
     DisableThreadLibraryCalls(hInstance);
+    HANDLE hMutex = CreateMutex(NULL, FALSE, "b3dregsvrMutex");
+    BOOL regsvr = hMutex && GetLastError() == ERROR_ALREADY_EXISTS;
     if (!regsvr) {
       hRes = _Module.RegisterClassObjects(CLSCTX_LOCAL_SERVER, 
         REGCLS_MULTIPLEUSE);
