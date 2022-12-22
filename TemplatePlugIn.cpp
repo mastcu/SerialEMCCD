@@ -1236,7 +1236,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
         sprintf(m_strTemp, "CM_SetFrameExposure(acqParams, %f)\n"
           "CM_SetStackFormat(acqParams, %d)\n", 
           mTD.dFrameTime + (mTD.dFrameTime > 0.05 ? 0.0001 : 0.00002),
-          saveFrames == SAVE_FRAMES ? 0 : 1);
+          (saveFrames == SAVE_FRAMES || mTD.bUseFrameAlign) ? 0 : 1);
           mTD.strCommand += m_strTemp;
       }
 
