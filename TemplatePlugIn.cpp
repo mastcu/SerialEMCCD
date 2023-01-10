@@ -97,7 +97,7 @@ enum {CHAN_UNUSED = 0, CHAN_ACQUIRED, CHAN_RETURNED};
 enum {NO_SAVE = 0, SAVE_FRAMES};
 enum {NO_DEL_IM = 0, DEL_IMAGE};
 enum {WAIT_FOR_THREAD = 0, WAIT_FOR_RETURN, WAIT_FOR_NEW_SHOT, WAIT_FOR_CONTINUOUS,
-  WAIT_FOR_TILT_QUEUE };
+  WAIT_FOR_TILT_QUEUE, WAIT_FOR_SAVE_THREAD, WAIT_FOR_SAVE_FINISH, WAIT_FOR_FRAME_SHOT };
 
 // Mapping from program read modes (0-2) to values for K2, and from special modes used to 
 // signal K3 linear and super-res (3 and 4).  The read mode index >= 0 is
@@ -114,10 +114,11 @@ static int sK2HardProcs[4] = {0, 2, 4, 6};
 // Now used to look up what to
 static int sInverseTranspose[8] = {0, 258, 3, 257, 1, 256, 2, 259};
 
-// THE debug mode flag and an integer that came through environment variable
+// THE debug mode flag and an integer that came through environment variable.  A quit flag
 static BOOL sDebug;
 static int sEnvDebug;
 static bool sSimulateSuperRes;
+static int sDMquitting = 0;
 
 static HANDLE sInstanceMutex;
 
@@ -147,6 +148,11 @@ static int sLastIndexOfTiltSum = 0;
 static int sLastStartOfTiltSum = 0;
 static int sLastEndOfTiltSum = 0;
 
+// Items related to using save threads
+static int sEndSaveThread = 0;
+static HANDLE sHSaveThread = NULL;
+static int sAcquireTDCopyInd = 0;
+static int sSaveTDCopyInd = 0;
 
 // Static data about loaded gain refs that needs to be set by the threads
 static float *sK2GainRefData[2] = {NULL, NULL};
@@ -160,17 +166,14 @@ static string sLastRefDir;
 static float sWriteScaling;
 static float sLastSaveFloatScaling;
 static bool sLastSaveNeededRef;
-static string sFrameMdocName;     // Mdoc name set by SaveFrameMdoc
-static string sMdocToSave;
 static string sStrDefectsToSave;
-static string sInputForComFile;
-static bool sThreadWorking = false;
 static double sLastDoseRate = 0.;
 static double sDeferredDoseRate = 0.;
 //static int sNumThreads[6] = {1, 2, 3,4, 6, 8};
 //static int sThreadNumInd = 0;
 
 #define DELETE_CONTINUOUS {delete [] sContinuousArray; sContinuousArray = NULL;}
+#define DELETE_ARRAY(a) {delete [] a; a = NULL;}
 
 // Structure to hold data to pass to acquire proc/thread
 struct ThreadData 
@@ -221,7 +224,11 @@ struct ThreadData
   string strSaveExtension;
   bool bLastSaveHadDefects;
   string strFrameTitle;
-  
+  string strMdocToSave;
+  string strFrameMdocName;    // Mdoc name set by SaveFrameMdoc
+  string strInputForComFile;
+  string strBaseNameForMdoc;    // Stack name or dir name saved by SetupFileSaving
+
   // New non-internal items
   int iNumFramesToSum;
   int iNumSummed;
@@ -230,10 +237,10 @@ struct ThreadData
   int iAsyncToRAM;
   float fLinearOffset;
   float fFrameOffset;
-  bool isTDcopy;
+  int isTDcopy;
+  ThreadData *copies[2];
   int iReadyToAcquire;
   int iReadyToReturn;
-  int iDMquitting;
   int iFrameRotFlip;
   bool bDoContinuous;
   bool bSetContinuousMode;
@@ -311,16 +318,23 @@ struct ThreadData
   bool bSaveComAfterMdoc;
   bool bAlignOfTiltFailed;
   bool useMotionCor;
+  bool saveNeededRef;
+  string refName;
+  float writeScaling;
+  bool bUseSaveThread;
+  int iNoMoreFrames;
+  int iSaveFinished;
   
   // Items needed internally in save routine and its functions
   FILE *fp;
   ImodImageFile *iifile;
   short *outData, *rotBuf, *tempBuf, *outSumBuf;
+  bool needTemp;
   unsigned char *pack4bitBuf;
   int *sumBuf;
   void **grabStack;
   MrcHeader hdata;
-  int fileMode, outByteSize, byteSize;
+  int fileMode, outByteSize, byteSize, maxGrabInd, curGrabInd;
   bool isInteger, isUnsignedInt, isFloat, signedBytes, save4bit;
   int refCopyReturnVal;
   double curRefTime;
@@ -331,16 +345,19 @@ static ThreadData *sTDwithFaResult = NULL;
 
 // Local functions callable from thread
 static DWORD WINAPI AcquireProc(LPVOID pParam);
-static void ProcessImage(void *imageData, void *array, int dataSize, long width, 
+static DWORD WINAPI SaveGrabProc(LPVOID pParam);
+static void AdjustAndWriteMdocAndCom(ThreadData *td, int &errorRet);
+static void ProcessImage(void *imageData, void *array, int dataSize, long width,
                           long height, long divideBy2, long transpose, int byteSize, 
                           bool isInteger, bool isUnsignedInt, float floatScaling,
-                          float linearOffset, int useThreads = 0, int extraDivBy2 = 0);
+                          float linearOffset, int useThreads = 0, int extraDivBy2 = 0,
+  bool skipDebug = false);
 static int AlignOrSaveImage(ThreadData *td, short *outForRot, bool saveImage, 
   bool alignFrame, int slice, bool finalFrame, int &fileSlice, int &tmin, int &tmax,
   float &meanSum, double *procWall, double &saveWall, double &alignWall, 
   double &wallStart);
 static int AlignSaveGrabbedImage(ThreadData *td, short *outForRot, int grabInd, 
-  int grabSlice, int maxGrabInd, int onlyAorS, int &fileSlice, int &tmin, int &tmax, 
+  int grabSlice, int onlyAorS, int &fileSlice, int &tmin, int &tmax, 
   float &meanSum, double *procWall, double &saveWall, double &alignWall, 
   double &wallStart, int &errorRet);
 static int PackAndSaveImage(ThreadData *td, void *array, int nxout, int nyout, int slice, 
@@ -350,8 +367,11 @@ static int SumFrameIfNeeded(ThreadData *td, bool finalFrame, bool &openForFirstS
   double *procWall, double &wallStart);
 static int GetTypeAndSizeInfo(ThreadData *td, DM::Image &image, int loop, int outLimit,
                               bool doingStack);
-static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum, 
-                            long &frameDivide, bool &needProc);
+static int InitOnFirstFrame(ThreadData *td, bool needSum, long &frameDivide, 
+  bool &needProc);
+static DWORD CheckAndCleanupThread(HANDLE &hThread);
+static void CleanUpBuffers(ThreadData *td, int grabProcInd);
+static void FixAndCloseFilesIfNeeded(ThreadData *td, int &fileSlice);
 static void SimulateSuperRes(ThreadData *td, void *image, double time);
 static int InitializeFrameAlign(ThreadData *td);
 static int FinishFrameAlign(ThreadData *td, short *procOut, int numSlice);
@@ -386,7 +406,7 @@ static void SplitFilePath(const string &path, string &dir, string &file);
 static int WriteTextFile(const char *filename, const char *text, int length, 
   int openErr, int writeErr, bool asBinary);
 static int WriteFrameMdoc(ThreadData *td);
-static void AddLineToFrameMdoc(const char *line);
+static void AddLineToFrameMdoc(ThreadData *td, const char *line);
 static int ReduceImage(ThreadData *td, void *array, void *outArray, int type, int width,
   int height, int redWidth, int redHeight, int binning, int filterType, float scaling);
 static void DebugPrintf(char *buffer, const char *format, ...);
@@ -486,6 +506,7 @@ public:
 private:
   ThreadData mTD;
   ThreadData mTDcopy;
+  ThreadData mTDcopy2;
   HANDLE m_HAcquireThread;
   BOOL m_bGMS2;
   int m_iDMVersion;
@@ -505,12 +526,12 @@ private:
   BOOL m_bSaveFrames;
   string m_strPostSaveCom;
   string m_strFrameTitle;
-  string m_strBaseNameForMdoc;    // Stack name or dir name saved by SetupFileSaving
   int m_iGpuAvailable;
   int m_iProcessGpuOK;
   int m_iPluginGpuOK;
   bool m_bDefectsParsed;
   bool m_bNextSaveResultsFromCopy;
+  bool m_bWaitingForSaveFinish;
 };
 
 TemplatePlugIn::TemplatePlugIn()
@@ -550,6 +571,9 @@ TemplatePlugIn::TemplatePlugIn()
   m_dFlyback = 400.;
   m_dLineFreq = 60.;
   m_dSyncMargin = 10.;
+  mTD.isTDcopy = 0;
+  mTD.copies[0] = &mTDcopy;
+  mTD.copies[1] = &mTDcopy2;
   mTD.iReadMode = -1;
   mTD.K3type = false;
   mTD.OneViewType = false;
@@ -794,7 +818,7 @@ double TemplatePlugIn::ExecuteClientScript(char *strScript, BOOL selectCamera)
   }
   if (m_HAcquireThread) {
     if (strstr(strScript, "HardwareDarkReference"))
-      waitType = WAIT_FOR_THREAD;
+      waitType = WAIT_FOR_FRAME_SHOT;
     WaitForAcquireThread(waitType);
   }
 
@@ -996,6 +1020,11 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   mTD.bUseOldAPI = saveFrames == SAVE_FRAMES && mTD.bAlignFrames && !mTD.K3type;
   if (mTD.bUseOldAPI)
     mTD.bAsyncSave = false;
+
+  // Cancel save thread if frame alignment, old API or synchronous save
+  if (mTD.bUseFrameAlign || mTD.bUseOldAPI || !mTD.bAsyncSave)
+    mTD.bUseSaveThread = false;
+
   if (mTD.useMotionCor)
     corrections |= OVW_DRIFT_CORR_FLAG;
 
@@ -1411,11 +1440,12 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
                       long *width, long *height, long divideBy2, long transpose, 
                       long delImage, long saveFrames)
 {
-  DWORD retval = 0, resret, threadID;
+  DWORD retval = 0, resret, threadID, saveRet;
   bool hasMutex = false;
   ThreadData *retTD = &mTD;
   bool useFinal;
   int retWidth = retTD->width, retHeight = retTD->height;
+  int copyInd;
 
   // If there was an acquire thread started, wait until it is done for any dose frac
   // shot, or until ready for acquisition for other shots
@@ -1424,6 +1454,16 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
       mTD.bDoseFrac ? WAIT_FOR_THREAD : WAIT_FOR_NEW_SHOT));
     if (!SleepMsg(10))
       retval = 1;
+  }
+
+  // Clean up saving thread if it ended
+  // Tell it to end if there is saving and it is not going through save thread
+  if (sHSaveThread) {
+    saveRet = CheckAndCleanupThread(sHSaveThread);
+    if (!retval && sHSaveThread && saveFrames && !mTD.bUseSaveThread) {
+      SetWatchedDataValue(sEndSaveThread, 1);
+      DebugToResult("Set save thread to end\n");
+    }
   }
 
   int sizeOrig = *arrSize;
@@ -1438,10 +1478,13 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   mTD.saveFrames = saveFrames;
   mTD.iReadyToAcquire = 0;
   mTD.iReadyToReturn = 0;
-  mTD.iDMquitting = 0;
   mTD.iErrorFromSave = 0;
   mTD.iEndContinuous = 0;
   mTD.iWaitingForFrame = 0;
+  mTD.iNoMoreFrames = 0;
+  mTD.iSaveFinished = 0;
+  mTD.curGrabInd = -1;
+  mTD.maxGrabInd = -1;
 
   // Get the array for storing continuous images 
   if (!retval && mTD.bDoContinuous) {
@@ -1461,11 +1504,35 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
   if (!retval && (mTD.bDoContinuous || ((saveFrames || mTD.bUseFrameAlign) && 
     mTD.bAsyncSave))) {
       *arrSize = *width = *height = 0;
-      mTDcopy = mTD;
-      mTDcopy.isTDcopy = true;
-      retTD = &mTDcopy;
 
-      m_HAcquireThread = CreateThread(NULL, 0, AcquireProc, &mTDcopy, CREATE_SUSPENDED, 
+      // Determine what TD copy to use.  The default is to use the same one over again
+      // unless the save thread is running, in which case the other one has to be used
+      // If the save thread is working on the one last acquired into, the other must (?) 
+      // be free to use
+      // If the save thread is working on the other one, it hasn't gotten to the last one
+      // acquired into, so need to wait for it to finish there
+      copyInd = sAcquireTDCopyInd;
+      if (sHSaveThread) {
+        copyInd = 1 - sSaveTDCopyInd;
+        if (sSaveTDCopyInd != sAcquireTDCopyInd) {
+          m_bWaitingForSaveFinish = true;
+          retval = WaitForAcquireThread(WAIT_FOR_SAVE_FINISH);
+          if (retval) {
+            m_bWaitingForSaveFinish = false;
+            return retval;
+          }
+        }
+      }
+
+      // Make the copy and make any needed changes before setting the acquire copy index
+      *mTD.copies[copyInd] = mTD;
+      mTD.copies[copyInd]->isTDcopy = copyInd + 1;
+      retTD = mTD.copies[copyInd];
+      sAcquireTDCopyInd = copyInd;
+      DebugPrintf(mTD.strTemp, "acquire TD index %d  use save thread %d\n", copyInd, 
+        mTD.copies[copyInd]->bUseSaveThread ? 1 : 0);
+
+      m_HAcquireThread = CreateThread(NULL, 0, AcquireProc, retTD, CREATE_SUSPENDED, 
         &threadID);
       if (!m_HAcquireThread) {
         retval = THREAD_ERROR;
@@ -1478,6 +1545,7 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         if (resret == (DWORD)(-1) || resret > 1)
           retval = THREAD_ERROR;
       }
+      m_bWaitingForSaveFinish = false;
       if (retval) {
         DELETE_CONTINUOUS;
         return retval;
@@ -1527,27 +1595,31 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
 DWORD TemplatePlugIn::WaitForAcquireThread(int waitType)
 {
   const char *messages[] = {"thread to end", "exposure and frame sum to complete",
-    "ready for single-shot", "continuous exposure to end", "a tilt sum to be ready"};
+    "ready for single-shot", "continuous exposure to end", "a tilt sum to be ready",
+  "a save to be done", "save thread to end", "ready for frame shot"};
   double quitStart = -1.;
   double waitStart = GetTickCount();
   bool done;
+  ThreadData *acqTD = mTD.copies[sAcquireTDCopyInd];
   DWORD retval;
   sprintf(m_strTemp, "Waiting for %s  %d\n", messages[waitType], 
     waitType == WAIT_FOR_CONTINUOUS ? sJ : 0);
   DebugToResult(m_strTemp);
   while (1) {
-    GetExitCodeThread(m_HAcquireThread, &retval);
-    if (retval != STILL_ACTIVE) {
-      CloseHandle(m_HAcquireThread);   // HOPE THAT IS RIGHT TO ADD!
-      m_HAcquireThread = NULL;
+    retval = CheckAndCleanupThread(
+      (waitType == WAIT_FOR_SAVE_THREAD || waitType == WAIT_FOR_SAVE_FINISH) ? 
+      sHSaveThread : m_HAcquireThread);
+    if (retval != STILL_ACTIVE && 
+      !(waitType == WAIT_FOR_FRAME_SHOT && m_bWaitingForSaveFinish))
       return retval;
-    }
+   
     WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
 
-    done = (waitType == WAIT_FOR_RETURN && mTDcopy.iReadyToReturn) ||
-      (waitType == WAIT_FOR_NEW_SHOT && mTDcopy.iReadyToAcquire) ||
+    done = (waitType == WAIT_FOR_RETURN && acqTD->iReadyToReturn) ||
+      (waitType == WAIT_FOR_NEW_SHOT && acqTD->iReadyToAcquire) ||
       (waitType == WAIT_FOR_TILT_QUEUE && (sTiltQueueSize > 0 ||
-        mTDcopy.iReadyToAcquire));
+        acqTD->iReadyToAcquire)) ||
+        (waitType == WAIT_FOR_SAVE_FINISH && !mTD.copies[sSaveTDCopyInd]->grabStack);
     ReleaseMutex(sDataMutexHandle);
     if (done)
       return 0;
@@ -1562,12 +1634,26 @@ DWORD TemplatePlugIn::WaitForAcquireThread(int waitType)
     }
     if (!SleepMsg(10)) {
       quitStart = GetTickCount();
-      SetWatchedDataValue(mTDcopy.iDMquitting, 1);
+      SetWatchedDataValue(sDMquitting, 1);
     }
     if (quitStart >= 0. && TickInterval(quitStart) > 5000.)
       return QUIT_DURING_SAVE;
   }
   return 0;
+}
+
+/*
+ * Thread-callable function for checking a thread
+ */
+static DWORD CheckAndCleanupThread(HANDLE &hThread)
+{
+  DWORD retval;
+  GetExitCodeThread(hThread, &retval);
+  if (retval != STILL_ACTIVE) {
+    CloseHandle(hThread);
+    hThread = NULL;
+  }
+  return retval;
 }
 
 /*
@@ -1599,17 +1685,19 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   vector<float> frameMeans;
   vector<float> tiltMeans;
   int firstSliceAboveThresh, lastSliceAboveThresh = -1, numInTilt = 0, tiltIndex = 0;
-  bool doingStack, needProc, needTemp, needSum, exposureDone, copiedToProc, getDose = 0;
+  bool doingStack, needProc, needSum, exposureDone, copiedToProc, getDose = 0;
   bool stackAllReady, doingAsyncSave, frameNeedsDelete = false;
   double retval, saveWall, getFrameWall, wallStart, alignWall, procSum = 0.;
   double procWall[6] = {0., 0., 0., 0., 0., 0.};
   int fileSlice, tmin, tmax, numSlices;
-  int grabInd = -1, grabSlice = -1, maxGrabInd = -1, grabProcInd = 0;
+  bool skipFrameDebug = false, lastExpDone = false;
+  int grabInd = -1, grabSlice = -1, grabProcInd = 0;
   float meanSum, binForDose, threshForTilt = td->fFrameThresh; 
   bool saveOrFrameAlign = saveFrames || td->bUseFrameAlign;
   bool useOldAPI = GMS_SDK_VERSION < 31 || td->bUseOldAPI;
   bool alignBeforeProc = td->bFaKeepPrecision && !td->iNumGrabAndStack;
   int stackSlice = 0, usedSlice = 0, sliceForList;
+  DWORD resRet;
   int errorRet = 0;
 #ifdef _WIN64
   float avgTilt, sdTilt, SEMtilt, diff, minDiff;
@@ -1622,10 +1710,11 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   td->height = 0;
   td->iNumSummed = 0;
   td->iFramesSaved = 0;
+  td->maxGrabInd = -1;
   td->fSavedScaling = td->fFloatScaling;
   doingAsyncSave = saveOrFrameAlign && td->bAsyncSave;
   exposureDone = !doingAsyncSave;
-  needTemp = saveOrFrameAlign && td->bEarlyReturn;
+  td->needTemp = saveOrFrameAlign && td->bEarlyReturn;
   needSum = (saveFrames && 
     ((td->iNumFramesToSum != 0 && (!useOldAPI || (useOldAPI && td->bEarlyReturn))) || 
     (!useOldAPI && ((td->bMakeDeferredSum && !td->useMotionCor) || 
@@ -1645,13 +1734,13 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   td->numOutSumsDoneAtIndex = 0;
   td->savedFrameList.clear();
   if (saveOrFrameAlign)
-    sInputForComFile.clear();
+    td->strInputForComFile.clear();
 
   // Clear out any leftover information here so mdoc is based only on new call
   // Clear out dose rate info
   if (saveFrames) {
-    sMdocToSave.clear();
-    sFrameMdocName.clear();
+    td->strMdocToSave.clear();
+    td->strFrameMdocName.clear();
   }
   sLastDoseRate = 0.;
   if (td->bMakeDeferredSum)
@@ -1678,7 +1767,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         outLimit = td->iFullSizeX * td->iFullSizeY * i;
       else
         outLimit = (td->iRight - td->iLeft) * (td->iBottom - td->iTop) * i;
-      if (td->iAntialias || td->bMakeSubarea || !needTemp) {
+      if (td->iAntialias || td->bMakeSubarea || !td->needTemp) {
         unbinnedArray = new short[outLimit];
         array = unbinnedArray;
       }
@@ -1847,9 +1936,22 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
     }
   }
 
-  // Set this flag to allow synchronization with Mdoc writing, there is no return
-  // below here until the end
-  sThreadWorking = true;
+  // If saving without the save thread and it is running, it was already signaled to end,
+  // now wait until it does
+  if (saveFrames && !td->bUseSaveThread && sHSaveThread) {
+    if (!sEndSaveThread)
+      SetWatchedDataValue(sEndSaveThread, 1);
+    wallStart = GetTickCount();
+    DebugToResult("Waiting for save thread to end\n");
+    while (TickInterval(wallStart) < 60000.) {
+      if (CheckAndCleanupThread(sHSaveThread) != STILL_ACTIVE)
+        break;
+      if (!SleepMsg(50))
+        break;
+    }
+    if (sHSaveThread)
+      DebugToResult("Warning: timeout waiting for save thread to end\n");
+  }
 
   // Loop on stack then image if there are both
   for (loop = 0; loop < numLoop; loop++) {
@@ -1954,13 +2056,14 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             while (1) {
               double elapsed = 0.;
               bool elapsedRet;
-              if (grabProcInd < maxGrabInd && stack->GetElapsedExposureTime(elapsed) &&
-                elapsed < td->dFrameTime * (stackSlice + 1)) {
+              skipFrameDebug = false;
+              if (grabProcInd < td->maxGrabInd && stack->GetElapsedExposureTime(elapsed)
+                && elapsed < td->dFrameTime * (stackSlice + 1) && !td->bUseSaveThread) {
                 if (!td->bMakeTiltSums)
-                DebugPrintf(td->strTemp, "Processing frame %d from grab stack\n", 
-                  grabProcInd);
+                  DebugPrintf(td->strTemp, "Processing frame %d from grab stack\n",
+                    grabProcInd);
                 i = AlignSaveGrabbedImage(td, outForRot, grabProcInd, grabSlice,
-                  maxGrabInd, td->bMakeTiltSums ? 1 : 0, fileSlice, tmin, tmax, meanSum, 
+                  td->bMakeTiltSums ? 1 : 0, fileSlice, tmin, tmax, meanSum, 
                   procWall, saveWall, alignWall, wallStart, errorRet);
                 delete[] td->grabStack[grabProcInd];
                 td->grabStack[grabProcInd] = NULL;
@@ -1976,7 +2079,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
                   sprintf(td->strTemp, "Got frame %d of %d   exp done %d  "
                     "elapsed %s %.2f\n", stackSlice + 1, numSlices, exposureDone ? 1 : 0,
                     elapsedRet ? "T" : "F", elapsed);
-                  if (!td->bMakeTiltSums)
+                  skipFrameDebug = stackSlice > 0 && stackSlice < numSlices - 1 && 
+                    !(grabSlice < 0 && numSlices - stackSlice <= td->iNumGrabAndStack) &&
+                    !(exposureDone && !lastExpDone);
+                  if (!skipFrameDebug)
                     DebugToResult(td->strTemp);
                 } else {
                   sprintf(td->strTemp, "No more frames available after frame %d even "
@@ -1985,23 +2091,26 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
                   numSlices = stackSlice;
                   td->iNumFramesToSum = B3DMIN(td->iNumFramesToSum, numSlices);
                 }
+                lastExpDone = exposureDone;
                 break;
               }
  
               // Sleep while processing events.  If it returns false, it is a quit,
               // so break and let the loop finish
-              if (!SleepMsg(10) || GetWatchedDataValue(td->iDMquitting)) {
+              if (!SleepMsg(10) || GetWatchedDataValue(sDMquitting)) {
                 td->iErrorFromSave = QUIT_DURING_SAVE;
-                SetWatchedDataValue(td->iDMquitting, 1);
+                SetWatchedDataValue(sDMquitting, 1);
                 break;
               }
             }
             sprintf(td->strTemp, "numSlices %d  isStackDone %s\n", numSlices,
               stackAllReady ? "Y":"N");
-            if (stackSlice >= numSlices || GetWatchedDataValue(td->iDMquitting) || 
-              td->iErrorFromSave == QUIT_DURING_SAVE || 
-              td->iErrorFromSave == DM_CALL_EXCEPTION)
+            if (stackSlice >= numSlices || GetWatchedDataValue(sDMquitting) ||
+              td->iErrorFromSave == QUIT_DURING_SAVE ||
+              td->iErrorFromSave == DM_CALL_EXCEPTION) {
+              SetWatchedDataValue(td->iNoMoreFrames, 1);
               break;
+            }
           }
           if (stackSlice)
             AccumulateWallTime(getFrameWall, wallStart);
@@ -2025,14 +2134,40 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
             }
             j++;
 
+            // Set size of grab stack if using thread, and max index now
+            if (td->bUseSaveThread) {
+              td->iNumGrabAndStack = numSlices;
+              td->maxGrabInd = numSlices - 1;
+            }
+
             // Sets frameDivide, outByteSize, fileMode, save4bit and copies gain reference
-            if (InitOnFirstFrame(td, needTemp, needSum, frameDivide, needProc)) {
+            if (InitOnFirstFrame(td, needSum, frameDivide, needProc)) {
               if (td->bUseFrameAlign)
                 errorRet = td->iErrorFromSave;
               break;
             }
-            if (!needTemp)
+            if (!td->needTemp)
               td->tempBuf = (short *)array;
+
+            // If using save thread and it is not running, start it
+            if (td->bUseSaveThread && !sHSaveThread) {
+              sSaveTDCopyInd = sAcquireTDCopyInd;
+              sEndSaveThread = 0;
+              sHSaveThread = CreateThread(NULL, 0, SaveGrabProc, td, CREATE_SUSPENDED,
+                &resRet);
+              DebugPrintf(td->strTemp, "Started save thread on TD %d\n", sSaveTDCopyInd);
+              if (!sHSaveThread)
+                errorRet = THREAD_ERROR;
+              else {
+                resRet = ResumeThread(sHSaveThread);
+                if (resRet == (DWORD)(-1) || resRet > 1)
+                  errorRet = THREAD_ERROR;
+              }
+              if (errorRet) {
+                ErrorToResult("AcquireProc: error starting or resuming save thread\n");
+                break;
+              }
+            }
           }
           wallStart = wallTime();
 
@@ -2195,7 +2330,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           if (needSum && usedSlice < td->iNumFramesToSum) {
             AddToSum(td, imageData, td->sumBuf);
             if (td->bEarlyReturn && usedSlice == td->iNumFramesToSum - 1) {
-                ProcessImage(td->sumBuf, array, td->dataSize, td->width, td->height,
+              ProcessImage(td->sumBuf, array, td->dataSize, td->width, td->height,
                   divideBy2, transpose, 4, !td->isFloat, false, td->fSavedScaling, 
                   td->fFrameOffset * td->iNumFramesToSum);
                 DebugToResult("Partial sum completed by thread\n");
@@ -2240,7 +2375,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
           // Grabbing starts when the possible number of remaining slices fits in stack
           // Record the usedSlice value at that time, and base index on usedSlice
-          if (numSlices - stackSlice <= td->iNumGrabAndStack) {
+          if (numSlices - stackSlice <= td->iNumGrabAndStack || td->bUseSaveThread) {
             if (grabSlice < 0) {
               grabSlice = usedSlice;
               DebugToResult("Starting to grab frames from rest of stack\n");
@@ -2262,12 +2397,14 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
               break;
             }
             procOut = (short *)td->grabStack[grabInd];
-            maxGrabInd = grabInd;
-
+            if (!td->bUseSaveThread)
+              td->maxGrabInd = grabInd;
+ 
             // Copy the array over either if no processing is needed or if doing high 
             // precision counting mode align
             if (!needProc || (td->bFaKeepPrecision && td->isCounting)) {
-              DebugToResult("Copying array to procOut\n");
+              if (!skipFrameDebug)
+                DebugToResult("Copying array to procOut\n");
               memcpy(procOut, imageData, td->width * td->height * td->iGrabByteSize);
               copiedToProc = true;
             }
@@ -2282,11 +2419,14 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
               td->bReturnFloats ? 2 : td->dataSize), 
               td->width, td->height, frameDivide, transpose, td->byteSize, td->isInteger,
               td->isUnsignedInt, td->fFloatScaling, td->fFrameOffset, 
-              (td->areFramesSuperRes ? 2 : 1) + (td->K3type ? 1 : 0), td->iExtraDivBy2);
+              (td->areFramesSuperRes ? 2 : 1) + (td->K3type ? 1 : 0), td->iExtraDivBy2,
+              skipFrameDebug);
             td->outData = (short *)procOut;  // WAS td->tempBuf;
             outForRot = td->rotBuf;
           }
           AccumulateWallTime(procWall[1], wallStart);
+          if (td->bUseSaveThread)
+            SetWatchedDataValue(td->curGrabInd, grabInd);
 
           // If just grabbing, skip other steps
           if (grabInd < 0) {
@@ -2310,7 +2450,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
           } else if (td->bUseFrameAlign && td->bMakeTiltSums && !td->bAlignOfTiltFailed &&
             !(td->bMakeTiltSums && !numInTilt)) {
             i = AlignSaveGrabbedImage(td, outForRot, grabInd, grabSlice,
-              maxGrabInd, -1, fileSlice, tmin, tmax, meanSum,
+              -1, fileSlice, tmin, tmax, meanSum,
               procWall, saveWall, alignWall, wallStart, errorRet);
             if (i && td->iErrorFromSave == FILE_OPEN_ERROR) {
               errorRet = td->iErrorFromSave;
@@ -2343,15 +2483,18 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
         DeleteImageIfNeeded(td, image, &frameNeedsDelete);
 
-        // If there are stacked frames, align and/or rotate/flip and save them
-        if (!td->iErrorFromSave && td->iNumGrabAndStack) {
+        if (td->bUseSaveThread) {
+          SetWatchedDataValue(td->iReadyToAcquire, 1);
+
+          // If there are stacked frames, align and/or rotate/flip and save them
+        } else if (!td->iErrorFromSave && td->iNumGrabAndStack) {
 
           // Signal that we are done with the DM stack and then process
           DebugPrintf(td->strTemp, "Done with stack, processing grabbed frames %d to %d\n"
-            , grabProcInd, maxGrabInd);
+            , grabProcInd, td->maxGrabInd);
           SetWatchedDataValue(td->iReadyToAcquire, 1);
-          for (grabInd = grabProcInd; grabInd <= maxGrabInd; grabInd++) {
-            i = AlignSaveGrabbedImage(td, outForRot, grabInd, grabSlice, maxGrabInd,
+          for (grabInd = grabProcInd; grabInd <= td->maxGrabInd; grabInd++) {
+            i = AlignSaveGrabbedImage(td, outForRot, grabInd, grabSlice,
               td->bMakeTiltSums ? 1 : 0, fileSlice, tmin,
               tmax, meanSum, procWall, saveWall, alignWall, wallStart, errorRet);
             if (i && td->iErrorFromSave == FILE_OPEN_ERROR)
@@ -2435,7 +2578,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
       if (!td->iErrorFromSave && td->bMakeAlignComFile) {
         if (td->bSaveComAfterMdoc)
-          sInputForComFile = td->strRootName + "." + td->strSaveExtension;
+          td->strInputForComFile = td->strRootName + "." + td->strSaveExtension;
         else
           td->iErrorFromSave = WriteAlignComFile(td,
             td->strRootName + "." + td->strSaveExtension, 0);
@@ -2455,25 +2598,11 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   }  // End of loop on stack and sum or single image
 
   // Clean up files now in case an exception got us to here
-  if (td->iifile)
-    iiDelete(td->iifile);
-  td->iifile = NULL;
-#ifdef _WIN64
-  if (td->fp) {
-
-    // If there was failure in the last header write or the last image, write the header
-    // Also adjust the frames saved if that was just a header failure
-    if (td->bHeaderNeedsWrite) {
-      sprintf(td->strTemp, "Writing header in cleanup with nz = %d\n", td->hdata.nz);
-      DebugToResult(td->strTemp);
-      mrc_head_write(td->fp, &td->hdata);
-      if (fileSlice == td->iFramesSaved + 1)
-        td->iFramesSaved++;
-    }
-    fclose(td->fp);
+  if (!td->bUseSaveThread) {
+    FixAndCloseFilesIfNeeded(td, fileSlice);
   }
-  td->fp = NULL;
 
+#ifdef _WIN64
   // Save list of frames actually saved if thresholding used and frames saved
   if (saveFrames && td->savedFrameList.size()) {
     string listString;
@@ -2492,45 +2621,17 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
 
   // Save frame mdoc if one is set up - this will write the align com if it was deferred
   WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
-  if (saveFrames && sMdocToSave.length() && sFrameMdocName.length()) {
-    if (td->iFramesSaved) {
-      size_t eolInd, nsfInd = sMdocToSave.find("NumSubFrames = ");
-      if (nsfInd != string::npos) {
-        eolInd = sMdocToSave.find("\n", nsfInd + 15);
-        if (eolInd != string::npos) {
-          sprintf(td->strTemp, "%d", td->iFramesSaved);
-          sMdocToSave.replace(nsfInd + 15, eolInd - (nsfInd + 15), td->strTemp);
-        }
-      }
-      if (nsfInd == string::npos || eolInd == string::npos) {
-        sprintf(td->strTemp, "NumSubFrames = %d", td->iFramesSaved);
-        AddLineToFrameMdoc(td->strTemp);
-      }
-      tmin = WriteFrameMdoc(td);
-      if (!errorRet)
-        errorRet = tmin;
-    } else {
-      sMdocToSave.clear();
-      sFrameMdocName.clear();
-    }
+  if (saveFrames && td->strMdocToSave.length() && td->strFrameMdocName.length() && 
+    !td->bUseSaveThread) {
+    AdjustAndWriteMdocAndCom(td, errorRet);
   }
-  sThreadWorking = false;
+  td->iSaveFinished = 1;
   ReleaseMutex(sDataMutexHandle);
 #endif
-
-  // Clean up all buffers
-  delete [] td->rotBuf;
-  delete [] td->sumBuf;
-  delete [] td->outSumBuf;
-  delete [] td->pack4bitBuf;
-  if (needTemp)
-    delete [] td->tempBuf;
-  if (td->iNumGrabAndStack) {
-    if (td->grabStack)
-      for (grabInd = grabProcInd; grabInd < td->iNumGrabAndStack; grabInd++)
-        delete [] td->grabStack[grabInd];
-    delete [] td->grabStack;
-  }
+  
+  DELETE_ARRAY(td->sumBuf);
+  if (!td->bUseSaveThread)
+    CleanUpBuffers(td, grabProcInd);
 
   // Delete image(s) before return if they can be found
   if (delImage && !doingAsyncSave) {
@@ -2559,6 +2660,146 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   //sThreadNumInd = (sThreadNumInd + 1) % 6;
   DebugToResult(td->strTemp);
   return errorRet;
+}
+
+/*
+ * Thread procedure for saving the grab stack as it occurs
+ arg*/
+static DWORD WINAPI SaveGrabProc(LPVOID pParam)
+{
+  ThreadData *td = (ThreadData *)pParam;
+  bool doRet = false, waitForNext = false;
+  int ind, grabInd, fileSlice, errorRet, retVal;
+  double saveWall, wallStart, alignWall, procSum = 0.;
+  double procWall[6] = {0., 0., 0., 0., 0., 0.};
+  float meanSum;
+  int tmin, tmax, newInd;
+
+  // Start indefinite loop
+  for (;;) {
+
+    // Set up for new stack and file
+    grabInd = 0;
+    fileSlice = 0;
+    wallStart = wallTime();
+    saveWall = procSum = 0.;
+    for (ind = 0; ind < 6; ind++)
+      procWall[ind] = 0.;
+
+    DebugPrintf(td->copies[1 - sAcquireTDCopyInd]->strTemp, 
+      "SaveGrabProc starting on TD index #%d\n", sSaveTDCopyInd);
+
+    // Loop on frames until done
+    for (;;) {
+      if (grabInd <= GetWatchedDataValue(td->curGrabInd)) {
+        ind = AlignSaveGrabbedImage(td, td->rotBuf ? td->rotBuf : td->tempBuf, grabInd, 0,
+          0, fileSlice, tmin,
+          tmax, meanSum, procWall, saveWall, alignWall, wallStart, errorRet);
+        if (ind && td->iErrorFromSave == FILE_OPEN_ERROR)
+          errorRet = td->iErrorFromSave;
+        grabInd++;
+        if (ind)
+          break;
+      } else if (GetWatchedDataValue(td->iNoMoreFrames)) {
+        if (td->curGrabInd < td->maxGrabInd)
+          td->bHeaderNeedsWrite = true;
+        break;
+      }
+      if (!SleepMsg(2)) {
+        SetWatchedDataValue(sDMquitting, 1);
+        return 1;
+      }
+      if (grabInd > td->maxGrabInd)
+        break;
+    }
+
+    // Done with this save
+    FixAndCloseFilesIfNeeded(td, fileSlice);
+    td->maxGrabInd = -1;
+    td->curGrabInd = -1;
+    CleanUpBuffers(td, grabInd);
+    
+
+    // See if thread should end or wait for another save to be ready to start
+    newInd = 1 - sSaveTDCopyInd;
+    DebugPrintf(td->copies[1 - sAcquireTDCopyInd]->strTemp, 
+      "SaveGrabProc finished saving %d slices, watching TD %d\n", fileSlice, newInd);
+    WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
+    td->iSaveFinished = 1;
+    if (td->strMdocToSave.length() && td->strFrameMdocName.length()) {
+      AdjustAndWriteMdocAndCom(td, errorRet);
+    }
+    ReleaseMutex(sDataMutexHandle);
+
+    for (;;) {
+      if (!SleepMsg(10)) {
+        SetWatchedDataValue(sDMquitting, 1);
+        return 1;
+      }
+
+      retVal = -2;
+      WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
+
+      // Quitting
+      if (sDMquitting) {
+        retVal = 1;
+
+        // Switch to other data index for new stack
+      } else if (td->copies[newInd]->bUseSaveThread &&
+
+        !td->copies[newInd]->iNoMoreFrames && td->copies[newInd]->maxGrabInd >= 0 &&
+        td->copies[newInd]->curGrabInd >= 0) {
+        sSaveTDCopyInd = newInd;
+        td = td->copies[newInd];
+        ReleaseMutex(sDataMutexHandle);
+        retVal = -1;
+
+        // Respond to end flag
+      } else if (GetWatchedDataValue(sEndSaveThread) > 0) {
+        ReleaseMutex(sDataMutexHandle);
+        retVal = 0;
+      }
+      ReleaseMutex(sDataMutexHandle);
+      if (retVal >= 0) {
+        DebugToResult("SaveGrabProc ended\n");
+        return retVal;
+      }
+
+      // Go on to the stack
+      if (retVal == -1)
+        break;
+    }
+  }
+  return 0;
+}
+
+/*
+ * Set or update the # of frames in the mdoc string and write the mdoc if any
+ */
+static void AdjustAndWriteMdocAndCom(ThreadData *td, int &errorRet)
+{
+  int err;
+  if (td->iFramesSaved) {
+    size_t eolInd, nsfInd = td->strMdocToSave.find("NumSubFrames = ");
+    if (nsfInd != string::npos) {
+      eolInd = td->strMdocToSave.find("\n", nsfInd + 15);
+      if (eolInd != string::npos) {
+        sprintf(td->strTemp, "%d", td->iFramesSaved);
+        td->strMdocToSave.replace(nsfInd + 15, eolInd - (nsfInd + 15), td->strTemp);
+      }
+    }
+    if (nsfInd == string::npos || eolInd == string::npos) {
+      sprintf(td->strTemp, "NumSubFrames = %d", td->iFramesSaved);
+      AddLineToFrameMdoc(td, td->strTemp);
+    }
+    err = WriteFrameMdoc(td);
+    if (!errorRet)
+      errorRet = err;
+  } else {
+    td->strMdocToSave.clear();
+    td->strFrameMdocName.clear();
+  }
+
 }
 
 // Do antialias reduction or extract subarea if it is called for, from array to outArray
@@ -3163,7 +3404,7 @@ static int RunContinuousAcquire(ThreadData *td)
       td->iReadyToReturn = 1;
       nxout = GetTickCount() - startTime;
       maxTime = B3DMAX(maxTime, nxout);
-      if (td->iEndContinuous || td->iDMquitting) {
+      if (td->iEndContinuous || sDMquitting) {
         ReleaseMutex(sDataMutexHandle);
         sprintf(td->strTemp, "RunContinuousAcquire: Ending thread, time %.3f; last "
           "acquire %d  max %d\n", (GetTickCount() % (DWORD)3600000) / 1000., nxout, 
@@ -3186,7 +3427,7 @@ static int RunContinuousAcquire(ThreadData *td)
       sJ++;
       if (!SleepMsg(10)) {
         DebugToResult("RunContinuousAcquire: Interrupted by quit\n");
-        SetWatchedDataValue(td->iDMquitting, 1);
+        SetWatchedDataValue(sDMquitting, 1);
         break;
       }
     }
@@ -3292,14 +3533,14 @@ int TemplatePlugIn::GetContinuousFrame(short array[], long *arrSize, long *width
         ResetEvent(sFrameReadyEvent);
         ReleaseMutex(sDataMutexHandle);
       }
-      if (mTDcopy.iDMquitting)
+      if (sDMquitting)
         return QUIT_DURING_SAVE;
     } else {
 
       // For COM connection do regular sleep
       if (!SleepMsg(10)) {
         DebugToResult("GetContinuousFrame: Looks like a quit\n");
-        SetWatchedDataValue(mTDcopy.iDMquitting, 1);
+        SetWatchedDataValue(sDMquitting, 1);
         return QUIT_DURING_SAVE;
       }
     }
@@ -3428,7 +3669,7 @@ static int GetTypeAndSizeInfo(ThreadData *td, DM::Image &image, int loop,  int o
 /*
  * Does many initializations for file saving on a first frame, including getting buffers
  */
-static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum, 
+static int InitOnFirstFrame(ThreadData *td, bool needSum, 
                             long &frameDivide, bool &needProc)
 {
   bool gainNormed = td->iK2Processing == NEWCM_GAIN_NORMALIZED;
@@ -3492,6 +3733,7 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
     if (td->OneViewType && td->iExtraDivBy2)
       sWriteScaling /= (float)pow(2., td->iExtraDivBy2);
   }
+  td->writeScaling = sWriteScaling;
 
   // Set the byte size for a grab stack if any
   td->iGrabByteSize = td->outByteSize;
@@ -3529,7 +3771,7 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
       return 1;
     }
   }
-  if (needTemp) {
+  if (td->needTemp) {
     try {
       td->tempBuf = new short [td->width * td->height];
     }
@@ -3591,7 +3833,53 @@ static int InitOnFirstFrame(ThreadData *td, bool needTemp, bool needSum,
       td->refCopyReturnVal = CopyK2ReferenceIfNeeded(td);
       sLastSaveNeededRef = !td->refCopyReturnVal;
   }
+  td->saveNeededRef = sLastSaveNeededRef;
   return 0;
+}
+
+/*
+ * Clean up all buffers that could be passed to save thread
+ */
+static void CleanUpBuffers(ThreadData *td, int grabProcInd)
+{
+  int grabInd;
+  DELETE_ARRAY(td->rotBuf);
+  DELETE_ARRAY(td->outSumBuf);
+  DELETE_ARRAY(td->pack4bitBuf);
+  if (td->needTemp)
+    DELETE_ARRAY(td->tempBuf);
+  if (td->iNumGrabAndStack) {
+    if (td->grabStack)
+      for (grabInd = grabProcInd; grabInd < td->iNumGrabAndStack; grabInd++)
+        delete[] td->grabStack[grabInd];
+    DELETE_ARRAY(td->grabStack);
+  }
+}
+
+/*
+ * Make sure files are closed and fix header of MRC file if needed
+ */
+static void FixAndCloseFilesIfNeeded(ThreadData *td, int &fileSlice)
+{
+  if (td->iifile)
+    iiDelete(td->iifile);
+  td->iifile = NULL;
+#ifdef _WIN64
+  if (td->fp) {
+
+    // If there was failure in the last header write or the last image, write the header
+    // Also adjust the frames saved if that was just a header failure
+    if (td->bHeaderNeedsWrite) {
+      sprintf(td->strTemp, "Writing header in cleanup with nz = %d\n", td->hdata.nz);
+      DebugToResult(td->strTemp);
+      mrc_head_write(td->fp, &td->hdata);
+      if (fileSlice == td->iFramesSaved + 1)
+        td->iFramesSaved++;
+    }
+    fclose(td->fp);
+  }
+  td->fp = NULL;
+#endif
 }
 
 /*
@@ -3761,7 +4049,7 @@ static int InitializeFrameAlign(ThreadData *td)
 
 // Convenience routine for processing a grabbed image
 static int AlignSaveGrabbedImage(ThreadData *td, short *outForRot, int grabInd,
-  int grabSlice, int maxGrabInd, int onlyAorS, int &fileSlice, int &tmin, int &tmax, 
+  int grabSlice, int onlyAorS, int &fileSlice, int &tmin, int &tmax, 
   float &meanSum, double *procWall, double &saveWall, double &alignWall, 
   double &wallStart, int &errorRet)
 {
@@ -3769,7 +4057,7 @@ static int AlignSaveGrabbedImage(ThreadData *td, short *outForRot, int grabInd,
   td->outData = (short *)td->grabStack[grabInd];
   i = AlignOrSaveImage(td, outForRot, td->saveFrames == SAVE_FRAMES && onlyAorS >= 0,
     td->bUseFrameAlign && onlyAorS <= 0,
-    grabSlice + grabInd, grabInd == maxGrabInd, fileSlice, tmin,
+    grabSlice + grabInd, grabInd == td->maxGrabInd, fileSlice, tmin,
     tmax, meanSum, procWall, saveWall, alignWall, wallStart);
   if (td->iErrorFromSave == FRAMEALI_NEXT_FRAME)
     errorRet = td->iErrorFromSave;
@@ -3777,8 +4065,7 @@ static int AlignSaveGrabbedImage(ThreadData *td, short *outForRot, int grabInd,
     return i;
   if (onlyAorS < 0)
     return 0;
-  delete[] td->grabStack[grabInd];
-  td->grabStack[grabInd] = NULL;
+  DELETE_ARRAY(td->grabStack[grabInd]);
   return 0;
 }
 
@@ -4583,9 +4870,9 @@ static int WriteAlignComFile(ThreadData *td, string inputFile, int ifMdoc)
 * useThreads should be 1 for K2 counting, 2 for K2 super-res, 3 for K3
 */
 static void ProcessImage(void *imageData, void *array, int dataSize, long width, 
-                         long height, long divideBy2, long transpose, int byteSize, 
-                         bool isInteger, bool isUnsignedInt, float floatScaling,
-                         float linearOffset, int useThreads, int extraDivBy2)
+  long height, long divideBy2, long transpose, int byteSize, bool isInteger, 
+  bool isUnsignedInt, float floatScaling, float linearOffset, int useThreads, 
+  int extraDivBy2, bool skipDebug)
 {
   int i, j, iy, ix = 0;
   unsigned int *uiData;
@@ -4597,11 +4884,14 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
   unsigned char *bData, *ubData;
   char *sbData;
   char sbVal;
+  BOOL debugSave = sDebug;
   float scale, postOffset;
   float *flIn, *flOut = NULL, flTmp;
   int operations[4] = {1, 5, 7, 3};
   char mess[512];
   int numThreads, totalDivBy2 = divideBy2 + extraDivBy2;
+  if (skipDebug)
+    sDebug = false;
 
   /*if (sDebug && byteSize > 2) {
     iData = (int *)imageData;
@@ -5124,9 +5414,9 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
           sprintf(mess,"Truncating signed integers to unsigned shorts,  scaling by "
             "%f  offset %f -> %f\n", floatScaling, linearOffset, postOffset);
           DebugToResult(mess);
-        iData = (int *)imageData;
+          iData = (int *)imageData;
         for (i = 0; i < width * height; i++) {
-            flTmp = (float)iData[i] * floatScaling + postOffset;
+         flTmp = (float)iData[i] * floatScaling + postOffset;
             B3DCLAMP(flTmp, 0.f, 65535.f);
             usData[i] = (unsigned short)flTmp;
         }
@@ -5162,6 +5452,7 @@ static void ProcessImage(void *imageData, void *array, int dataSize, long width,
       }
     }
   }
+  sDebug = debugSave;
 }
 
 /*
@@ -5343,6 +5634,7 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   sprintf(td->strTemp, "%s\\%sRef_%s.%s", saveDir.c_str(), prefStr.c_str(),
     rootName.c_str(), extension[extInd]);
   sLastRefName = td->strTemp;
+  td->refName = sLastRefName;
 
   // Intercept need for K3 binned frame and make sure it is there or loaded and made
 #ifdef _WIN64
@@ -5520,6 +5812,7 @@ void TemplatePlugIn::SetReadMode(long mode, double scaling)
     mTD.bDoseFrac = false;
     mTD.bUseFrameAlign = false;
     mTD.bMakeDeferredSum = false;
+    mTD.bUseSaveThread = false;
   }
   mTD.isCounting = mode >= 0 && sReadModes[mode] == K2_COUNTING_READ_MODE;
   mTD.isSuperRes = mode >= 0 && (sReadModes[mode] == K2_SUPERRES_READ_MODE || 
@@ -5702,11 +5995,14 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
     }
   }
 
+  mTD.bUseSaveThread = (flags & K2_USE_SAVE_THREAD) != 0 && mTD.iNumGrabAndStack &&
+    !frameThresh && !mTD.bMakeTiltSums;
+
   sprintf(m_strTemp, "SetupFileSaving called with flags %x rf %d frf %d %s fpi %s pix %f"
     " ER %s A2R %d sum %d grab %d\n  thresh %.2f copy %s \n  dir %s root %s\n", flags, 
     rotationFlip, mTD.iFrameRotFlip, mTD.bWriteTiff ? "TIFF" : "MRC", 
     filePerImage ? "Y":"N", pixelSize, mTD.bEarlyReturn ? "Y":"N", 
-    mTD.iAsyncToRAM, mTD.iNumFramesToSum, mTD.iNumGrabAndStack,mTD.fFrameThresh, 
+    mTD.iAsyncToRAM, mTD.iNumFramesToSum, mTD.iNumGrabAndStack, mTD.fFrameThresh, 
     (flags & K2_COPY_GAIN_REF) ? mTD.strGainRefToCopy.c_str() :"NO",
     mTD.strSaveDir.c_str(), mTD.strRootName.c_str());
   DebugToResult(m_strTemp);
@@ -5744,7 +6040,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
       else
         *error = DIR_CREATE_ERROR;
     }
-    m_strBaseNameForMdoc = mTD.strSaveDir;
+    mTD.strBaseNameForMdoc = mTD.strSaveDir;
   } else if (! *error) {
 
     // Check whether the file exists
@@ -5768,7 +6064,7 @@ void TemplatePlugIn::SetupFileSaving(long rotationFlip, BOOL filePerImage,
       }
     }
     if (!*error)
-      m_strBaseNameForMdoc = m_strTemp;
+      mTD.strBaseNameForMdoc = m_strTemp;
   }
   if (!*error && defects && (flags & K2_SAVE_DEFECTS)) {
     
@@ -5835,27 +6131,28 @@ void TemplatePlugIn::ClearTiltSums()
 int TemplatePlugIn::SaveFrameMdoc(char *strMdoc, long flags)
 {
   int retval = 0;
+  ThreadData *td = m_HAcquireThread ? mTD.copies[sAcquireTDCopyInd] : &mTD;
 
   // This gets cleared by a previous call here, so a single-shot should not be able to
   // save its mdoc by mistake
-  if (!m_strBaseNameForMdoc.length())
+  if (!td->strBaseNameForMdoc.length())
     return FRAMEDOC_NO_SAVING;
 
   // These should be cleared before an acquire with saving starts, and after saving
   WaitForSingleObject(sDataMutexHandle, DATA_MUTEX_WAIT);
-  sMdocToSave = strMdoc;
-  sFrameMdocName = m_strBaseNameForMdoc + ".mdoc";
-  m_strBaseNameForMdoc.clear();
+  td->strMdocToSave = strMdoc;
+  td->strFrameMdocName = td->strBaseNameForMdoc + ".mdoc";
+  td->strBaseNameForMdoc.clear();
 
   // Add defect file now, it is known when the shot started
   if (mTD.bLastSaveHadDefects) {
     sprintf(m_strTemp, "DefectFile = %s\n", mTD.strLastDefectName.c_str());
-    AddLineToFrameMdoc(m_strTemp);
+    AddLineToFrameMdoc(td, m_strTemp);
   }
 
   // Write it now or let thread do it
-  if (!(m_HAcquireThread && sThreadWorking))
-    retval = WriteFrameMdoc(&mTD);
+  if (!td->iSaveFinished)
+    retval = WriteFrameMdoc(td);
   ReleaseMutex(sDataMutexHandle);
   return retval;
 }
@@ -5867,27 +6164,28 @@ static int WriteFrameMdoc(ThreadData *td)
 {
   string refPath, refName;
   int retval;
+  char strTemp[MAX_TEMP_STRING];
 
   // Add reference now, this all got handled in the thread
   if (sLastSaveNeededRef && sLastRefName.length()) {
     SplitFilePath(sLastRefName, refPath, refName);
-    sprintf(td->strTemp, "GainReference = %s\n", refName.c_str());
-    AddLineToFrameMdoc(td->strTemp);
+    sprintf(strTemp, "GainReference = %s\n", refName.c_str());
+    AddLineToFrameMdoc(td, strTemp);
   }
   errno = 0;
-  retval = WriteTextFile(sFrameMdocName.c_str(), sMdocToSave.c_str(),
-    (int)sMdocToSave.length(), FRAMEDOC_OPEN_ERR, FRAMEDOC_WRITE_ERR, false);
+  retval = WriteTextFile(td->strFrameMdocName.c_str(), td->strMdocToSave.c_str(),
+    (int)td->strMdocToSave.length(), FRAMEDOC_OPEN_ERR, FRAMEDOC_WRITE_ERR, false);
   if (retval) {
-    sprintf(td->strTemp, "WriteFrameMdoc error is %d for file: %s : %s\n", retval, 
-      sFrameMdocName.c_str(), strerror(errno));
-    DebugToResult(td->strTemp);
+    sprintf(strTemp, "WriteFrameMdoc error is %d for file: %s : %s\n", retval, 
+      td->strFrameMdocName.c_str(), strerror(errno));
+    DebugToResult(strTemp);
   }
-  if (sInputForComFile.length() > 0) {
-    WriteAlignComFile(td, sInputForComFile, 2);
-    sInputForComFile.clear();
+  if (td->strInputForComFile.length() > 0) {
+    WriteAlignComFile(td, td->strInputForComFile, 2);
+    td->strInputForComFile.clear();
   }
-  sFrameMdocName.clear();
-  sMdocToSave.clear();
+  td->strFrameMdocName.clear();
+  td->strMdocToSave.clear();
   return retval;
 }
 
@@ -5895,16 +6193,16 @@ static int WriteFrameMdoc(ThreadData *td)
  * Adds the given line to the FrameSet section of the frame mdoc if it can find it, or
  * just appends it
  */
-static void AddLineToFrameMdoc(const char *line)
+static void AddLineToFrameMdoc(ThreadData *td, const char *line)
 {
-  size_t ind = sMdocToSave.find("[FrameSet");
+  size_t ind = td->strMdocToSave.find("[FrameSet");
   if (ind != string::npos) {
-    ind = sMdocToSave.find('\n', ind);
+    ind = td->strMdocToSave.find('\n', ind);
     if (ind != string::npos)
-      sMdocToSave.insert(ind + 1, line);
+      td->strMdocToSave.insert(ind + 1, line);
   }
   if (ind == string::npos)
-    sMdocToSave += line;
+    td->strMdocToSave += line;
 }
 
 /*
@@ -6041,7 +6339,7 @@ void TemplatePlugIn::SetupFrameAligning(long aliBinning, double rad2Filt1,
     "\n", alignFlags, gpuFlags, frameThreshes, comName ? comName : "");
   DebugToResult(m_strTemp);
   if (m_HAcquireThread)
-    WaitForAcquireThread(WAIT_FOR_THREAD);
+    WaitForAcquireThread(WAIT_FOR_FRAME_SHOT);
   if (!makingCom && gpuFlags) {
 
     // If GPU hasn't been tested yet, do so now, consulting shrmemframe only if local
@@ -6716,7 +7014,7 @@ void TemplatePlugIn::FreeK2GainReference(long which)
 // Wait until ready for single shot or dose fractionation shot
 int TemplatePlugIn::WaitUntilReady(long which)
 {
-  if (m_HAcquireThread && WaitForAcquireThread(which ? WAIT_FOR_THREAD : 
+  if (m_HAcquireThread && WaitForAcquireThread(which ? WAIT_FOR_FRAME_SHOT : 
     WAIT_FOR_NEW_SHOT))
       return 1;
   return 0;
