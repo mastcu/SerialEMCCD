@@ -205,6 +205,10 @@ struct ThreadData
   int iRight;
   int iTop;
   int iBottom;
+  int iK3Left;
+  int iK3Right;
+  int iK3Top;
+  int iK3Bottom;
   BOOL bDoseFrac;
   string strCommand;
   char strTemp[MAX_TEMP_STRING];   // Give it its own temp string separate from class
@@ -1131,10 +1135,18 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     mTD.fFrameOffset = (float)(mTD.fLinearOffset * mTD.dFrameTime);
   mTD.fLinearOffset = (float)(mTD.fLinearOffset * exposure);
 
-  mTD.iTop = top;
-  mTD.iBottom = bottom;
-  mTD.iLeft = left;
-  mTD.iRight = right;
+  // Save t-lb-r values is TD, adjust values to be used in BinnedReadArea when taking K3 
+  // frames binned - they have to be binned coordinates to match binning 2
+  mTD.iTop = mTD.iK3Top = top;
+  mTD.iBottom = mTD.iK3Bottom = bottom;
+  mTD.iLeft = mTD.iK3Left = left;
+  mTD.iRight =  mTD.iK3Right = right;
+  if (mTD.bTakeBinnedFrames) {
+    mTD.iK3Bottom = bottom = top / 2 + (bottom - top) / 2;
+    mTD.iK3Top = top = top / 2;
+    mTD.iK3Right = right = left / 2 + (right - left) / 2;
+    mTD.iK3Left = left = left / 2;
+  }
 
   // These are needed generally for getting dose rate
   mTD.dK2Exposure = exposure;
@@ -1176,7 +1188,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       "(camera, %d, %g, %d, %d)\n", newProc, exposure + 0.0005, 
       mTD.bTakeBinnedFrames ? 2 : binning, mTD.bTakeBinnedFrames ? 2 : binning);
     mTD.strCommand += m_strTemp;
-    if (!mTD.bDoseFrac && !mTD.bMakeSubarea) {
+    if (!(mTD.bDoseFrac && mTD.bUseOldAPI) && !mTD.bMakeSubarea) {
       sprintf(m_strTemp, "CM_SetBinnedReadArea(camera, acqParams, %d, %d, %d, %d)\n",
         top, left, bottom, right);
       mTD.strCommand += m_strTemp;
@@ -1825,7 +1837,11 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         camera, (CM::AcquisitionProcessing)td->iK2Processing, td->dK2Exposure + 0.001, 
         td->bTakeBinnedFrames ? 2 : td->iK2Binning, 
         td->bTakeBinnedFrames ? 2 : td->iK2Binning);
-          //, td->iK2Top, td->iK2Left, td->iK2Bottom, td->iK2Right);
+      if (!td->bMakeSubarea) {
+        CM::SetBinnedReadArea(camera, acqParams, td->iK3Top, td->iK3Left, td->iK3Bottom,
+          td->iK3Right);
+      }
+
       // The above validated without knowing about dose-fractionation and rounded to 0.1,
       // So set exposure time again and the final validation will know about frames
       CM::SetExposure(acqParams, td->dK2Exposure + 0.001);
@@ -2925,7 +2941,7 @@ static void GainNormalizeSum(ThreadData *td, void *array)
 {
 #ifdef _WIN64
   int refInd = (td->isSuperRes && !td->bTakeBinnedFrames) ? 1 : 0;
-  int ind, error = 0;
+  int ind, refOff, ix, iy, error = 0;
   int iVal;
   short *sData = (short *)array;
   unsigned short *usData = (unsigned short *)array;
@@ -2937,32 +2953,40 @@ static void GainNormalizeSum(ThreadData *td, void *array)
     error = 1;
     errStr = "there was a problem copying the gain reference";
   } else {
-    error = LoadK2ReferenceIfNeeded(td, true, errStr);
+    error = LoadK2ReferenceIfNeeded(td, false, errStr);
   }
 
   // Here, check that size matches for an existing reference
-  if (!error && (td->width != sK2GainRefWidth[refInd] || 
-    td->height != sK2GainRefHeight[refInd]))
+  if (!error && (td->width + td->iLeft > sK2GainRefWidth[refInd] || 
+    td->height + td->iTop > sK2GainRefHeight[refInd]))
       error = 3;
   if (error == 3) {
-    sprintf(td->strTemp, "gain reference size (%d x %d) is not the same as the "
-      "image size (%d x %d)", sK2GainRefWidth[refInd], sK2GainRefHeight[refInd], 
-      td->width, td->height);
+    sprintf(td->strTemp, "gain reference size (%d x %d) is too small for image size and "
+      "position (%d x %d, offset %d, %d)", sK2GainRefWidth[refInd], 
+      sK2GainRefHeight[refInd], td->width, td->height, td->iLeft, td->iTop);
     errStr = td->strTemp;
   }
 
   // Normalize at last; no more errors
   if (!error) {
     refData = sK2GainRefData[refInd];
-    if (td->divideBy2) {
-      for (ind = 0; ind < td->width * td->height; ind++) {
-        iVal = (int)(sData[ind] * refData[ind] * td->fGainNormScale + 0.5);
-        sData[ind] = B3DMAX(-32768, B3DMIN(32767, iVal));
-      }
-    } else {
-      for (ind = 0; ind < td->width * td->height; ind++) {
-        iVal = (int)(usData[ind] * refData[ind] * td->fGainNormScale + 0.5);
-        usData[ind] = B3DMAX(0, B3DMIN(65535, iVal));
+    for (iy = 0; iy < td->height; iy++) {
+      if (td->divideBy2) {
+        refOff = (iy + td->iTop) * sK2GainRefWidth[refInd] + td->iLeft;
+        ind = iy * td->width;
+        for (ix = 0; ix < td->width; ix++) {
+          iVal = (int)(sData[ind + ix] * refData[refOff + ix] *
+            td->fGainNormScale + 0.5);
+          sData[ind + ix] = B3DMAX(-32768, B3DMIN(32767, iVal));
+        }
+      } else {
+        refOff = (iy + td->iTop) * sK2GainRefWidth[refInd] + td->iLeft;
+        ind = iy * td->width;
+        for (ix = 0; ix < td->width; ix++) {
+          iVal = (int)(usData[ind + ix] * refData[refOff + ix] *
+            td->fGainNormScale + 0.5);
+          usData[ind + ix] = B3DMAX(0, B3DMIN(65535, iVal));
+        }
       }
     }
   }
