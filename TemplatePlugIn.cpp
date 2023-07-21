@@ -417,6 +417,7 @@ static void DebugPrintf(char *buffer, const char *format, ...);
 static void GetElectronDoseRate(ThreadData *td, DM::Image &image, double exposure, 
   float binning);
 static void AddTitleToHeader(MrcHeader *hdata, char *title);
+static int MapReadMode(ThreadData *td);
 
 // Declarations of global functions called from here
 void TerminateModuleUninitializeCOM();
@@ -1291,17 +1292,15 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
       "Number wait_time_s\n%s"   // Validate for K3
       "CM_PrepareCameraForAcquire(manager, camera, acqParams, NULL, wait_time_s)\n"
-      "Sleep(wait_time_s)\n", B3DCHOICE(mTD.OneViewType, 3 + mTD.iReadMode,
-      sReadModes[mTD.iReadMode] + (mTD.bUseCorrDblSamp ? 2 : 0)),
+      "Sleep(wait_time_s)\n", MapReadMode(&mTD),
         (mTD.K3type || GMS_SDK_VERSION >= 330 || mTD.OneViewType) ?
       "CM_Validate_AcquisitionParameters(camera, acqParams)\n" : "");
     mTD.strCommand += m_strTemp;
 
-  } else if (mTD.iReadMode == -2 || mTD.iReadMode == -3) {
+  } else if (mTD.iReadMode <= -2) {
 
-    // A read mode of -3 or -2 means set mode 0 for regular or 1 for diffraction
     sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
-      "CM_Validate_AcquisitionParameters(camera, acqParams)\n", 3 + mTD.iReadMode);
+      "CM_Validate_AcquisitionParameters(camera, acqParams)\n", MapReadMode(&mTD));
     mTD.strCommand += m_strTemp;
   }
   
@@ -1849,7 +1848,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       /*sprintf(td->strTemp, "Got acqParams proc %d  exp %f bin %d\n", td->iK2Processing, 
         td->dK2Exposure + 0.001, td->iK2Binning);
       DebugToResult(td->strTemp);*/
-      if (!td->K3type) {
+      if (!td->K3type && !td->OneViewType) {
         CM::SetHardwareCorrections(acqParams, CM::CCD::Corrections::from_bits(
           td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0)); j++;
       } 
@@ -1882,8 +1881,7 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       j = 10;
       CM::SetSettling(acqParams, td->dK2Settling);  j++;
       CM::SetShutterIndex(acqParams, td->iK2Shutter);  j++;
-      CM::SetReadMode(acqParams, B3DCHOICE(td->OneViewType, 3 + td->iReadMode,
-        sReadModes[td->iReadMode] + (td->bUseCorrDblSamp ? 2 : 0)));  j++;
+      CM::SetReadMode(acqParams, MapReadMode(td));  j++;
       /*sprintf(td->strTemp, "Set settle %f  shutter %d mode %d\n", 
         td->dK2Settling, td->iK2Shutter, sReadModes[td->iReadMode]);
       DebugToResult(td->strTemp);*/
@@ -2818,6 +2816,23 @@ static void AdjustAndWriteMdocAndCom(ThreadData *td, int &errorRet)
 
 }
 
+// Convert read mode for K2/K3 and OneView types
+// Mode should have been sent for OneView originally as -mode - 1, but it wasn't, so for
+// new ones, it is sent as -mode
+// A read mode of -3 or -2 means set mode 0 for regular or 1 for diffraction
+// Then it is 21 for imaging and 22 for diffraction
+static int MapReadMode(ThreadData *td)
+{
+  if (td->OneViewType) {
+    if (td->iReadMode == -2 || td->iReadMode == -3)
+      return 3 + td->iReadMode;
+    if (td->iReadMode < -1)
+      return -td->iReadMode;
+  } else if (td->iReadMode >= 0)
+    return sReadModes[td->iReadMode] + (td->bUseCorrDblSamp ? 2 : 0);
+  return 0;
+}
+
 // Do antialias reduction or extract subarea if it is called for, from array to outArray
 // Past outArray are optional arguments, it uses the values in td if not supplied 
 // (redWidth/Hieght come from finalWidth/Height); and
@@ -3271,8 +3286,7 @@ static int RunContinuousAcquire(ThreadData *td)
       if (!td->K3type)
         CM::SetHardwareCorrections(acqParams, CM::CCD::Corrections::from_bits(
           td->iReadMode ? sCMHardCorrs[td->iHardwareProc / 2] : 0));
-      CM::SetReadMode(acqParams, sReadModes[td->iReadMode] + 
-        (td->bUseCorrDblSamp ? 2 : 0));
+      CM::SetReadMode(acqParams, MapReadMode(td));
       j++;
       if (td->K3type) {
 #if GMS_SDK_VERSION >= 300
@@ -3285,8 +3299,8 @@ static int RunContinuousAcquire(ThreadData *td)
     }
 
     // Set read mode for OneView
-    if (td->iReadMode == -2 || td->iReadMode == -3)
-      CM::SetReadMode(acqParams, td->iReadMode + 3);
+    if (td->iReadMode < -1)
+      CM::SetReadMode(acqParams, MapReadMode(td));
 
     // Get the DM image for this acquisition
     j = 13;
