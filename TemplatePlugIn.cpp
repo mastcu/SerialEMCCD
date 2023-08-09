@@ -1248,10 +1248,11 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
     }
 
     sprintf(m_strTemp, "CM_SetReadMode(acqParams, %d)\n"
-      "Number wait_time_s\n%s"   // Validate for K3
+      "Number wait_time_s\n%s%s"   // Add duty cycle setting and Validate for K3
       "CM_PrepareCameraForAcquire(manager, camera, acqParams, NULL, wait_time_s)\n"
       "Sleep(wait_time_s)\n", B3DCHOICE(mTD.OneViewType, 3 + mTD.iReadMode,
       sReadModes[mTD.iReadMode] + (mTD.bUseCorrDblSamp ? 2 : 0)),
+      mTD.K3type ? "CM_SetExposureLiveTime(acqParams, 1.e7)\n" : "",
         (mTD.K3type || GMS_SDK_VERSION >= 330 || mTD.OneViewType) ?
       "CM_Validate_AcquisitionParameters(camera, acqParams)\n" : "");
     mTD.strCommand += m_strTemp;
@@ -1779,6 +1780,10 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       CM::SetShutterIndex(acqParams, td->iK2Shutter);  j++;
       CM::SetReadMode(acqParams, B3DCHOICE(td->OneViewType, 3 + td->iReadMode,
         sReadModes[td->iReadMode] + (td->bUseCorrDblSamp ? 2 : 0)));  j++;
+#if GMS_SDK_VERSION >= 330
+      if (td->K3type)
+        CM::SetExposureLiveTime(acqParams, 1.e7);
+#endif
       /*sprintf(td->strTemp, "Set settle %f  shutter %d mode %d\n", 
         td->dK2Settling, td->iK2Shutter, sReadModes[td->iReadMode]);
       DebugToResult(td->strTemp);*/
