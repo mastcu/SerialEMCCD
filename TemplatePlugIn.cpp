@@ -8,6 +8,20 @@
 
 #include "stdafx.h"
 
+/*
+Environment variables that need to be defined with standard project properties:
+BOOST_1_38-32    path to 1.38.0 BOOST install, for building in GMS2
+BOOST_1_38_64    can be same path to BOOST, headers are not bit-specific
+BOOST_1_63_64    path to 1.63.0 BOOST install for 64-bit, for building in GMS3.31+
+DM_PLUGIN_SUFFIX defined as _NoBCG for GMS 3.6, undefined before that
+GMS_MAJOR_VERSION 2 or 3
+GMS_MINOR_VERSION minor version, see below on
+GMS2-32_SDK      Path to collection of DMSDKs plus \DMSDK%GMS_MAJOR_VERSION%.%GMS_MINOR_VERSION%-32
+                   e.g., C:\Users\mast\Documents\Scope\DMSDKs\DMSDK%GMS_MAJOR_VERSION%.%GMS_MINOR_VERSION%-32
+GMS2-64_SDK      Path to collection of DMSDKs plus \DMSDK%GMS_MAJOR_VERSION%.%GMS_MINOR_VERSION%-64
+These are set up assuming DMSDK's are named as DMSDK3.50-64, etc.
+*/
+
 // For GMS2, GMS_MINOR_VERSION must be defined to a single digit below 3 (0, 1, 2) or to 
 // double digits for 3 onwards (30, 31, etc).  GMS_SDK_VERSION goes to 3 digits for GMS3
 // To build all versions starting with 31 - x64:

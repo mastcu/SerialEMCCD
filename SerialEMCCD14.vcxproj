@@ -929,7 +929,7 @@ regsvr32 /s SerialEMCCDps.dll
       <Optimization>MaxSpeed</Optimization>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
       <AdditionalIncludeDirectories>$(GMS2-64_SDK)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>GMS_MAJOR_VERSION=$(GMS_MAJOR_VERSION);GMS_MINOR_VERSION=$(GMS_MINOR_VERSION);NDEBUG;WIN32;GMS2;_DMSDK;DM_SDK;_WIN64;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;DELAY_LOAD_FGPU;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>GMS_MAJOR_VERSION=$(GMS_MAJOR_VERSION);GMS_MINOR_VERSION=$(GMS_MINOR_VERSION);NDEBUG;WIN32;GMS2;_DMSDK;DM_SDK;_WIN64;NO_BCG;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_NO_DEPRECATE;DELAY_LOAD_FGPU;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -953,7 +953,7 @@ regsvr32 /s SerialEMCCDps.dll
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/force:unresolved /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>DMPlugInBasic.lib;Foundation.lib;Ws2_32.lib;libiimod-noHDF-14-64.lib;libifft-14-64.lib;libcfshr-14-64.lib;libimxml-14-64.lib;libtiff-14-64.lib;libjpeg-14-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>DMPlugInBasic$(DM_PLUGIN_SUFFIX).lib;Foundation.lib;Ws2_32.lib;libiimod-noHDF-14-64.lib;libifft-14-64.lib;libcfshr-14-64.lib;libimxml-14-64.lib;libtiff-14-64.lib;libjpeg-14-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>.\$(OutDir)SEMCCD-GMS$(GMS_MAJOR_VERSION).$(GMS_MINOR_VERSION)-64.dll</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <AdditionalLibraryDirectories>..\SerialEMLibs;$(GMS2-64_SDK)\lib\x64\Release;$(GMS2-64_SDK)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>

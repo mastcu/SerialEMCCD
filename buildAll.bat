@@ -5,6 +5,7 @@ set PATH=c:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\BIN\amd64;C:\win
 set LIB=c:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\LIB\amd64;c:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\ATLMFC\LIB\amd64;C:\Program Files (x86)\Microsoft SDKs\Windows\v7.0A\lib\x64
 set INCLUDE=c:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\INCLUDE;c:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\ATLMFC\INCLUDE;C:\Program Files (x86)\Microsoft SDKs\Windows\v7.0A\include
 
+set DM_PLUGIN_SUFFIX=
 set GMS_MINOR_VERSION=0
 set GMS_MAJOR_VERSION=2
 set GMS2-32_SDK=C:\Users\mast\Documents\Scope\DMSDKs\DMSDK%GMS_MAJOR_VERSION%.%GMS_MINOR_VERSION%-32
@@ -46,5 +47,10 @@ if %errorlevel% neq 0 exit /b %errorlevel%
 
 set GMS_MINOR_VERSION=50
 set GMS2-64_SDK=C:\Users\mast\Documents\Scope\DMSDKs\DMSDK%GMS_MAJOR_VERSION%.%GMS_MINOR_VERSION%-64
+msbuild /t:Rebuild /p:Configuration=GMS3.31-64 /p:Platform=x64 SerialEMCCD14.vcxproj
+
+set GMS_MINOR_VERSION=60
+set GMS2-64_SDK=C:\Users\mast\Documents\Scope\DMSDKs\DMSDK%GMS_MAJOR_VERSION%.%GMS_MINOR_VERSION%-64
+set DM_PLUGIN_SUFFIX=_NoBCG
 msbuild /t:Rebuild /p:Configuration=GMS3.31-64 /p:Platform=x64 SerialEMCCD14.vcxproj
 if %errorlevel% neq 0 exit /b %errorlevel%
