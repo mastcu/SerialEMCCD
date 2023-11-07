@@ -102,15 +102,15 @@ int ShrMemClient::ConnectIfNeeded(void)
   }
     
   searchDirs[3] = "C:\\ProgramData\\Gatan\\Plugins";
-  searchDirs[4] = searchDirs[1] + "\\Shrmemframe";
-  for (ind = 0; ind < 4; ind++) {
+  searchDirs[4] = searchDirs[3] + "\\Shrmemframe";
+  for (ind = 0; ind < 5; ind++) {
     if (searchDirs[ind].length()) {
       shrMemPath = searchDirs[ind] + "\\shrmemframe.exe";
       if (!_stat(shrMemPath.c_str(), &statbuf))
         break;
     }
   }
-  if (ind >= 4) {
+  if (ind >= 5) {
     ERR_PRINT(PRN_FMT "Could not find shrmemframe.exe for frame alignment\n" PREFIX);
     return 1;
   } 
