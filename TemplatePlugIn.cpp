@@ -6208,7 +6208,8 @@ int TemplatePlugIn::SaveFrameMdoc(char *strMdoc, long flags)
   }
 
   // Write it now or let thread do it
-  if (td->iSaveFinished)
+  // Hopefully this works if save thread is ever tried again.  It works without it
+  if (!(m_HAcquireThread || sHSaveThread) || td->iSaveFinished)
     retval = WriteFrameMdoc(td);
   ReleaseMutex(sDataMutexHandle);
   return retval;
