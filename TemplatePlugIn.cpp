@@ -6208,7 +6208,7 @@ int TemplatePlugIn::SaveFrameMdoc(char *strMdoc, long flags)
   }
 
   // Write it now or let thread do it
-  if (!td->iSaveFinished)
+  if (td->iSaveFinished)
     retval = WriteFrameMdoc(td);
   ReleaseMutex(sDataMutexHandle);
   return retval;
