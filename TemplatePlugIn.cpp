@@ -284,6 +284,7 @@ struct ThreadData
   bool bSaveSummedFrames;
   bool bSaveSuperReduced;
   bool bMakeSubarea;
+  bool bSetExpAfterArea;
   bool bTakeBinnedFrames;
   bool bUseCorrDblSamp;
   vector<short> outSumFrameList;
@@ -1200,13 +1201,19 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   // Set up acquisition parameters
   if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
     sprintf(m_strTemp, "Object acqParams = CM_CreateAcquisitionParameters_FullCCD"
-      "(camera, %d, %g, %d, %d)\n", newProc, exposure + 0.0005, 
+      "(camera, %d, %g, %d, %d)\n", newProc, exposure + 
+      B3DMAX(0.00005, B3DMIN(0.0005, exposure / 100.)), 
       mTD.bTakeBinnedFrames ? 2 : binning, mTD.bTakeBinnedFrames ? 2 : binning);
     mTD.strCommand += m_strTemp;
     if (!(mTD.bDoseFrac && mTD.bUseOldAPI) && !mTD.bMakeSubarea) {
       sprintf(m_strTemp, "CM_SetBinnedReadArea(camera, acqParams, %d, %d, %d, %d)\n",
         top, left, bottom, right);
       mTD.strCommand += m_strTemp;
+      if (mTD.bSetExpAfterArea) {
+        sprintf(m_strTemp, "CM_SetExposure(acqParams, %g)\n", exposure +
+          B3DMAX(0.00005, B3DMIN(0.0005, exposure / 100.)));
+        mTD.strCommand += m_strTemp;
+      }
     }
 
     // Specify corrections if incoming value is >= 0
@@ -1854,6 +1861,9 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       if (!td->bMakeSubarea) {
         CM::SetBinnedReadArea(camera, acqParams, td->iK3Top, td->iK3Left, td->iK3Bottom,
           td->iK3Right);
+        if (td->bSetExpAfterArea)
+          CM::SetExposure(acqParams, td->dK2Exposure +
+            B3DMAX(0.00005, B3DMIN(0.001, td->dK2Exposure / 100.)));
       }
 
       // The above validated without knowing about dose-fractionation and rounded to 0.1,
@@ -1881,7 +1891,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
         CM::SetCorrections(acqParams, OVW_DRIFT_CORR_FLAG, OVW_DRIFT_CORR_FLAG);
       j++;
       CM::SetFrameExposure(acqParams, 
-        td->dFrameTime + (td->dFrameTime > 0.05 ? 0.0001 : 0.00002));  j++;
+        td->dFrameTime + (td->dFrameTime > 0.05 ? 0.0001 : 
+          B3DMIN(0.00002, td->dFrameTime / 100.)));  j++;
       CM::SetDoAcquireStack(acqParams, 1);  j++;
       CM::SetStackFormat(acqParams, CM::StackFormat::Series);  j++;
       CM::SetDoAsyncReadout(acqParams, td->iAsyncToRAM);   j++;
@@ -3213,9 +3224,12 @@ static int RunContinuousAcquire(ThreadData *td)
     acqParams = CM::CreateAcquisitionParameters_FullCCD(
       camera, (CM::AcquisitionProcessing)td->iK2Processing, 
       td->dK2Exposure + (K2type ? 0.001 : 0.), td->iK2Binning,  td->iK2Binning); j++;
-    if (!td->bMakeSubarea)
+    if (!td->bMakeSubarea) {
       CM::SetBinnedReadArea(camera, acqParams, td->iTop, td->iLeft, td->iBottom,
         td->iRight);
+      if (td->bSetExpAfterArea)
+        CM::SetExposure(acqParams, td->dK2Exposure);
+    }
     j++;
     CM::SetSettling(acqParams, td->dK2Settling);  j++;
     CM::SetShutterIndex(acqParams, td->iK2Shutter);  j++;
@@ -5922,6 +5936,7 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
     mTD.iFullSizeY = B3DNINT(fullSizes / K2_REDUCED_Y_SCALE);
     mTD.iFullSizeX = B3DNINT(fullSizes - K2_REDUCED_Y_SCALE * mTD.iFullSizeY);
   }
+  mTD.bSetExpAfterArea = (flags & K2_OVW_SET_EXPOSURE) != 0;
   sprintf(m_strTemp, "SetK2Parameters called with save %s  align %d mtdalign %d flags "
     "0x%x  scaling %f\n", m_bSaveFrames ? "Y":"N", alignFrames, mTD.bAlignFrames, flags, 
     scaling);
