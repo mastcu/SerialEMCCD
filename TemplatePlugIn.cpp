@@ -1297,8 +1297,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
           mTD.strCommand += m_strTemp;
         }
         sprintf(m_strTemp, "CM_SetFrameExposure(acqParams, %f)\n"
-          "CM_SetStackFormat(acqParams, %d)\n", 
-          mTD.dFrameTime + (mTD.dFrameTime > 0.05 ? 0.0001 : 0.00002),
+          "CM_SetStackFormat(acqParams, %d)\n", mTD.dFrameTime + 
+          B3DCHOICE(mTD.OneViewType, 0., mTD.dFrameTime > 0.05 ? 0.0001 : 0.00002),
           (saveFrames == SAVE_FRAMES || mTD.bUseFrameAlign) ? 0 : 1);
           mTD.strCommand += m_strTemp;
       }
@@ -1890,9 +1890,8 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
       if (td->useMotionCor)
         CM::SetCorrections(acqParams, OVW_DRIFT_CORR_FLAG, OVW_DRIFT_CORR_FLAG);
       j++;
-      CM::SetFrameExposure(acqParams, 
-        td->dFrameTime + (td->dFrameTime > 0.05 ? 0.0001 : 
-          B3DMIN(0.00002, td->dFrameTime / 100.)));  j++;
+      CM::SetFrameExposure(acqParams, td->dFrameTime + 
+        B3DCHOICE(td->OneViewType, 0., td->dFrameTime > 0.05 ? 0.0001 : 0.00002));  j++;
       CM::SetDoAcquireStack(acqParams, 1);  j++;
       CM::SetStackFormat(acqParams, CM::StackFormat::Series);  j++;
       CM::SetDoAsyncReadout(acqParams, td->iAsyncToRAM);   j++;
