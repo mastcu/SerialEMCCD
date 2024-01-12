@@ -47,10 +47,10 @@ if %errorlevel% neq 0 exit /b %errorlevel%
 
 set GMS_MINOR_VERSION=50
 set GMS2-64_SDK=C:\Users\mast\Documents\Scope\DMSDKs\DMSDK%GMS_MAJOR_VERSION%.%GMS_MINOR_VERSION%-64
-msbuild /t:Rebuild /p:Configuration=GMS3.31-64 /p:Platform=x64 SerialEMCCD14.vcxproj
+msbuild /t:Rebuild /p:Configuration=GMS3.5-IOMP /p:Platform=x64 SerialEMCCD14.vcxproj
 
 set GMS_MINOR_VERSION=60
 set GMS2-64_SDK=C:\Users\mast\Documents\Scope\DMSDKs\DMSDK%GMS_MAJOR_VERSION%.%GMS_MINOR_VERSION%-64
 set DM_PLUGIN_SUFFIX=_NoBCG
-msbuild /t:Rebuild /p:Configuration=GMS3.31-64 /p:Platform=x64 SerialEMCCD14.vcxproj
+msbuild /t:Rebuild /p:Configuration=GMS3.5-IOMP /p:Platform=x64 SerialEMCCD14.vcxproj
 if %errorlevel% neq 0 exit /b %errorlevel%
