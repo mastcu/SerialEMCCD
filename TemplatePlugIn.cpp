@@ -342,6 +342,8 @@ struct ThreadData
   bool bUseSaveThread;
   int iNoMoreFrames;
   int iSaveFinished;
+  int numStacksAcquired;
+  int numInitialHandles;
   
   // Items needed internally in save routine and its functions
   FILE *fp;
@@ -615,6 +617,8 @@ TemplatePlugIn::TemplatePlugIn()
   mTD.iRotationFlip = 0;
   mTD.iFrameRotFlip = 0;
   mTD.dPixelSize = 5.;
+  mTD.numInitialHandles = 0;
+  mTD.numStacksAcquired = -5;
   const char *temp = getenv("SERIALEMCCD_ROOTNAME");
   if (temp)
     mTD.strRootName = temp;
@@ -1588,6 +1592,8 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         !mTD.bEarlyReturn;
       retWidth = useFinal ? retTD->iFinalWidth : retTD->width;
       retHeight = useFinal ? retTD->iFinalHeight : retTD->height;
+      mTD.numStacksAcquired = retTD->numStacksAcquired;
+      mTD.numInitialHandles = retTD->numInitialHandles;
       sprintf(m_strTemp, "Back from thread, retval %d errfs %d  #saved %d w %d h %d\n",
         retval, mTD.iErrorFromSave, mTD.iFramesSaved, retWidth, retHeight);
       DebugToResult(m_strTemp);
@@ -2682,6 +2688,26 @@ static DWORD WINAPI AcquireProc(LPVOID pParam)
   if (td->bUseFrameAlign) {
     CleanUpFrameAlign(td);
   }
+
+#ifdef _WIN64
+  if (saveOrFrameAlign) {
+    td->numStacksAcquired++;
+    if (td->numStacksAcquired >= 0 &&
+      GetProcessHandleCount(GetCurrentProcess(), &resRet)) {
+      if (!td->numInitialHandles) {
+        td->numInitialHandles = resRet;
+      } else if (td->numInitialHandles > 0) {
+        i = resRet - td->numInitialHandles;
+        if (td->numStacksAcquired % 1000 == 0 && i / td->numStacksAcquired > 24) {
+          sprintf(td->strTemp, "WARNING: There is a Windows handle leak of %d handles per"
+            " frame stack\nThis can eventually crash DigitalMicrograph. Please inform the"
+            " SerialEM developers", i / td->numStacksAcquired);
+          ProblemToResult(td->strTemp);
+        }
+      }
+    }
+  }
+#endif
 
   delete unbinnedArray;
 
