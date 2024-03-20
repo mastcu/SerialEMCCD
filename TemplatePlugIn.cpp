@@ -252,6 +252,7 @@ struct ThreadData
   int iNumSummed;
   int iNumGrabAndStack;
   bool bEarlyReturn;
+  bool bImmediateReturn;
   int iAsyncToRAM;
   float fLinearOffset;
   float fFrameOffset;
@@ -1591,8 +1592,11 @@ int TemplatePlugIn::AcquireAndTransferImage(void *array, int dataSize, long *arr
         "Started thread, going into wait loop\n");
       if (mTD.bDoContinuous)
         return 0;
-      retval = WaitForAcquireThread(B3DCHOICE(mTD.bMakeTiltSums, WAIT_FOR_TILT_QUEUE,
-        mTD.bEarlyReturn ? WAIT_FOR_RETURN : WAIT_FOR_THREAD));
+      if (mTD.bEarlyReturn && mTD.bImmediateReturn)
+        retval = 0;
+      else
+        retval = WaitForAcquireThread(B3DCHOICE(mTD.bMakeTiltSums, WAIT_FOR_TILT_QUEUE,
+          mTD.bEarlyReturn ? WAIT_FOR_RETURN : WAIT_FOR_THREAD));
       mTD.iErrorFromSave = mTDcopy.iErrorFromSave;
       mTD.iFramesSaved = mTDcopy.iFramesSaved;
       useFinal = mTDcopy.iAntialias || mTDcopy.bMakeSubarea || mTDcopy.bUseFrameAlign &&
@@ -6320,6 +6324,7 @@ int TemplatePlugIn::ManageEarlyReturn(int flags, int iSumAndGrab)
     mTD.iNumFramesToSum = iSumAndGrab & 65535;
     mTD.iNumGrabAndStack = iSumAndGrab >> 16;
   }
+  mTD.bImmediateReturn = mTD.bEarlyReturn && !mTD.iNumFramesToSum;
   if (mTD.bEarlyReturn && !mTD.bAsyncSave)
     return EARLY_RET_WITH_SYNC;
   return 0;
