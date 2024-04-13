@@ -6324,7 +6324,8 @@ int TemplatePlugIn::ManageEarlyReturn(int flags, int iSumAndGrab)
     mTD.iNumFramesToSum = iSumAndGrab & 65535;
     mTD.iNumGrabAndStack = iSumAndGrab >> 16;
   }
-  mTD.bImmediateReturn = mTD.bEarlyReturn && !mTD.iNumFramesToSum;
+  mTD.bImmediateReturn = mTD.bEarlyReturn && !mTD.iNumFramesToSum && 
+    (flags & K2_IMMEDIATE_RETURN) != 0;
   if (mTD.bEarlyReturn && !mTD.bAsyncSave)
     return EARLY_RET_WITH_SYNC;
   return 0;
