@@ -11,9 +11,9 @@ The GMS2 configurations are currently compiled in Visual Studio 2010 with the
 2003.
 
 The 64-bit configurations require libraries in the SerialEMLibs repository,
-available at
+available in a Mercurial repository at
 http://bio3d.colorado.edu/SerialEM/SerialEMLibs
-and
+and in a git repository at
 https://github.com/mastcu/SerialEMLibs
 This repository
 should be in an adjacent directory, unless the properties are changed to
