@@ -3,13 +3,19 @@ General Public License (GPL) version 2.0, and may be modified and
 redistributed under the terms of this license.  A copy of this license is in
 the file GPL.txt.  This source can be found at
 http://bio3d.colorado.edu/SerialEM/SerialEMCCD
+and
+https://github.com/mastcu/SerialEMCCD
 
 The GMS2 configurations are currently compiled in Visual Studio 2010 with the
 2008 (vc90) toolset.  The GMS1 configuration is compiled in Visual Studio
 2003.
 
 The 64-bit configurations require libraries in the SerialEMLibs repository,
-available at http://bio3d.colorado.edu/SerialEM/SerialEMLibs.  This repository
+available at
+http://bio3d.colorado.edu/SerialEM/SerialEMLibs
+and
+https://github.com/mastcu/SerialEMLibs
+This repository
 should be in an adjacent directory, unless the properties are changed to
 access the libraries from another location.
 
