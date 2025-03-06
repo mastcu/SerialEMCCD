@@ -13,7 +13,7 @@ class ShrMemClient
 public:
   ShrMemClient(void);
   ~ShrMemClient(void);
-  int ConnectIfNeeded(void);
+  int ConnectIfNeeded(int gpuFlags);
   void Disconnect(int wait = 2000);
   int initialize(int binSum, int binAlign, float trimFrac, int numAllVsAll,
                  int cumAlignAtEnd, int useHybrid, int deferSum, int groupSize,
@@ -49,6 +49,8 @@ private:
   int mNumFrames;             // Keep track of number of frames so gain ref is copied once
   int mNx, mNy;               // Keep track of image size
   int mServerID;              // The unique ID for this run, send as an argument
+  int mGPUnum;                // Number of gpu sent to GPUavailable
+  int mGPUdebug;              // Debug value sent
   
 public:
   int CheckIfProcessDied(const char *message);
