@@ -58,6 +58,7 @@ ShrMemClient::ShrMemClient(void)
   mProcessHandle = NULL;
   mActionSignal = NULL;
   mDoneSignal = NULL;
+  mGPUnum = -1;
 }
 
 // Destructor: try to close the server
@@ -67,7 +68,7 @@ ShrMemClient::~ShrMemClient(void)
 }
 
 // Call to check if connection exists and make it if not
-int ShrMemClient::ConnectIfNeeded(void)
+int ShrMemClient::ConnectIfNeeded(int gpuFlags)
 {
   char buffer[160];
   STARTUPINFO sinfo;
@@ -79,11 +80,16 @@ int ShrMemClient::ConnectIfNeeded(void)
   TCHAR dllPath[MAX_PATH];
   int initialTimeout = 5000, initTryInterval = 50;
   double startTime;
+  float memory;
+  static bool inConnect = false;
   HMODULE thisModule = reinterpret_cast<HMODULE>(&__ImageBase);
+  if (inConnect)
+    return 0;
   
   if (mMappedBuf && !CheckIfProcessDied(
-    "shrmemframe is no longer running; trying to reconnect\n"))
+    "shrmemframe is no longer running; trying to reconnect\n")) {
     return 0;
+  }
 
   // Get a new ID value
   mServerID = time(NULL) % 10000000;
@@ -206,6 +212,11 @@ int ShrMemClient::ConnectIfNeeded(void)
     Disconnect();
     return 1;
   }
+  if (gpuFlags && mGPUnum >= 0) {
+    inConnect = true;
+    gpuAvailable(mGPUnum, &memory, mGPUdebug);
+    inConnect = false;
+  }
   return 0;
 }
 
@@ -245,7 +256,7 @@ int ShrMemClient::initialize(int binSum, int binAlign, float trimFrac, int numAl
                  int debug)
 {
   InitializeParams params;
-  if (ConnectIfNeeded())
+  if (ConnectIfNeeded(gpuFlags))
     return -1;
   params.binSum = binSum;
   params.binAlign = binAlign;
@@ -288,7 +299,7 @@ int ShrMemClient::initialize(int binSum, int binAlign, float trimFrac, int numAl
 int ShrMemClient::gpuAvailable(int nGPU, float *memory, int debug)
 {
   GpuAvailableParams params;
-  if (ConnectIfNeeded())
+  if (ConnectIfNeeded(0))
     return -1;
   params.nGPU = nGPU;
   params.debug = debug;
@@ -298,6 +309,8 @@ int ShrMemClient::gpuAvailable(int nGPU, float *memory, int debug)
   memcpy(&params, mParamBuf, sizeof(GpuAvailableParams));
   RelayMessages(params.messages);
   *memory = params.memory;
+  mGPUnum = nGPU;
+  mGPUdebug = debug;
   return params.retVal;
 }
 
