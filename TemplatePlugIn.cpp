@@ -11,8 +11,8 @@
 /*
 Environment variables that need to be defined with standard project properties:
 BOOST_1_38-32    path to 1.38.0 BOOST install, for building in GMS2
-BOOST_1_38_64    can be same path to BOOST, headers are not bit-specific
-BOOST_1_63_64    path to 1.63.0 BOOST install for 64-bit, for building in GMS3.31+
+BOOST_1_38-64    can be same path to BOOST, headers are not bit-specific
+BOOST_1_63-64    path to 1.63.0 BOOST install for 64-bit, for building in GMS3.31+
 DM_PLUGIN_SUFFIX defined as _NoBCG for GMS 3.6, undefined before that
 GMS_MAJOR_VERSION 2 or 3
 GMS_MINOR_VERSION minor version, see below on
@@ -6995,7 +6995,9 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
         "}\n";
     }
     if (m_iExtraDSdelay > 0 && !controlScan) {
-
+#if GMS_SDK_VERSION >= 300
+      mTD.strCommand += "DSStartAcquisition(paramID, 0, 1)\n";
+#else
       // With this loop, it doesn't seem to need any delay at the end
       mTD.strCommand += "DSStartAcquisition(paramID, 0, 0)\n"
         "while (DSIsViewActive()) {\n"
@@ -7003,6 +7005,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
         "}\n";
       //sprintf(m_strTemp, "Delay(%d)\n", j);
       //mTD.strCommand += m_strTemp;
+#endif
     } else {
       mTD.strCommand += "DSStartAcquisition(paramID, 0, 1)\n";
     }
