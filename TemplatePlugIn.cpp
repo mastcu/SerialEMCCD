@@ -6995,7 +6995,9 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
         "}\n";
     }
     if (m_iExtraDSdelay > 0 && !controlScan) {
-
+#if GMS_SDK_VERSION >= 300
+      mTD.strCommand += "DSStartAcquisition(paramID, 0, 1)\n";
+#else
       // With this loop, it doesn't seem to need any delay at the end
       mTD.strCommand += "DSStartAcquisition(paramID, 0, 0)\n"
         "while (DSIsViewActive()) {\n"
@@ -7003,6 +7005,7 @@ int TemplatePlugIn::AcquireDSImage(short array[], long *arrSize, long *width,
         "}\n";
       //sprintf(m_strTemp, "Delay(%d)\n", j);
       //mTD.strCommand += m_strTemp;
+#endif
     } else {
       mTD.strCommand += "DSStartAcquisition(paramID, 0, 1)\n";
     }
