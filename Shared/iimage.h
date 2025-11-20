@@ -4,11 +4,13 @@
 
 #ifndef IIMAGE_H
 #define IIMAGE_H
-
+#ifdef _WIN32
+#include <Windows.h>
+#endif
+#include <math.h>
 #include "ilist.h"
 #include "mrcfiles.h"
 #include "mrcslice.h"
-#include <math.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,6 +28,7 @@ extern "C" {
 #define IIFILE_HDF     5
 #define IIFILE_JPEG    6
 #define IIFILE_ADOC    7
+#define IIFILE_SHR_MEM 8
 
   /* Values for the format member of ImodImageFile, describing kind data */
 #define IIFORMAT_LUMINANCE 0
@@ -61,6 +64,7 @@ extern "C" {
 #define IICOMPRESSION_EER_8BIT  65000
 #define IICOMPRESSION_EER_7BIT  65001
 #define FEI_TIFF_DEFECT_TAG     65100
+#define FEI_EER_METADATA_TAG    65001
 
   /* Error codes, used by check routines */
 #define IIERR_BAD_CALL   -1
@@ -89,9 +93,14 @@ extern "C" {
 #define IIFLAG_TVIPS_DATA      2
 
   /* Flags for calling tiffEERsuperResAndFlags */
-#define IIFLAG_SKIP_EER_DIRS     1
-#define IIFLAG_ADD_TO_EER_SUM    2
-#define IIFLAG_START_END_EER_SUM 4
+#define IIFLAG_SKIP_EER_DIRS      1
+#define IIFLAG_ADD_TO_EER_SUM     2
+#define IIFLAG_START_END_EER_SUM  4
+#define IIFLAG_IGNORE_BAD_EER_END 8
+#define IIFLAG_ANTIALIAS_EER      16
+#define IIFLAG_EER_USE_LANCZOS    32
+#define EER_AA_SCALING_BIT_SHIFT  6
+#define EER_AA_SCALING_MASK       7  
 
 /* END_CODE */
 
@@ -111,7 +120,12 @@ extern "C" {
 #define IIAXIS_Y 2
 #define IIAXIS_Z 3
 
+#define MAX_HALF_FLOAT 65504.
+
 #define MAX_TIFF_THREADS 16
+
+#define SHR_MEM_NAME_TAG "/IMODShrMem_"
+#define SHR_MEM_DATA_OFFSET 2048
 
   /* DOC_CODE ImodImageFile structure */
   typedef struct  ImodImageFileStruct ImodImageFile;
@@ -153,6 +167,11 @@ extern "C" {
     int   sectionSkip;
     int   hasPieceCoords;    /* Flag that MRC file has piece coordinates in header */
     char *header;
+#ifdef _WIN32
+    HANDLE shrMemFile;
+#else
+    int shrMemFile;
+#endif
     char *userData;
     unsigned int userFlags;  /* Flags for the userData */
     int userCount;           /* Number of bytes of userData */
@@ -166,11 +185,14 @@ extern "C" {
     int  tiffCompression;    /* Compression type in tiff file */
     int  readEERasSuperRes;  /* Super-resolution factor when reading EER file */
     int  numFramesInEERfile; /* Actual number of frames in file when autogrouping */
+    int  antialiasEERfilter; /* Filter type for antialiasing while reading */
+    int  EERkernelScale;     /* Scale factor when reading EER as antialiased shorts */
     int  tileSizeX;          /* Tile size in X, or 0 if no tiles */
     int  tileSizeY;          /* Tile size in Y if tiles, strip size if not */
     int  lastWrittenZ;       /* Last Z written, needed if sequential writing only */
     int  packed4bits;        /* Data in file are 4-bit, packed 2 pixels per byte */
-    int fillOrder;           /* Fill order for the 4-bit data */
+    int  fillOrder;          /* Fill order for the 4-bit data */
+    int  halfFloats;         /* Data in file are 16-bit floats */
     Ilist *directoryNums;    /* List of directory numbers for qualifying images in file */
 
     /* HDF variables */
@@ -187,6 +209,7 @@ extern "C" {
     int hdfSource;           /* Apparent source of file (IIHDF_ value) */
     int hdfFileID;           /* File ID */
     int zChunkSize;          /* Size of chunk in Z; must be nonzero for a volume */
+    int hdfCompression;      /* Compression level for Zip compression */
 
     /* Callback functions used by different file formats. */
     iiSectionFunc readSection;
@@ -259,6 +282,7 @@ extern "C" {
     int pixSize;
     int swapped;
     int packed4bits;
+    int halfFloats;
     int bytesSinceCheck;
   } LineProcData;
 
@@ -284,6 +308,7 @@ extern "C" {
   void iiSyncFromMrcHeader(ImodImageFile *inFile, MrcHeader *hdata);
   int iiDefaultMinMaxMean(int type, float *amin, float *amax, float *amean);
   int iiWriteHeader(ImodImageFile *inFile);
+  int iiAddToOpenedList(ImodImageFile *iiFile);
   int  iiSetMM(ImodImageFile *inFile, float inMin, float inMax, float scaleMax);
   void iiFileChangeAddress(ImodImageFile *oldFile, ImodImageFile *newFile);
   FILE *iiFOpen(const char *filename, const char *mode);
@@ -337,7 +362,7 @@ extern "C" {
   int tiffReadSection(ImodImageFile *inFile, char *buf, int inSection);
   void tiffClose(ImodImageFile *inFile);
   int tiffGetField(ImodImageFile *inFile, int tag, void *value);
-  int tiffGetArray(ImodImageFile *inFile, int tag, b3dUInt16 *count, void *value);
+  int tiffGetArray(ImodImageFile *inFile, int tag, b3dUInt32 *count, void *value);
   void tiffSuppressWarnings(void);
   void tiffSuppressErrors(void);
   void tiffFilterWarnings(void);
@@ -355,7 +380,11 @@ extern "C" {
   void tiffDelete(ImodImageFile *inFile);
   void tiffSetMapping(int value);
   void tiffSetEERreadProperties(int superRes, int autogroup, int flags);
+  void tiffGainReferenceForEER(float *ref);
   int tiffGetMaxEERsuperRes();
+  int tiffGetMinEERsuperRes();
+  void tiffSetStringTagToPrint(int tag);
+  void getDfltEERsummingFromEnv(int *superRes, int *zSumming);
   void tiffAddDescription(const char *text);
   int tiffNumReadThreads(int nx, int ny, int compression, int maxThreads);
   int tiffParallelRead(ImodImageFile **fileCopies, int maxThreads, int llx, int urx,
@@ -377,19 +406,25 @@ extern "C" {
   int iiHDFopenNew(ImodImageFile *inFile, const char *mode);
   int hdfWriteGlobalAdoc(ImodImageFile *inFile);
   int hdfWriteDummySection(ImodImageFile *inFile, char *buf, int cz);
-  int iiProcessReadLine(MrcHeader *hdata, IloadInfo *li, LineProcData *d);
+  int iiProcessReadLine(MrcHeader *hdata, IloadInfo *li, LineProcData *d, 
+                        unsigned char *bdataIn, unsigned char *bufpIn);
   int iiInitReadSectionAny(MrcHeader *hdata, IloadInfo *li, unsigned char *buf,
                            LineProcData *d, int *freeMap, int *yEnd, const char *caller);
   void iiBestTileSize(int imSize, int *tileSize, int *numTiles, int multipleOf);
   void iiLimitedTileSize(int imSize, int *tileSize, int *numTiles, int multipleOf,
                          int limit);
   int iiTestIfHDF(const char *filename);
+  int iiReorderHDFstack(ImodImageFile *inFile, int *sectOrder);
 
   int iiJPEGCheck(ImodImageFile *inFile);
   int jpegOpenNew(ImodImageFile *inFile);
   int jpegWriteSection(ImodImageFile *inFile, char *buf, int inverted, int resolution, 
                        int quality);
   int iiSimpleFillMrcHeader(ImodImageFile *inFile, MrcHeader *hdata);
+  int iiShrMemCreate(const char *filename, ImodImageFile *iiFile);
+  ImodImageFile *iiShrMemOpen(const char *filename, const char *mode);
+  size_t iiShrMemCheckSize(const char *filename);
+  int iiShrMemRemove(const char *filename);
 
   int iiADOCCheck(ImodImageFile *inFile);
   /* This is here in case a program links with iiqimage */
