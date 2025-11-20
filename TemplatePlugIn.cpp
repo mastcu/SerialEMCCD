@@ -407,7 +407,7 @@ static void DeleteImageIfNeeded(ThreadData *td, DM::Image &image, bool *needsDel
 static void SetWatchedDataValue(int &member, int value);
 static int GetWatchedDataValue(int &member);
 static int CopyK2ReferenceIfNeeded(ThreadData *td);
-static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &errStr);
+static int LoadK2ReferenceIfNeeded(ThreadData *td, string &errStr);
 static int CheckK2ReferenceTime(ThreadData *td);
 static void DebugToResult(const char *strMessage, const char *strPrefix = NULL);
 static void ErrorToResult(const char *strMessage, const char *strPrefix = NULL);
@@ -1127,7 +1127,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
     // Make sure gain reference is available if needed
     if (newProc != NEWCM_GAIN_NORMALIZED && mTD.iReadMode > K2_LINEAR_READ_MODE && 
-      !mTD.strGainRefToCopy.empty() && LoadK2ReferenceIfNeeded(&mTD, false, errStr)) {
+      !mTD.strGainRefToCopy.empty() && LoadK2ReferenceIfNeeded(&mTD, errStr)) {
         sprintf(mTD.strTemp, "%s\n", errStr.c_str());
         ErrorToResult(mTD.strTemp);
         return GAIN_REF_LOAD_ERROR;
@@ -3027,7 +3027,7 @@ static void GainNormalizeSum(ThreadData *td, void *array)
     error = 1;
     errStr = "there was a problem copying the gain reference";
   } else {
-    error = LoadK2ReferenceIfNeeded(td, false, errStr);
+    error = LoadK2ReferenceIfNeeded(td, errStr);
   }
 
   // Here, check that size matches for an existing reference
@@ -3077,7 +3077,7 @@ static void GainNormalizeSum(ThreadData *td, void *array)
  * read in one of the K2 gain references if necessary; and/or make a K3 binned reference
  * Checking the reference time should happen before this call
  */
-static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &errStr)
+static int LoadK2ReferenceIfNeeded(ThreadData *td, string &errStr)
 {
   int refInd = td->isSuperRes ? 1 : 0;
   ImodImageFile *iiFile = NULL;
@@ -3098,11 +3098,6 @@ static int LoadK2ReferenceIfNeeded(ThreadData *td, bool sizeMustMatch, string &e
       error = 2;
       errStr = "the gain reference file could not be opened as an IMOD image file: " +
         string(b3dGetError());
-    } else {
-      if (sizeMustMatch && (iiFile->nx != td->width * sizeFac || 
-        iiFile->ny != td->height * sizeFac)) {
-          error = 3;
-      }
     }
 
     if (!error) {
@@ -5741,7 +5736,7 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   if (td->bTakeBinnedFrames) {
     MrcHeader hdata;
     FILE *fp;
-    if (!LoadK2ReferenceIfNeeded(td, true, errStr)) {
+    if (!LoadK2ReferenceIfNeeded(td, errStr)) {
       fp = fopen(sLastRefName.c_str(), "wb");
       if (!fp)
         errStr = "Could not open file " + sLastRefName + "for binned gain reference";

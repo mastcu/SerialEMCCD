@@ -53,9 +53,16 @@
 #define MRC_MODE_COMPLEX_SHORT 3
 #define MRC_MODE_COMPLEX_FLOAT 4
 #define MRC_MODE_USHORT        6
+#define MRC_MODE_HALF_FLOAT    12
 #define MRC_MODE_RGB           16
 #define MRC_MODE_4BIT          101
 /* END_CODE */
+
+#define MRC_EXT_TYPE_NONE      0
+#define MRC_EXT_TYPE_SERI      1
+#define MRC_EXT_TYPE_AGAR      2
+#define MRC_EXT_TYPE_FEI       3
+#define MRC_EXT_TYPE_UNKNOWN   4
 
 #define PACKED_4BIT_MODE       1
 #define PACKED_HALF_XSIZE      2
@@ -78,7 +85,8 @@
 #define IIUNIT_BAD_MAPCRS    (1l << 4)
 #define IIUNIT_4BIT_MODE     (1l << 5)
 #define IIUNIT_HALF_XSIZE    (1l << 6)
-
+#define IIUNIT_Y_INVERTED    (1l << 7)
+#define IIUNIT_HALF_FLOATS   (1l << 8)
 
 typedef struct  /*complex floating number*/
 {
@@ -202,6 +210,7 @@ typedef struct MRCheader
   int    yInverted;
   int    iiuFlags;
   int    packed4bits;
+  int    halfFloats;
 
   char *pathname;
   char *filedesc;
@@ -271,6 +280,14 @@ struct TiltInfo
 
 };
 
+typedef unsigned short imnp_uint16;
+typedef unsigned int imnp_uint32;
+
+union FloatBits
+{
+  float f;
+  imnp_uint32 fbits;
+};
 
 #ifdef __cplusplus
 extern "C" {
@@ -282,13 +299,20 @@ int mrc_head_read (FILE *fin,  MrcHeader *hdata);
 int mrc_head_write(FILE *fout, MrcHeader *hdata);
 void mrcInitOutputHeader(MrcHeader *hdata);
 int mrcCopyExtraHeader(MrcHeader *hin, MrcHeader *hout);
+int mrcReadExtraHeader(MrcHeader *hin, unsigned char **extData);
+int mrcWriteExtraHeader(MrcHeader *hout, unsigned char *extData, int next);
+void mrcCopyValidExtendedType(MrcHeader *hin, MrcHeader *hout);
 int mrc_head_label(MrcHeader *hdata, const char *label);
+void mrcFillLabelString(const char *label, void *outLabel);
+int mrcPrintLabelString(MrcHeader *hdata, int labelInd);
 int mrc_head_new  (MrcHeader *hdata, int x, int y, int z, int mode);
 int mrc_byte_mmm  (MrcHeader *hdata, unsigned char **idata);
 int mrc_head_label_cp(MrcHeader *hin, MrcHeader *hout);
 int mrc_test_size(MrcHeader *hdata);
+int mrcGetStandardVersion(MrcHeader *hdata);
 void fixTitlePadding(char *label);
 int sizeCanBe4BitK2SuperRes(int nx, int ny);
+int mrcGetExtendedType(MrcHeader *hdata, int *version);
 
 void mrc_get_scale(MrcHeader *h, float *xs, float *ys, float *zs);
 void mrc_set_scale(MrcHeader *h, double x, double y, double z);
@@ -302,6 +326,7 @@ int mrc_data_new   (FILE *fout, MrcHeader *hdata);
 int mrc_write_slice(void *buf, FILE *fout, MrcHeader *hdata, 
 		    int slice, char axis);
 int parallelWriteSlice(void *buf, FILE *fout, MrcHeader *hdata, int slice);
+int mrcWriteFFT(const char *filename, float *fft, int nxReal, int nyReal, int ifScale);
 
 /************************ Read image data functions **************************/
 void *mrc_mread_slice(FILE *fin, MrcHeader *hdata,
@@ -358,6 +383,7 @@ int iiPlistFromMetadata(const char *filename, int addMdoc, IloadInfo *li, int nx
                         int ny, int nz);
 int iiPlistFromAutodoc(int adocIndex, int clearOnDone,  IloadInfo *li, int nx, int ny, 
                        int nz, int montage, int numSect, int sectType);
+void iiPlistSetAdocCoordType(int value);
 void mrc_liso(MrcHeader *hdata, IloadInfo *li);
 int mrc_fix_li(IloadInfo *li, int nx, int ny, int nz);
 int get_loadinfo(MrcHeader *hdata, IloadInfo *li);
@@ -376,6 +402,10 @@ void mrc_swap_longs(b3dInt32 *data, int amt);
 void mrc_swap_floats(b3dFloat *data, int amt);
 void mrc_swap_header(MrcHeader *hdata);
 void mrc_set_cmap_stamp(MrcHeader *hdata);
+void imnp_halfbuf_to_floats(void *halfBuf, float *floatBuf, int numVals);
+void imnp_floatbuf_to_halfs(float *floatBuf, void *halfBuf, int numVals);
+imnp_uint16 imnp_floatbits_to_halfbits(imnp_uint32 f);
+imnp_uint32 imnp_halfbits_to_floatbits(imnp_uint16 h);
 
 #ifdef __cplusplus
 }
