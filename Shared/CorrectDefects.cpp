@@ -1839,6 +1839,12 @@ int CorDefParseFeiXml(const char *strng, CameraDefects &defects, int pad)
         ixmlClear(xmlInd);
         return -err;
       }
+      
+      // Workaround to point entry <point>2301,211/8</point>  10/13/21
+      if (strchr(value, '/')) {
+        free(value);
+        continue;
+      }
 
       // Parse the value as a list
       valList = parselist(value, &numList);
@@ -1912,7 +1918,7 @@ int CorDefProcessFeiDefects(ImodImageFile *iiFile, CameraDefects &defects, int n
                             const char *dumpDefectName, char *messBuf, int  bufLen)
 {
   int retval;
-  b3dUInt16 count;
+  b3dUInt32 count;
   char *strng, *strCopy;
   FILE *defFP;
   std::string sstr;
