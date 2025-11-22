@@ -288,6 +288,7 @@ struct ThreadData
   bool bSetExpAfterArea;
   bool bTakeBinnedFrames;
   bool bUseCorrDblSamp;
+  bool bUseDarkMode;
   vector<short> outSumFrameList;
   vector<short> numFramesInOutSum;
   vector<int> savedFrameList;
@@ -935,6 +936,8 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   mTD.bUseCorrDblSamp = mTD.bUseCorrDblSamp && mTD.K3type && 
     ((m_iDMVersion == DM_VERSION_WITH_CDS && m_iDMBuild >= DM_BUILD_WITH_CDS) || 
       m_iDMVersion > DM_VERSION_WITH_CDS);
+  mTD.bUseDarkMode = mTD.bUseDarkMode && mTD.K3type &&
+    m_iDMVersion >= (mTD.bUseCorrDblSamp ? DM_VERSION_CDS_DARK : DM_VERSION_WITH_DARK);
 
   // Set flag to keep precision when indicated or when it has no cost, but not if frames
   // are being saved times 100.  Copy this test to CameraController when it changes
@@ -2882,14 +2885,18 @@ static void AdjustAndWriteMdocAndCom(ThreadData *td, int &errorRet)
 // Then it is 21 for imaging and 22 for diffraction
 static int MapReadMode(ThreadData *td)
 {
+  int mode = 0;
   if (td->OneViewType) {
     if (td->iReadMode == -2 || td->iReadMode == -3)
       return 3 + td->iReadMode;
     if (td->iReadMode < -1)
       return -td->iReadMode;
-  } else if (td->iReadMode >= 0)
-    return sReadModes[td->iReadMode] + (td->bUseCorrDblSamp ? 2 : 0);
-  return 0;
+  } else if (td->iReadMode >= 0) {
+    mode = sReadModes[td->iReadMode] + (td->bUseCorrDblSamp ? 2 : 0);
+    if (td->bUseDarkMode)
+      mode += (td->bUseCorrDblSamp ? 8 : 12);
+  }
+  return mode;
 }
 
 // Do antialias reduction or extract subarea if it is called for, from array to outArray
@@ -5661,6 +5668,8 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   int prefInd = (td->isSuperRes && !td->bTakeBinnedFrames) ? 1 : 0;
   int extInd = td->bTakeBinnedFrames ? 1 : 0;
   prefStr = prefix[prefInd];
+  if (td->bUseDarkMode)
+    prefStr += "Dark";
   if (td->bUseCorrDblSamp)
     prefStr += "CDS";
 
@@ -5951,6 +5960,7 @@ void TemplatePlugIn::SetK2Parameters(long mode, double scaling, long hardwarePro
   m_bSaveFrames = saveFrames;
   mTD.iAntialias = flags & K2_ANTIALIAS_MASK;
   mTD.bUseCorrDblSamp = (flags & K3_USE_CORR_DBL_SAMP) != 0;
+  mTD.bUseDarkMode = (flags & K3_USE_DARK_MODE) != 0;
   if (mTD.iAntialias || mTD.bUseFrameAlign) {
     mTD.iFinalHeight = B3DNINT(reducedSizes / K2_REDUCED_Y_SCALE);
     mTD.iFinalWidth = B3DNINT(reducedSizes - K2_REDUCED_Y_SCALE * mTD.iFinalHeight);
