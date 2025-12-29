@@ -5661,10 +5661,11 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   string rootName = td->strRootName;
   string errStr, prefStr;
   char *prefix[2] = {"Count", "Super"};
-  char *extension[2] = {"dm4", "mrc"};
+  char *extension[3] = {"dm4", "mrc", "tif"};
   int ind, retVal = 0;
   bool needCopy = true, namesOK = false;
   double maxCopySec = 0.;
+  ImodImageFile *iiFile;
   int prefInd = (td->isSuperRes && !td->bTakeBinnedFrames) ? 1 : 0;
   int extInd = td->bTakeBinnedFrames ? 1 : 0;
   prefStr = prefix[prefInd];
@@ -5672,6 +5673,8 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
     prefStr += "Dark";
   if (td->bUseCorrDblSamp)
     prefStr += "CDS";
+  if (extInd && (td->iSaveFlags & K3_SAVE_GAIN_AS_TIFF))
+    extInd++;
 
   // For single image files, find the date-time root and split up the name
   if (td->bFilePerImage) {
@@ -5690,7 +5693,7 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
   // If there is an existing copy and the mode and the directory match, find the copy
   // Otherwise look for all matching files in directory
   if (sLastRefName.length() && strstr(sLastRefName.c_str(), (prefStr + "Ref").c_str())
-    && !sLastRefDir.compare(saveDir)) {
+    && strstr(sLastRefName.c_str(), extension[extInd]) && !sLastRefDir.compare(saveDir)) {
     sprintf(td->strTemp, "Finding %s\n", sLastRefName.c_str());
     hFindCopy = FindFirstFile(sLastRefName.c_str(), &findCopyData);
     namesOK = true;
@@ -5698,7 +5701,8 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
     sprintf(td->strTemp, "%s\\%sRef_*.%s", saveDir.c_str(), prefStr.c_str(),
       extension[extInd]);
     hFindCopy = FindFirstFile(td->strTemp, &findCopyData);
-    sprintf(td->strTemp, "finding %s\\%sRef_*.dm4\n", saveDir.data(), prefStr.c_str());
+    sprintf(td->strTemp, "finding %s\\%sRef_*.%s\n", saveDir.data(), prefStr.c_str(), 
+      extension[extInd]);
   }
   DebugToResult(td->strTemp);
 
@@ -5746,24 +5750,52 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
     MrcHeader hdata;
     FILE *fp;
     if (!LoadK2ReferenceIfNeeded(td, errStr)) {
-      fp = fopen(sLastRefName.c_str(), "wb");
-      if (!fp)
-        errStr = "Could not open file " + sLastRefName + "for binned gain reference";
-    } 
+      if (extInd < 2) {
+        fp = fopen(sLastRefName.c_str(), "wb");
+        if (!fp)
+          errStr = "Could not open file " + sLastRefName + "for binned gain reference";
+      } else {
+        iiFile = iiNew();
+        if (!iiFile) {
+          errStr = "Error creating structure for saving binned gain reference as TIFF";
+        } else {
+          iiFile->nz = 1; // Has no effect to set it higher
+          iiFile->format = IIFORMAT_LUMINANCE;
+          iiFile->file = IIFILE_TIFF;
+          iiFile->type = IITYPE_FLOAT;
+          iiFile->nx = sK2GainRefWidth[0];
+          iiFile->ny = sK2GainRefHeight[0];
+          iiFile->filename = _strdup(sLastRefName.c_str());
+          if (tiffOpenNew(iiFile)) {
+            ind = errno;
+            errStr = "Could not open file " + sLastRefName + "for binned gain reference "
+              "- " + strerror(errno);
+            iiDelete(iiFile);
+          }
+        }
+      }
+    }
     if (!errStr.length()) {
       sprintf(td->strTemp, "Writing file with binned gain reference: refSec  %f  "
         "maxCopySec %f\n", td->curRefTime, maxCopySec);
       DebugToResult(td->strTemp);
-      mrc_head_new(&hdata, sK2GainRefWidth[0], sK2GainRefHeight[0], 1, MRC_MODE_FLOAT);
-      hdata.yInverted = 1;
-      mrc_head_label(&hdata, "SerialEMCCD: Generated K3 binned reference oriented OK");
-      if (mrc_head_write(fp, &hdata)) {
-        errStr = "Error writing header to binned gain reference: " + 
-          string(b3dGetError());
-      } else if (mrc_write_slice(sK2GainRefData[0], fp, &hdata, 0, 'Z')) {
-        errStr = "Error writing binned gain reference: " + string(b3dGetError());
+      if (extInd < 2) {
+        mrc_head_new(&hdata, sK2GainRefWidth[0], sK2GainRefHeight[0], 1, MRC_MODE_FLOAT);
+        hdata.yInverted = 1;
+        mrc_head_label(&hdata, "SerialEMCCD: Generated K3 binned reference oriented OK");
+        if (mrc_head_write(fp, &hdata)) {
+          errStr = "Error writing header to binned gain reference: " +
+            string(b3dGetError());
+        } else if (mrc_write_slice(sK2GainRefData[0], fp, &hdata, 0, 'Z')) {
+          errStr = "Error writing binned gain reference: " + string(b3dGetError());
+        }
+        fclose(fp);
+      } else {
+        ind = tiffWriteSection(iiFile, sK2GainRefData[0], IICOMPRESSION_NONE, 0, 0, 0);
+        if (ind)
+          errStr = "Error writing binned gain reference: " + string(b3dGetError());
+        iiDelete(iiFile);
       }
-      fclose(fp);
     }
     if (errStr.length() > 0) {
       sprintf(td->strTemp, "%s\n", errStr.c_str());
