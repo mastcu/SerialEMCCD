@@ -5759,7 +5759,7 @@ static int CopyK2ReferenceIfNeeded(ThreadData *td)
         if (!iiFile) {
           errStr = "Error creating structure for saving binned gain reference as TIFF";
         } else {
-          iiFile->nz = 1; // Has no effect to set it higher
+          iiFile->nz = 1;
           iiFile->format = IIFORMAT_LUMINANCE;
           iiFile->file = IIFILE_TIFF;
           iiFile->type = IITYPE_FLOAT;
