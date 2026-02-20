@@ -874,11 +874,11 @@ void TemplatePlugIn::QueueScript(char *strScript)
 /*
  * Common pathway for obtaining an acquired image or a dark reference
  */
-int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width, 
-              long *height, long processing, double exposure,
-              long binning, long top, long left, long bottom, 
-              long right, long shutter, double settling, long shutterDelay,
-              long divideBy2, long corrections)
+int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
+  long *height, long processing, double exposure,
+  long binning, long top, long left, long bottom,
+  long right, long shutter, double settling, long shutterDelay,
+  long divideBy2, long corrections)
 {
   int saveFrames = NO_SAVE;
   int newProc, err, procIn, heightAdj, widthAdj, binAdj, scaleAdj, binWidth, binHeight;
@@ -893,9 +893,9 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   ClearTiltSums();
 
   // Process flags to do with saving/aligning for consistency
-  if (m_bSaveFrames && frameCapable && mTD.bDoseFrac && mTD.strSaveDir.length() && 
+  if (m_bSaveFrames && frameCapable && mTD.bDoseFrac && mTD.strSaveDir.length() &&
     mTD.strRootName.length())
-      saveFrames = SAVE_FRAMES;
+    saveFrames = SAVE_FRAMES;
   if (saveFrames == NO_SAVE) {
     mTD.bMakeAlignComFile = false;
     mTD.bFaDoSubset = false;
@@ -921,30 +921,30 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   if (saveFrames == SAVE_FRAMES)
     mTD.strFrameTitle = m_strFrameTitle;
 
-  if (mTD.bFaDoSubset && (mTD.bUseFrameAlign || mTD.bMakeAlignComFile) && 
+  if (mTD.bFaDoSubset && (mTD.bUseFrameAlign || mTD.bMakeAlignComFile) &&
     B3DMIN(mTD.iExpectedFrames, mTD.iFaSubsetEnd) + 1 - mTD.iFaSubsetStart < 2) {
-      sprintf(m_strTemp, "You must align a subset of at least 2 frames: expected "
-        "frames = %d, subset specified %d to %d\n", mTD.iExpectedFrames, 
-        mTD.iFaSubsetStart, mTD.iFaSubsetEnd);
-      ProblemToResult(m_strTemp);
-      return FRAMEALI_BAD_SUBSET;
+    sprintf(m_strTemp, "You must align a subset of at least 2 frames: expected "
+      "frames = %d, subset specified %d to %d\n", mTD.iExpectedFrames,
+      mTD.iFaSubsetStart, mTD.iFaSubsetEnd);
+    ProblemToResult(m_strTemp);
+    return FRAMEALI_BAD_SUBSET;
   }
 
   mTD.bTakeBinnedFrames = mTD.bTakeBinnedFrames && mTD.K3type && mTD.isSuperRes;
   mTD.areFramesSuperRes = mTD.isSuperRes && !mTD.bTakeBinnedFrames;
-  mTD.bUseCorrDblSamp = mTD.bUseCorrDblSamp && mTD.K3type && 
-    ((m_iDMVersion == DM_VERSION_WITH_CDS && m_iDMBuild >= DM_BUILD_WITH_CDS) || 
+  mTD.bUseCorrDblSamp = mTD.bUseCorrDblSamp && mTD.K3type &&
+    ((m_iDMVersion == DM_VERSION_WITH_CDS && m_iDMBuild >= DM_BUILD_WITH_CDS) ||
       m_iDMVersion > DM_VERSION_WITH_CDS);
 
   // Set flag to keep precision when indicated or when it has no cost, but not if frames
   // are being saved times 100.  Copy this test to CameraController when it changes
-  mTD.bFaKeepPrecision = (!mTD.iNumGrabAndStack || userKeepPrecision) && !mTD.K3type && 
+  mTD.bFaKeepPrecision = (!mTD.iNumGrabAndStack || userKeepPrecision) && !mTD.K3type &&
     !mTD.OneViewType && mTD.bUseFrameAlign && (!mTD.iFaGpuFlags || userKeepPrecision) &&
     sReadModes[mTD.iReadMode] != K2_LINEAR_READ_MODE && processing == GAIN_NORMALIZED;
   m_bNextSaveResultsFromCopy = false;
 
   // Check validity of making a com file
-  if (mTD.bMakeAlignComFile) { 
+  if (mTD.bMakeAlignComFile) {
     if (mTD.bFilePerImage || mTD.bUseFrameAlign) {
       sprintf(m_strTemp, "You cannot make an align com file when %s\n",
         mTD.bFilePerImage ? "saving one frame per file" : "aligning in the plugin");
@@ -986,16 +986,16 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
 
   // Give up on an existing deferred sum for a new dose frac shot or starting continuous
   if ((mTD.bDoseFrac || mTD.bDoContinuous) && (sDeferredSum || sValidDeferredSum)) {
-    delete [] sDeferredSum;
+    delete[] sDeferredSum;
     sDeferredSum = NULL;
     sValidDeferredSum = false;
   }
 
   if (m_iDMVersion >= NEW_CAMERA_MANAGER) {
-    
+
     // Convert the processing argument to the new format
     switch (processing) {
-    case DARK_REFERENCE: 
+    case DARK_REFERENCE:
     case UNPROCESSED:
       newProc = NEWCM_UNPROCESSED;
       break;
@@ -1028,10 +1028,10 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   // and doing a nin-empty early return
   mTD.bGainNormSum = ((mTD.bUseFrameAlign && mTD.bEarlyReturn && mTD.iNumFramesToSum) ||
     ((mTD.iSaveFlags & K2_GAIN_NORM_SUM) != 0 && saveFrames == SAVE_FRAMES)) &&
-    newProc != NEWCM_GAIN_NORMALIZED && mTD.iReadMode > K2_LINEAR_READ_MODE && 
+    newProc != NEWCM_GAIN_NORMALIZED && mTD.iReadMode > K2_LINEAR_READ_MODE &&
     !mTD.strGainRefToCopy.empty();
   if (mTD.bGainNormSum) {
-    scaleAdj = (divideBy2 ? 2 : 1) * 
+    scaleAdj = (divideBy2 ? 2 : 1) *
       B3DNINT(B3DMAX(1., mTD.fFloatScaling / (divideBy2 ? 2 : 1)));
     mTD.fGainNormScale = (float)(mTD.fFloatScaling / scaleAdj);
     mTD.fFloatScaling = (float)scaleAdj;
@@ -1068,37 +1068,37 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   // For antialias reduction here, make sure it is allowed and set binning to 1
   // Antialias reduction for pure binning is allowed for continuous mode
   if (mTD.iReadMode >= 0 && mTD.iAntialias && !(!mTD.bUseFrameAlign && mTD.bEarlyReturn &&
-    !mTD.iNumFramesToSum && !mTD.bMakeDeferredSum) && 
+    !mTD.iNumFramesToSum && !mTD.bMakeDeferredSum) &&
     !(mTD.bUseFrameAlign && (!mTD.bEarlyReturn || !mTD.iNumFramesToSum))) {
-      if (binning == 1 || mTD.iFinalWidth * binAdj > widthAdj || 
-        mTD.iFinalHeight * binAdj > heightAdj || 
-        (mTD.bDoContinuous && mTD.iAntialias > 1)) {
-          if (mTD.bDoContinuous && mTD.iAntialias > 1)
-            sprintf(m_strTemp,"Attempting to use antialias reduction in continuous "
-            "mode\n");
-          else
-            sprintf(m_strTemp, "Bad parameters for antialiasing: from %d x %d to %d x %d "
-            "binning by %d\n", widthAdj, heightAdj, mTD.iFinalWidth, mTD.iFinalHeight, 
-            binAdj);
-          ProblemToResult(m_strTemp);
-          return BAD_ANTIALIAS_PARAM;
-      }
-      binning = 1;
-      DebugToResult("Set up antialias\n");
+    if (binning == 1 || mTD.iFinalWidth * binAdj > widthAdj ||
+      mTD.iFinalHeight * binAdj > heightAdj ||
+      (mTD.bDoContinuous && mTD.iAntialias > 1)) {
+      if (mTD.bDoContinuous && mTD.iAntialias > 1)
+        sprintf(m_strTemp, "Attempting to use antialias reduction in continuous "
+          "mode\n");
+      else
+        sprintf(m_strTemp, "Bad parameters for antialiasing: from %d x %d to %d x %d "
+          "binning by %d\n", widthAdj, heightAdj, mTD.iFinalWidth, mTD.iFinalHeight,
+          binAdj);
+      ProblemToResult(m_strTemp);
+      return BAD_ANTIALIAS_PARAM;
+    }
+    binning = 1;
+    DebugToResult("Set up antialias\n");
 
-      // For K3, take advantage of hardware binning by 2 or 4 and reduce final binning
-      // to apply
-      if (mTD.K3type && mTD.bDoContinuous) {
-        if (mTD.iFinalBinning % 4 == 0 && mTD.iReadMode == K2_LINEAR_READ_MODE) {
-          binning = 4;
-          mTD.iFinalBinning /= 4;
-        } else if (mTD.iFinalBinning % 2 == 0) {
-          binning = 2;
-          mTD.iFinalBinning /= 2;
-        }
-        if (mTD.iFinalBinning == 1)
-          mTD.iAntialias = 0;
+    // For K3, take advantage of hardware binning by 2 or 4 and reduce final binning
+    // to apply
+    if (mTD.K3type && mTD.bDoContinuous) {
+      if (mTD.iFinalBinning % 4 == 0 && mTD.iReadMode == K2_LINEAR_READ_MODE) {
+        binning = 4;
+        mTD.iFinalBinning /= 4;
+      } else if (mTD.iFinalBinning % 2 == 0) {
+        binning = 2;
+        mTD.iFinalBinning /= 2;
       }
+      if (mTD.iFinalBinning == 1)
+        mTD.iAntialias = 0;
+    }
 
   } else
     mTD.iAntialias = 0;
@@ -1114,34 +1114,34 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
       binWidth = 2 * widthAdj;
       binHeight = 2 * heightAdj;
     }
-    
+
     // For reduced framealign image, check final sizes here
     if ((binning > 1 && (mTD.iFinalWidth > binWidth || mTD.iFinalHeight > binHeight)) ||
       mTD.iFinalWidth < 0.9 * binWidth || mTD.iFinalHeight < 0.9 * binHeight) {
-        sprintf(m_strTemp, "Bad parameters for final width after frame align with "
-          "reduction:\n reduction expected to be %d x %d, final width %d x %d\n",
-          binWidth, binHeight, mTD.iFinalWidth, mTD.iFinalHeight);
-        ProblemToResult(m_strTemp);
-        return BAD_FRAME_REDUCE_PARAM;
+      sprintf(m_strTemp, "Bad parameters for final width after frame align with "
+        "reduction:\n reduction expected to be %d x %d, final width %d x %d\n",
+        binWidth, binHeight, mTD.iFinalWidth, mTD.iFinalHeight);
+      ProblemToResult(m_strTemp);
+      return BAD_FRAME_REDUCE_PARAM;
     }
 
     // Make sure gain reference is available if needed
-    if (newProc != NEWCM_GAIN_NORMALIZED && mTD.iReadMode > K2_LINEAR_READ_MODE && 
+    if (newProc != NEWCM_GAIN_NORMALIZED && mTD.iReadMode > K2_LINEAR_READ_MODE &&
       !mTD.strGainRefToCopy.empty() && LoadK2ReferenceIfNeeded(&mTD, errStr)) {
-        sprintf(mTD.strTemp, "%s\n", errStr.c_str());
-        ErrorToResult(mTD.strTemp);
-        return GAIN_REF_LOAD_ERROR;
+      sprintf(mTD.strTemp, "%s\n", errStr.c_str());
+      ErrorToResult(mTD.strTemp);
+      return GAIN_REF_LOAD_ERROR;
     }
     binning = 1;
   }
 
   // Evaluate reducing super-res for saving
-  mTD.bSaveSuperReduced = mTD.isSuperRes && (mTD.iSaveFlags & K2_SAVE_SUPER_REDUCED) && 
+  mTD.bSaveSuperReduced = mTD.isSuperRes && (mTD.iSaveFlags & K2_SAVE_SUPER_REDUCED) &&
     saveFrames == SAVE_FRAMES && newProc == NEWCM_GAIN_NORMALIZED;
   if (mTD.bSaveSuperReduced)
     mTD.bSaveTimes100 = false;
-  mTD.bDoingFrameTS = (saveFrames == SAVE_FRAMES || 
-    (mTD.bUseFrameAlign && mTD.bMakeTiltSums)) && 
+  mTD.bDoingFrameTS = (saveFrames == SAVE_FRAMES ||
+    (mTD.bUseFrameAlign && mTD.bMakeTiltSums)) &&
     mTD.fFrameThresh > 0. && (mTD.iSaveFlags & K2_SKIP_BELOW_THRESH);
 
   // The full sizes are chip sizes.  Divide them by binning to get size of image that
@@ -1161,7 +1161,7 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   mTD.iTop = mTD.iK3Top = top;
   mTD.iBottom = mTD.iK3Bottom = bottom;
   mTD.iLeft = mTD.iK3Left = left;
-  mTD.iRight =  mTD.iK3Right = right;
+  mTD.iRight = mTD.iK3Right = right;
   if (mTD.bTakeBinnedFrames) {
     mTD.iK3Bottom = bottom = top / 2 + (bottom - top) / 2;
     mTD.iK3Top = top = top / 2;
@@ -1176,8 +1176,18 @@ int TemplatePlugIn::GetImage(short *array, long *arrSize, long *width,
   // Check if View is active
 #if GMS_SDK_VERSION >= 300
   if (Gatan::Camera::IsViewActive()) {
-    ProblemToResult("The continuous View is active, cannot take an image for SerialEM");
-    return VIEW_IS_ACTIVE;
+    for (err = 0; err < 10; err++) {
+      Gatan::Camera::StopCurrentCameraViewer(false);
+      Sleep(100);
+      if (!Gatan::Camera::IsViewActive())
+        break;
+    }
+
+    // In simulator, it never acknowledges that it stopped until the next acquire call
+    if (Gatan::Camera::IsViewActive()) {
+      ProblemToResult("The continuous View may still be active despite calls to stop it");
+      return VIEW_IS_ACTIVE;
+    }
   }
 #endif
 
