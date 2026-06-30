@@ -6626,6 +6626,11 @@ void TemplatePlugIn::MakeAlignComFile(long flags, long dumInt1, double dumDbl1,
     double dumDbl2, char *mdocName, char *mdocFileOrText, long *error)
 {
   string mdocInSaveDir = mTD.strSaveDir + "\\" + mdocName;
+  string comDir, ext;
+  if (flags & K2FA_MDOC_IN_SAME_DIR) {
+    SplitFilePath(mTD.strAlignComName, comDir, ext);
+    mdocInSaveDir = comDir + "\\" + mdocName;
+  }
   *error = 0;
 
   // Either save the string or try to copy the given file to frame directory
